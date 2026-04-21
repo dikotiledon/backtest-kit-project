@@ -369,6 +369,35 @@ test('filterSweepCombos collapses redundant fusion-v4 weight combos when related
   assert.deepEqual(filtered[0], combos[0]);
 });
 
+test('pine test script defaults to the hardened fusion v4 profile', async () => {
+  const source = await fs.readFile(new URL('../pine/test.pine', import.meta.url), 'utf8');
+
+  assert.match(source, /Use Volatility Filter", defval=false/);
+  assert.match(source, /Use Regime Filter", defval=false/);
+  assert.match(source, /Use ADX Filter", defval=true/);
+  assert.match(source, /useTrendXConf\s*=\s*input\.bool\(true,\s+title="Require Confirmation Trend \(x\)"/);
+  assert.match(source, /minPredSum\s*=\s*input\.float\(2(?:\.0)?,\s+title="Min Prediction Sum \(strength\)"/);
+  assert.match(source, /minBarsBetween\s*=\s*input\.int\(2,\s+title="Cooldown Bars Between Entries"/);
+  assert.match(source, /useSignalFusion\s*=\s*input\.bool\(true,\s+title="Use Signal Fusion"/);
+  assert.match(source, /useAtrFlipConfirm\s*=\s*input\.bool\(true,\s+title="Use ATR Flip Confirm"/);
+  assert.match(source, /use3LineConfirm\s*=\s*input\.bool\(false,\s+title="Use 3 Line Strike Confirm"/);
+  assert.match(source, /useEngulfingConfirm\s*=\s*input\.bool\(true,\s+title="Use Engulfing Confirm"/);
+  assert.match(source, /useEmaCrossConfirm\s*=\s*input\.bool\(false,\s+title="Use EMA Cross Confirm"/);
+  assert.match(source, /useFusionV2\s*=\s*input\.bool\(false,\s+title="Use Fusion V2 Soft Mode"/);
+  assert.match(source, /useFusionV3\s*=\s*input\.bool\(false,\s+title="Use Fusion V3 Threshold Shaping"/);
+  assert.match(source, /useFusionV4\s*=\s*input\.bool\(true,\s+title="Use Fusion V4 Residual Layer"/);
+  assert.match(source, /fusionV4MinAbsPrediction\s*=\s*input\.float\(2(?:\.0)?,\s+title="Fusion V4 Min \|Prediction\|"/);
+  assert.match(source, /fusionV4MaxAbsPrediction\s*=\s*input\.float\(4(?:\.0)?,\s+title="Fusion V4 Max \|Prediction\|"/);
+  assert.match(source, /fusionV4LongAtrWeight\s*=\s*input\.float\(-0\.25,\s+title="Fusion V4 Long ATR Weight"/);
+  assert.match(source, /fusionV4LongEngulfWeight\s*=\s*input\.float\(-0\.25,\s+title="Fusion V4 Long Engulf Weight"/);
+  assert.match(source, /fusionV4LongEmaWeight\s*=\s*input\.float\(0(?:\.0)?,\s+title="Fusion V4 Long EMA Weight"/);
+  assert.match(source, /fusionV4ShortAtrWeight\s*=\s*input\.float\(-0\.5,\s+title="Fusion V4 Short ATR Weight"/);
+  assert.match(source, /fusionV4ShortEngulfWeight\s*=\s*input\.float\(-0\.1,\s+title="Fusion V4 Short Engulf Weight"/);
+  assert.match(source, /fusionV4ShortEmaWeight\s*=\s*input\.float\(0(?:\.0)?,\s+title="Fusion V4 Short EMA Weight"/);
+  assert.match(source, /slAtrMult\s*=\s*input\.float\(1(?:\.0)?,\s+title="SL ATR x"/);
+  assert.match(source, /tpAtrMult\s*=\s*input\.float\(2\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
+});
+
 test('pine test script does not expose long-only or short-only controls', async () => {
   const source = await fs.readFile(new URL('../pine/test.pine', import.meta.url), 'utf8');
 

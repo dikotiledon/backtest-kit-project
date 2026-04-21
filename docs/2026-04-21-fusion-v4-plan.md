@@ -47,6 +47,11 @@ Use a **residual layer**, not a score-stacking layer.
 - Anchor: `2026-04-21T10:30:00.000Z`
 - Compare against control at `minPredSum=2.0` (behaviorally same as current live control on actual starts)
 
+## Adoption decision
+- Adopted as the shipped default profile in `pine/test.pine`
+- Shipped defaults now mirror best locked result `fusion-v4-04`
+- Revalidated on the unpatched default script at the same anchor: score `60.26`, trades `241`, ROI `38.44%`, win rate `36.51%`, profit factor `1.51`, max drawdown `5.06%`
+
 ## Exit condition
 - V4 implemented and tested
 - Locked-window V4 benchmark completed

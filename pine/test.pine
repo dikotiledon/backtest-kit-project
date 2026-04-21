@@ -159,7 +159,7 @@ showTradeStats = input.bool(false, title="Show Performance Panel", group="Perfor
 useWorstCase = input.bool(false, title="Use Worst-Case Fills", group="Performance")
 
 // Settings object for user-defined settings
-FilterSettings filterSettings = FilterSettings.new(input.bool(title="Use Volatility Filter", defval=true, tooltip="Whether to use the volatility filter.", group="Filters"), input.bool(title="Use Regime Filter", defval=true, group="Filters", inline="regime"), input.bool(title="Use ADX Filter", defval=true, group="Filters", inline="adx"), input.float(title="Threshold", defval=-0.1, minval=-10, maxval=10, step=0.1, tooltip="Whether to use the trend detection filter. Threshold for detecting Trending/Ranging markets.", group="Filters", inline="regime"), input.int(title="Threshold", defval=20, minval=0, maxval=100, step=1, tooltip="Whether to use the ADX filter. Threshold for detecting Trending/Ranging markets.", group="Filters", inline="adx"))
+FilterSettings filterSettings = FilterSettings.new(input.bool(title="Use Volatility Filter", defval=false, tooltip="Whether to use the volatility filter.", group="Filters"), input.bool(title="Use Regime Filter", defval=false, group="Filters", inline="regime"), input.bool(title="Use ADX Filter", defval=true, group="Filters", inline="adx"), input.float(title="Threshold", defval=-0.1, minval=-10, maxval=10, step=0.1, tooltip="Whether to use the trend detection filter. Threshold for detecting Trending/Ranging markets.", group="Filters", inline="regime"), input.int(title="Threshold", defval=20, minval=0, maxval=100, step=1, tooltip="Whether to use the ADX filter. Threshold for detecting Trending/Ranging markets.", group="Filters", inline="adx"))
 
 // Filter object for filtering the ML predictions
 Filter filter = Filter.new(
@@ -357,21 +357,22 @@ baseStartLong = isNewBuySignal and isBullish and isEmaUptrend and isSmaUptrend
 baseStartShort = isNewSellSignal and isBearish and isEmaDowntrend and isSmaDowntrend
 
 // Edge controls to improve trade quality
+// Default profile: Fusion V4 hardened preset from locked 10k-bar XRPUSDT 15m benchmark (2026-04-21)
 useTrendXConf = input.bool(true,  title="Require Confirmation Trend (x)", group="Edge Controls")
-minPredSum    = input.float(2.5,  title="Min Prediction Sum (strength)", minval=0.0, step=0.5, group="Edge Controls")
-minBarsBetween = input.int(4, title="Cooldown Bars Between Entries", minval=0, group="Edge Controls")
-useSignalFusion = input.bool(false, title="Use Signal Fusion", group="Edge Controls")
+minPredSum    = input.float(2.0,  title="Min Prediction Sum (strength)", minval=0.0, step=0.5, group="Edge Controls")
+minBarsBetween = input.int(2, title="Cooldown Bars Between Entries", minval=0, group="Edge Controls")
+useSignalFusion = input.bool(true, title="Use Signal Fusion", group="Edge Controls")
 minFusionScore = input.int(1, title="Min Fusion Score", minval=0, maxval=4, group="Edge Controls")
 useAtrFlipConfirm = input.bool(true, title="Use ATR Flip Confirm", group="Signal Fusion")
-use3LineConfirm = input.bool(true, title="Use 3 Line Strike Confirm", group="Signal Fusion")
+use3LineConfirm = input.bool(false, title="Use 3 Line Strike Confirm", group="Signal Fusion")
 useEngulfingConfirm = input.bool(true, title="Use Engulfing Confirm", group="Signal Fusion")
-useEmaCrossConfirm = input.bool(true, title="Use EMA Cross Confirm", group="Signal Fusion")
+useEmaCrossConfirm = input.bool(false, title="Use EMA Cross Confirm", group="Signal Fusion")
 useFusionV2 = input.bool(false, title="Use Fusion V2 Soft Mode", group="Signal Fusion V2")
 fusionBonusPerSignal = input.float(0.25, title="Fusion Bonus Per Signal", minval=0.0, step=0.05, group="Signal Fusion V2")
 fusionMaxBonus = input.float(0.50, title="Fusion Max Bonus", minval=0.0, step=0.05, group="Signal Fusion V2")
 useFusionV3 = input.bool(false, title="Use Fusion V3 Threshold Shaping", group="Signal Fusion V3")
 fusionPenaltyPerMissing = input.float(0.25, title="Fusion Penalty Per Missing Signal", minval=0.0, step=0.05, group="Signal Fusion V3")
-useFusionV4 = input.bool(false, title="Use Fusion V4 Residual Layer", group="Signal Fusion V4")
+useFusionV4 = input.bool(true, title="Use Fusion V4 Residual Layer", group="Signal Fusion V4")
 fusionV4MinAbsPrediction = input.float(2.0, title="Fusion V4 Min |Prediction|", minval=0.0, step=0.5, group="Signal Fusion V4")
 fusionV4MaxAbsPrediction = input.float(4.0, title="Fusion V4 Max |Prediction|", minval=0.0, step=0.5, group="Signal Fusion V4")
 fusionV4LongAtrWeight = input.float(-0.25, title="Fusion V4 Long ATR Weight", step=0.05, group="Signal Fusion V4")
@@ -439,8 +440,8 @@ endShortTrade = settings.useDynamicExits and isDynamicExitValid ? endShortTradeD
 enableStrategy = input.bool(true, title="Enable Signal Engine", group="Strategy")
 useStopsTP     = input.bool(true,  title="Use ATR Stop/Target", group="Strategy")
 riskAtrLen     = input.int(14,     title="ATR Length", minval=1, group="Strategy")
-slAtrMult      = input.float(1.5,  title="SL ATR x", minval=0.1, step=0.1, group="Strategy")
-tpAtrMult      = input.float(1.5,  title="TP ATR x (1:1 R:R by default)", minval=0.1, step=0.1, group="Strategy")
+slAtrMult      = input.float(1.0,  title="SL ATR x", minval=0.1, step=0.1, group="Strategy")
+tpAtrMult      = input.float(2.5,  title="TP ATR x (1:1 R:R by default)", minval=0.1, step=0.1, group="Strategy")
 useSignalExits = input.bool(false, title="Use Signal-Based Exits (in addition to SL/TP)", group="Strategy")
 
 var int simPos = 0

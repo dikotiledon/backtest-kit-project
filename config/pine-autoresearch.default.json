@@ -1,0 +1,27 @@
+{
+  "labId": "pine-fusion-v4-xrpusdt-15m-fixed-window",
+  "scriptPath": "../pine/test.pine",
+  "symbol": "XRPUSDT",
+  "timeframe": "15m",
+  "limit": 10000,
+  "when": "2026-04-21T10:30:00.000Z",
+  "exchange": null,
+  "grid": "fusion-v4",
+  "maxConfigs": 8,
+  "minTrades": 10,
+  "incumbent": {
+    "path": "../pine/sweeps/fixed-window-fusion-v4-XRPUSDT-15m-10000-2026-04-21T10-30-00Z/best-config.json"
+  },
+  "thresholds": {
+    "minScoreDelta": 0.25,
+    "minRoiDeltaPct": 0,
+    "minProfitFactorDelta": 0,
+    "maxDrawdownDeltaPct": 0.75,
+    "minTradeCount": 150,
+    "minTradeRatioVsIncumbent": 0.75
+  },
+  "outputs": {
+    "researchRoot": "../pine/autoresearch/pine-fusion-v4-xrpusdt-15m-fixed-window",
+    "digestRoot": "../report/pine-autoresearch/pine-fusion-v4-xrpusdt-15m-fixed-window"
+  }
+}

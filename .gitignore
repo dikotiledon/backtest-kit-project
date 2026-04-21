@@ -1,5 +1,8 @@
 node_modules/
 pine/sweeps/
+pine/autoresearch/
+pine/dump/
+report/pine-autoresearch/
 tmp/
 *.log
 coverage/

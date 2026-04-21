@@ -109,6 +109,8 @@ async function main() {
   const maxConfigs = args['max-configs'] ? Number(args['max-configs']) : null;
   const keepArtifacts = Boolean(args['keep-artifacts']);
   const minTrades = args['min-trades'] ? Number(args['min-trades']) : 10;
+  const when = args.when ? String(args.when) : null;
+  const exchange = args.exchange ? String(args.exchange) : null;
   const gridName = String(args.grid || 'default');
   const runId = args['run-id'] || `sweep-${gridName}-${symbol}-${timeframe}-${limit}-${timestampId()}`;
 
@@ -131,6 +133,8 @@ async function main() {
     candidateGrid: serializeGrid(grid),
     gridName,
     configCount: combos.length,
+    when,
+    exchange,
   };
   await fs.writeFile(path.join(runDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8');
 
@@ -155,14 +159,22 @@ async function main() {
 
     try {
       await fs.writeFile(variantPath, patchedSource, 'utf8');
-      await runNode([
+      const runArgs = [
         cliScript,
         '--input', variantPath,
         '--symbol', symbol,
         '--timeframe', timeframe,
         '--limit', limit,
         '--output', outputBase,
-      ], cwd);
+      ];
+      if (when) {
+        runArgs.push('--when', when);
+      }
+      if (exchange) {
+        runArgs.push('--exchange', exchange);
+      }
+
+      await runNode(runArgs, cwd);
 
       const analysis = await analyzeJsonlFile(cleanedPath, { minTrades });
       const result = {

@@ -10,7 +10,10 @@
     "sync:lib": "node ./scripts/fetch_docs.mjs",
     "pine:run": "node ./scripts/pine-import-run-clean.mjs",
     "pine:analyze": "node ./scripts/pine-optimize.mjs",
-    "pine:sweep": "node ./scripts/pine-sweep.mjs"
+    "pine:sweep": "node ./scripts/pine-sweep.mjs",
+    "pine:autoresearch": "node ./scripts/pine-autoresearch.mjs cycle --config ./config/pine-autoresearch.default.json",
+    "pine:autoresearch:digest": "node ./scripts/pine-autoresearch.mjs digest --config ./config/pine-autoresearch.default.json",
+    "pine:autoresearch:promote": "node ./scripts/pine-autoresearch.mjs promote --config ./config/pine-autoresearch.default.json"
   },
   "keywords": [],
   "author": "",

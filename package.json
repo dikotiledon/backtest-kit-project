@@ -13,7 +13,8 @@
     "pine:sweep": "node ./scripts/pine-sweep.mjs",
     "pine:autoresearch": "node ./scripts/pine-autoresearch.mjs cycle --config ./config/pine-autoresearch.default.json",
     "pine:autoresearch:digest": "node ./scripts/pine-autoresearch.mjs digest --config ./config/pine-autoresearch.default.json",
-    "pine:autoresearch:promote": "node ./scripts/pine-autoresearch.mjs promote --config ./config/pine-autoresearch.default.json"
+    "pine:autoresearch:promote": "node ./scripts/pine-autoresearch.mjs promote --config ./config/pine-autoresearch.default.json",
+    "pine:autoresearch:autopromote": "node ./scripts/pine-autoresearch.mjs autopromote --config ./config/pine-autoresearch.default.json"
   },
   "keywords": [],
   "author": "",

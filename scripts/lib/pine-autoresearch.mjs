@@ -7,12 +7,37 @@ function round(value, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function stableValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stableValue(item));
+  }
+
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = stableValue(value[key]);
+        return acc;
+      }, {});
+  }
+
+  return value;
+}
+
 export function isoNow() {
   return new Date().toISOString();
 }
 
 export function timestampId() {
   return isoNow().replace(/[:.]/g, '-');
+}
+
+export function configFingerprint(config) {
+  return JSON.stringify(stableValue(config || {}));
+}
+
+export function sameConfig(left, right) {
+  return configFingerprint(left) === configFingerprint(right);
 }
 
 export async function readJson(filePath) {
@@ -25,9 +50,26 @@ export async function writeJson(filePath, payload) {
   await fs.writeFile(filePath, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 }
 
+export async function appendJsonl(filePath, payload) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.appendFile(filePath, `${JSON.stringify(payload)}\n`, 'utf8');
+}
+
 export async function writeText(filePath, text) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await fs.writeFile(filePath, text, 'utf8');
+}
+
+export async function readJsonl(filePath) {
+  try {
+    const raw = await fs.readFile(filePath, 'utf8');
+    return raw
+      .split(/\r?\n/)
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+  } catch {
+    return [];
+  }
 }
 
 export function summarizeResult(result) {
@@ -36,11 +78,11 @@ export function summarizeResult(result) {
     label: result.label || result.configId || 'unknown',
     configId: result.configId,
     score: round(result.score, 2),
-    tradeCount: result.metrics?.tradeCount ?? 0,
-    roiPct: round(result.metrics?.roiPct ?? 0, 2),
-    winRatePct: round(result.metrics?.winRatePct ?? 0, 2),
-    profitFactor: round(result.metrics?.profitFactor ?? 0, 2),
-    maxDrawdownPct: round(result.metrics?.maxDrawdownPct ?? 0, 2),
+    tradeCount: result.metrics?.tradeCount ?? result.tradeCount ?? 0,
+    roiPct: round(result.metrics?.roiPct ?? result.roiPct ?? 0, 2),
+    winRatePct: round(result.metrics?.winRatePct ?? result.winRatePct ?? 0, 2),
+    profitFactor: round(result.metrics?.profitFactor ?? result.profitFactor ?? 0, 2),
+    maxDrawdownPct: round(result.metrics?.maxDrawdownPct ?? result.maxDrawdownPct ?? 0, 2),
     config: result.config || null,
   };
 }
@@ -113,57 +155,162 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
   };
 }
 
-export function renderScoutMarkdown({ config, manifest }) {
-  const incumbent = manifest.incumbent;
-  const challenger = manifest.challenger;
-  const decision = manifest.decision;
+export function decideMatrixPromotion({ labResults = [], policy = {}, champion, challenger }) {
+  const primary = labResults[0] || null;
+  const shadowLabs = labResults.slice(1);
+  const shadowPassCount = shadowLabs.filter((item) => item.decision?.recommendation === 'promote').length;
+  const allPassCount = labResults.filter((item) => item.decision?.recommendation === 'promote').length;
+  const shadowPassRatio = shadowLabs.length ? round(shadowPassCount / shadowLabs.length, 3) : 1;
+  const candidateChanged = !sameConfig(champion?.config, challenger?.config);
+
+  const requirePrimaryPromote = policy.requirePrimaryPromote ?? true;
+  const minShadowPassCount = policy.minShadowPassCount ?? 0;
+  const minShadowPassRatio = policy.minShadowPassRatio ?? 0;
+  const requireCandidateChange = policy.requireCandidateChange ?? true;
+
+  const gates = {
+    candidateChanged: requireCandidateChange ? candidateChanged : true,
+    primaryPromote: requirePrimaryPromote ? primary?.decision?.recommendation === 'promote' : true,
+    shadowPassCount: shadowPassCount >= minShadowPassCount,
+    shadowPassRatio: shadowPassRatio >= minShadowPassRatio,
+  };
+
+  const failedGates = Object.entries(gates)
+    .filter(([, passed]) => !passed)
+    .map(([name]) => name);
+
+  const recommendation = failedGates.length === 0 ? 'promote' : 'hold';
+  const summary = recommendation === 'promote'
+    ? `Promote challenger ${challenger?.configId}: matrix guards passed (${allPassCount}/${labResults.length} labs promote).`
+    : `Hold champion ${champion?.configId}: matrix failed ${failedGates.join(', ')} gate(s).`;
+
+  return {
+    recommendation,
+    summary,
+    gates,
+    failedGates,
+    counts: {
+      totalLabs: labResults.length,
+      shadowLabs: shadowLabs.length,
+      allPassCount,
+      shadowPassCount,
+      shadowPassRatio,
+    },
+    policy: {
+      requirePrimaryPromote,
+      minShadowPassCount,
+      minShadowPassRatio,
+      requireCandidateChange,
+    },
+  };
+}
+
+export function decideAutoPromotionAction({ latestManifest, historyEvents = [], championState, policy = {}, now = isoNow() }) {
+  const enabled = policy.enabled ?? false;
+  const cooldownHours = policy.cooldownHours ?? 24;
+  const maxPromotionsPerDay = policy.maxPromotionsPerDay ?? 1;
+  const requireMatrixPromotion = policy.requireMatrixPromotion ?? true;
+  const decision = latestManifest?.matrixDecision || latestManifest?.decision || null;
+  const candidate = latestManifest?.challenger || null;
+  const candidateChanged = !sameConfig(championState?.config, candidate?.config);
+  const matrixReady = requireMatrixPromotion ? decision?.recommendation === 'promote' : Boolean(candidate);
+
+  const promotionEvents = historyEvents.filter((event) => event.type === 'promote' || event.type === 'autopromote');
+  const lastPromotion = promotionEvents.at(-1) || null;
+  const nowMs = Date.parse(now);
+  const cooldownPassed = !lastPromotion
+    ? true
+    : ((nowMs - Date.parse(lastPromotion.timestamp)) / 3600000) >= cooldownHours;
+  const dayStart = new Date(nowMs);
+  dayStart.setUTCHours(0, 0, 0, 0);
+  const promotionsToday = promotionEvents.filter((event) => Date.parse(event.timestamp) >= dayStart.getTime()).length;
+  const dailyQuotaPassed = promotionsToday < maxPromotionsPerDay;
+
+  const gates = {
+    enabled,
+    matrixReady,
+    candidateChanged,
+    cooldown: cooldownPassed,
+    dailyQuota: dailyQuotaPassed,
+  };
+
+  const failedGates = Object.entries(gates)
+    .filter(([, passed]) => !passed)
+    .map(([name]) => name);
+
+  const recommendation = failedGates.length === 0 ? 'promote' : 'hold';
+  const summary = recommendation === 'promote'
+    ? `Auto-promote challenger ${candidate?.configId}: guards passed.`
+    : `Auto-promote hold: failed ${failedGates.join(', ')} gate(s).`;
+
+  return {
+    recommendation,
+    summary,
+    gates,
+    failedGates,
+    policy: {
+      enabled,
+      cooldownHours,
+      maxPromotionsPerDay,
+      requireMatrixPromotion,
+    },
+  };
+}
+
+function renderLabRowTable(labResults) {
   const lines = [
-    `# Pine Autoresearch Scout - ${config.labId}`,
+    '| lab | incumbent | challenger | score Δ | ROI Δ | PF Δ | DD Δ | rec |',
+    '| --- | --- | --- | ---: | ---: | ---: | ---: | --- |',
+  ];
+
+  for (const item of labResults || []) {
+    lines.push(`| ${item.lab.labId} | ${item.incumbent.configId} | ${item.challenger.configId} | ${item.decision.comparisons?.scoreDelta ?? 0} | ${item.decision.comparisons?.roiDeltaPct ?? 0}% | ${item.decision.comparisons?.profitFactorDelta ?? 0} | ${item.decision.comparisons?.drawdownDeltaPct ?? 0}% | ${item.decision.recommendation} |`);
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
+export function renderScoutMarkdown({ config, manifest }) {
+  const champion = manifest.champion || manifest.incumbent;
+  const challenger = manifest.challenger;
+  const decision = manifest.matrixDecision || manifest.decision;
+  const lines = [
+    `# Pine Autoresearch Scout - ${config.matrixId}`,
     '',
     `- Generated: ${manifest.generatedAt}`,
     `- Run ID: ${manifest.runId}`,
-    `- Run dir: \`${manifest.runDir}\``,
-    `- Grid: \`${manifest.gridName}\``,
-    `- Symbol/timeframe: ${manifest.symbol} ${manifest.timeframe}`,
-    `- Bars: ${manifest.limit}`,
-    `- Anchor: ${manifest.when || 'latest available window'}`,
+    `- Primary run dir: \`${manifest.primarySweep?.runDir || manifest.runDir}\``,
+    `- Grid: \`${manifest.primarySweep?.gridName || manifest.gridName}\``,
+    `- Primary lab: ${manifest.primaryLab?.labId || config.primaryLab.labId}`,
     '',
-    '## Incumbent',
+    '## Champion',
     '',
-    `- ${incumbent.configId}`,
-    `- score ${incumbent.score}, trades ${incumbent.tradeCount}, ROI ${incumbent.roiPct}%, win rate ${incumbent.winRatePct}%, PF ${incumbent.profitFactor}, max DD ${incumbent.maxDrawdownPct}%`,
+    champion ? `- ${champion.configId}` : '- none',
+    champion ? `- score ${champion.score}, trades ${champion.tradeCount}, ROI ${champion.roiPct}%, PF ${champion.profitFactor}, max DD ${champion.maxDrawdownPct}%` : '',
     '',
-    '## Best challenger',
+    '## Challenger',
     '',
-    challenger
-      ? `- ${challenger.configId}`
-      : '- none',
-    challenger
-      ? `- score ${challenger.score}, trades ${challenger.tradeCount}, ROI ${challenger.roiPct}%, win rate ${challenger.winRatePct}%, PF ${challenger.profitFactor}, max DD ${challenger.maxDrawdownPct}%`
-      : '',
+    challenger ? `- ${challenger.configId}` : '- none',
+    challenger ? `- score ${challenger.score}, trades ${challenger.tradeCount}, ROI ${challenger.roiPct}%, PF ${challenger.profitFactor}, max DD ${challenger.maxDrawdownPct}%` : '',
     '',
-    '## Decision',
+    '## Matrix decision',
     '',
-    `- Recommendation: **${decision.recommendation.toUpperCase()}**`,
-    `- ${decision.summary}`,
+    `- Recommendation: **${decision?.recommendation?.toUpperCase() || 'N/A'}**`,
+    `- ${decision?.summary || 'No matrix decision.'}`,
   ];
 
-  if (decision.comparisons) {
-    lines.push('', '## Deltas', '');
-    lines.push(`- score delta: ${decision.comparisons.scoreDelta}`);
-    lines.push(`- ROI delta: ${decision.comparisons.roiDeltaPct}%`);
-    lines.push(`- profit factor delta: ${decision.comparisons.profitFactorDelta}`);
-    lines.push(`- drawdown delta: ${decision.comparisons.drawdownDeltaPct}%`);
-    lines.push(`- trade ratio vs incumbent: ${decision.comparisons.tradeRatioVsIncumbent}`);
-    lines.push('', '## Gates', '');
-    for (const [gate, passed] of Object.entries(decision.gates)) {
-      lines.push(`- ${gate}: ${passed ? 'PASS' : 'FAIL'}`);
-    }
+  if (decision?.counts) {
+    lines.push(`- Labs promoting: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
+    lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
   }
 
-  if (manifest.topConfigs?.length) {
-    lines.push('', '## Top configs', '');
-    for (const item of manifest.topConfigs) {
+  if (manifest.labResults?.length) {
+    lines.push('', '## Lab matrix', '', renderLabRowTable(manifest.labResults));
+  }
+
+  if (manifest.primarySweep?.topConfigs?.length) {
+    lines.push('', '## Primary sweep top configs', '');
+    for (const item of manifest.primarySweep.topConfigs) {
       lines.push(`- ${item.configId}: score ${item.score}, trades ${item.tradeCount}, ROI ${item.roiPct}%, PF ${item.profitFactor}, max DD ${item.maxDrawdownPct}%`);
     }
   }
@@ -171,48 +318,79 @@ export function renderScoutMarkdown({ config, manifest }) {
   return `${lines.filter(Boolean).join('\n')}\n`;
 }
 
-export function renderDigestMarkdown({ config, latestManifest, previousManifest }) {
-  const latest = latestManifest?.challenger;
-  const incumbent = latestManifest?.incumbent;
-  const decision = latestManifest?.decision;
+export function renderDigestMarkdown({ config, latestManifest, previousManifest, historyEvents = [], championState }) {
+  const champion = latestManifest?.champion || championState || latestManifest?.incumbent;
+  const challenger = latestManifest?.challenger;
+  const decision = latestManifest?.matrixDecision || latestManifest?.decision;
   const previous = previousManifest?.challenger;
+  const recentEvents = historyEvents.slice(-8).reverse();
+
   const lines = [
-    `# Pine Autoresearch Digest - ${config.labId}`,
+    `# Pine Autoresearch Digest - ${config.matrixId}`,
     '',
     `- Generated: ${isoNow()}`,
     `- Latest run: ${latestManifest?.runId || 'n/a'}`,
-    `- Window: ${config.symbol} ${config.timeframe} ${config.limit} bars @ ${config.when || 'latest available window'}`,
+    `- Primary lab: ${config.primaryLab.labId}`,
+    `- Shadow labs: ${config.shadowLabs.length}`,
     '',
     '## Current state',
     '',
-    incumbent ? `- Incumbent: ${incumbent.configId} (score ${incumbent.score}, ROI ${incumbent.roiPct}%)` : '- Incumbent: n/a',
-    latest ? `- Latest challenger: ${latest.configId} (score ${latest.score}, ROI ${latest.roiPct}%)` : '- Latest challenger: none',
-    decision ? `- Recommendation: **${decision.recommendation.toUpperCase()}**` : '- Recommendation: n/a',
+    champion ? `- Champion: ${champion.configId} (score ${champion.score ?? 'n/a'}, ROI ${champion.roiPct ?? 'n/a'}%)` : '- Champion: n/a',
+    challenger ? `- Latest challenger: ${challenger.configId} (score ${challenger.score}, ROI ${challenger.roiPct}%)` : '- Latest challenger: none',
+    decision ? `- Matrix recommendation: **${decision.recommendation.toUpperCase()}**` : '- Matrix recommendation: n/a',
   ];
 
-  if (decision?.comparisons) {
-    lines.push('', '## Latest run deltas', '');
-    lines.push(`- score delta vs incumbent: ${decision.comparisons.scoreDelta}`);
-    lines.push(`- ROI delta vs incumbent: ${decision.comparisons.roiDeltaPct}%`);
-    lines.push(`- PF delta vs incumbent: ${decision.comparisons.profitFactorDelta}`);
-    lines.push(`- max DD delta vs incumbent: ${decision.comparisons.drawdownDeltaPct}%`);
-    lines.push(`- trade ratio vs incumbent: ${decision.comparisons.tradeRatioVsIncumbent}`);
+  if (decision?.counts) {
+    lines.push(`- Promote labs: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
+    lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
   }
 
-  if (latest && previous) {
+  if (latestManifest?.labResults?.length) {
+    lines.push('', '## Latest matrix', '', renderLabRowTable(latestManifest.labResults));
+  }
+
+  if (challenger && previous) {
     lines.push('', '## Change since previous scout', '');
     lines.push(`- previous challenger: ${previous.configId} (score ${previous.score}, ROI ${previous.roiPct}%)`);
-    lines.push(`- latest challenger: ${latest.configId} (score ${latest.score}, ROI ${latest.roiPct}%)`);
-    lines.push(`- challenger score delta: ${round(latest.score - previous.score, 2)}`);
-    lines.push(`- challenger ROI delta: ${round(latest.roiPct - previous.roiPct, 2)}%`);
+    lines.push(`- latest challenger: ${challenger.configId} (score ${challenger.score}, ROI ${challenger.roiPct}%)`);
+    lines.push(`- challenger score delta: ${round(challenger.score - previous.score, 2)}`);
+    lines.push(`- challenger ROI delta: ${round(challenger.roiPct - previous.roiPct, 2)}%`);
+  }
+
+  if (recentEvents.length) {
+    lines.push('', '## Recent history', '');
+    lines.push('| ts | type | detail |');
+    lines.push('| --- | --- | --- |');
+    for (const event of recentEvents) {
+      lines.push(`| ${event.timestamp} | ${event.type} | ${event.summary || event.toConfigId || event.challengerConfigId || 'n/a'} |`);
+    }
   }
 
   lines.push('', '## Recommendation', '', decision?.summary || 'No decision available.', '');
   return `${lines.join('\n')}\n`;
 }
 
+export function renderHistoryMarkdown({ config, championState, historyEvents = [] }) {
+  const recent = historyEvents.slice(-20).reverse();
+  const lines = [
+    `# Pine Autoresearch History - ${config.matrixId}`,
+    '',
+    championState ? `- Champion: ${championState.configId}` : '- Champion: n/a',
+    championState?.promotedAt ? `- Promoted at: ${championState.promotedAt}` : '- Promoted at: n/a',
+    '',
+    '| ts | type | champion | challenger | recommendation | note |',
+    '| --- | --- | --- | --- | --- | --- |',
+  ];
+
+  for (const event of recent) {
+    lines.push(`| ${event.timestamp} | ${event.type} | ${event.championConfigId || event.fromConfigId || 'n/a'} | ${event.challengerConfigId || event.toConfigId || 'n/a'} | ${event.recommendation || 'n/a'} | ${event.summary || event.note || 'n/a'} |`);
+  }
+
+  return `${lines.join('\n')}\n`;
+}
+
 export function summarizeDigestAnnouncement({ latestManifest, previousManifest }) {
-  const decision = latestManifest?.decision;
+  const decision = latestManifest?.matrixDecision || latestManifest?.decision;
   const latest = latestManifest?.challenger;
   const previous = previousManifest?.challenger;
   if (!latest || !decision) {
@@ -226,8 +404,8 @@ export function summarizeDigestAnnouncement({ latestManifest, previousManifest }
     `ROI ${latest.roiPct}%`,
   ];
 
-  if (decision.comparisons) {
-    parts.push(`vs incumbent score ${decision.comparisons.scoreDelta >= 0 ? '+' : ''}${decision.comparisons.scoreDelta}`);
+  if (decision.counts) {
+    parts.push(`labs ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
   }
 
   if (previous) {

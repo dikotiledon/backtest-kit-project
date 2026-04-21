@@ -1,5 +1,5 @@
 {
-  "matrixId": "pine-fusion-v4-core-xrpusdt-15m-local-only",
+  "matrixId": "pine-fusion-v4-core-15m-locked-window",
   "scriptPath": "../pine/test.pine",
   "grid": "phase3-core",
   "defaultProfile": "full",
@@ -17,7 +17,7 @@
   "minTrades": 10,
   "pinnedData": {
     "enabled": true,
-    "datasetsRoot": "../pine/datasets/pine-fusion-v4-core-xrpusdt-15m-local-only",
+    "datasetsRoot": "../pine/datasets/pine-fusion-v4-core-15m-locked-window",
     "cacheRoot": "../pine/dump/data/candle",
     "exchangeName": "ccxt-exchange",
     "sourceExchangeId": "binance",
@@ -30,8 +30,8 @@
     "labId": "xrpusdt-15m-primary",
     "symbol": "XRPUSDT",
     "timeframe": "15m",
-    "limit": 4500,
-    "when": "2026-04-21T06:00:00.000Z",
+    "limit": 10000,
+    "when": "2026-04-21T10:30:00.000Z",
     "exchange": "ccxt-exchange",
     "thresholds": {
       "minScoreDelta": 0.25,
@@ -42,11 +42,44 @@
       "minTradeRatioVsIncumbent": 0.75
     }
   },
-  "shadowLabs": [],
+  "shadowLabs": [
+    {
+      "labId": "btcusdt-15m-shadow",
+      "symbol": "BTCUSDT",
+      "timeframe": "15m",
+      "limit": 10000,
+      "when": "2026-04-21T10:30:00.000Z",
+      "exchange": "ccxt-exchange",
+      "thresholds": {
+        "minScoreDelta": 0,
+        "minRoiDeltaPct": -0.5,
+        "minProfitFactorDelta": -0.05,
+        "maxDrawdownDeltaPct": 1,
+        "minTradeCount": 100,
+        "minTradeRatioVsIncumbent": 0.65
+      }
+    },
+    {
+      "labId": "ethusdt-15m-shadow",
+      "symbol": "ETHUSDT",
+      "timeframe": "15m",
+      "limit": 10000,
+      "when": "2026-04-21T10:30:00.000Z",
+      "exchange": "ccxt-exchange",
+      "thresholds": {
+        "minScoreDelta": 0,
+        "minRoiDeltaPct": -0.5,
+        "minProfitFactorDelta": -0.05,
+        "maxDrawdownDeltaPct": 1,
+        "minTradeCount": 100,
+        "minTradeRatioVsIncumbent": 0.65
+      }
+    }
+  ],
   "matrixPolicy": {
     "requirePrimaryPromote": true,
-    "minShadowPassCount": 0,
-    "minShadowPassRatio": 0,
+    "minShadowPassCount": 1,
+    "minShadowPassRatio": 0.5,
     "requireCandidateChange": true
   },
   "autoPromotion": {
@@ -56,7 +89,7 @@
     "requireMatrixPromotion": true
   },
   "outputs": {
-    "researchRoot": "../pine/autoresearch/pine-fusion-v4-core-xrpusdt-15m-local-only",
-    "digestRoot": "../report/pine-autoresearch/pine-fusion-v4-core-xrpusdt-15m-local-only"
+    "researchRoot": "../pine/autoresearch/pine-fusion-v4-core-15m-locked-window",
+    "digestRoot": "../report/pine-autoresearch/pine-fusion-v4-core-15m-locked-window"
   }
 }

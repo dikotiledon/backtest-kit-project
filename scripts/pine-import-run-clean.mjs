@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { validatePinnedCacheComplete } from './lib/pine-dataset.mjs';
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -146,6 +147,10 @@ async function main() {
   const libs = args.libs || './pine/scripts';
   const when = args.when ? String(args.when) : null;
   const exchange = args.exchange ? String(args.exchange) : null;
+  const noCache = Boolean(args['no-cache']);
+  const requireCacheComplete = Boolean(args['require-cache-complete']);
+  const cacheRoot = path.resolve(cwd, String(args['cache-root'] || './pine/dump/data/candle'));
+  const cacheExchange = String(args['cache-exchange'] || exchange || 'ccxt-exchange');
 
   const inputPath = path.resolve(cwd, input);
   const libsDir = path.resolve(cwd, libs);
@@ -159,6 +164,24 @@ async function main() {
     : path.basename(flattenedPath, path.extname(flattenedPath));
 
   await flattenImports({ inputPath, flattenedPath, libsDir });
+
+  if (requireCacheComplete) {
+    if (!when) {
+      throw new Error('--require-cache-complete requires --when');
+    }
+    const validation = await validatePinnedCacheComplete({
+      cacheRoot,
+      exchangeName: cacheExchange,
+      symbol,
+      timeframe,
+      limit: Number(limit),
+      when,
+    });
+    if (!validation.complete) {
+      const preview = validation.missingTimestamps.slice(0, 5).join(', ');
+      throw new Error(`Pinned cache incomplete for ${symbol} ${timeframe}: missing ${validation.missingCount} candle(s). First missing timestamps: ${preview}`);
+    }
+  }
 
   const cliPath = path.resolve(cwd, 'node_modules/@backtest-kit/cli/build/index.mjs');
   const runArgs = [
@@ -176,6 +199,9 @@ async function main() {
   }
   if (exchange) {
     runArgs.push('--exchange', exchange);
+  }
+  if (noCache) {
+    runArgs.push('--noCache');
   }
 
   console.log(`[run] node ${runArgs.join(' ')}`);

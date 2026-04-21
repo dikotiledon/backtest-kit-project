@@ -111,6 +111,10 @@ async function main() {
   const minTrades = args['min-trades'] ? Number(args['min-trades']) : 10;
   const when = args.when ? String(args.when) : null;
   const exchange = args.exchange ? String(args.exchange) : null;
+  const noCache = Boolean(args['no-cache']);
+  const requireCacheComplete = Boolean(args['require-cache-complete']);
+  const cacheRoot = args['cache-root'] ? String(args['cache-root']) : null;
+  const cacheExchange = args['cache-exchange'] ? String(args['cache-exchange']) : null;
   const gridName = String(args.grid || 'default');
   const runId = args['run-id'] || `sweep-${gridName}-${symbol}-${timeframe}-${limit}-${timestampId()}`;
 
@@ -172,6 +176,18 @@ async function main() {
       }
       if (exchange) {
         runArgs.push('--exchange', exchange);
+      }
+      if (noCache) {
+        runArgs.push('--no-cache');
+      }
+      if (requireCacheComplete) {
+        runArgs.push('--require-cache-complete');
+      }
+      if (cacheRoot) {
+        runArgs.push('--cache-root', cacheRoot);
+      }
+      if (cacheExchange) {
+        runArgs.push('--cache-exchange', cacheExchange);
       }
 
       await runNode(runArgs, cwd);

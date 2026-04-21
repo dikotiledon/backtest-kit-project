@@ -22,6 +22,7 @@ import {
   writeJson,
   writeText,
 } from './lib/pine-autoresearch.mjs';
+import { stagePinnedDatasetForLab } from './lib/pine-dataset.mjs';
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -138,6 +139,8 @@ async function loadConfig(cwd, configPath, overrides = {}) {
   const raw = await readJson(resolvedConfigPath);
   const baseDir = path.dirname(resolvedConfigPath);
   const defaultThresholds = getThresholds(raw.thresholds || {});
+  const selectedProfile = overrides.profile || raw.defaultProfile || 'full';
+  const profileSettings = raw.scoutProfiles?.[selectedProfile] || null;
 
   const legacyPrimary = {
     labId: raw.labId || raw.matrixId || 'primary',
@@ -162,9 +165,11 @@ async function loadConfig(cwd, configPath, overrides = {}) {
     scriptPath: resolveMaybeRelative(baseDir, raw.scriptPath),
     researchRoot: resolveMaybeRelative(baseDir, raw.outputs?.researchRoot),
     digestRoot: resolveMaybeRelative(baseDir, raw.outputs?.digestRoot),
-    grid: String(overrides.grid || raw.grid),
-    maxConfigs: overrides.maxConfigs ? Number(overrides.maxConfigs) : (raw.maxConfigs ?? null),
-    minTrades: overrides.minTrades ? Number(overrides.minTrades) : (raw.minTrades ?? 10),
+    selectedProfile,
+    scoutProfiles: raw.scoutProfiles || {},
+    grid: String(overrides.grid || profileSettings?.grid || raw.grid),
+    maxConfigs: overrides.maxConfigs ? Number(overrides.maxConfigs) : (profileSettings?.maxConfigs ?? raw.maxConfigs ?? null),
+    minTrades: overrides.minTrades ? Number(overrides.minTrades) : (profileSettings?.minTrades ?? raw.minTrades ?? 10),
     seedChampionPath: resolveMaybeRelative(baseDir, raw.seedChampion?.path || raw.incumbent?.path),
     primaryLab: normalizeLab(primarySource, defaultThresholds, 0, 'primary'),
     shadowLabs: shadowSources.map((lab, index) => normalizeLab(lab, defaultThresholds, index, 'shadow')),
@@ -182,6 +187,13 @@ async function loadConfig(cwd, configPath, overrides = {}) {
       requireMatrixPromotion: true,
       ...(raw.autoPromotion || {}),
     },
+    pinnedData: {
+      enabled: Boolean(raw.pinnedData?.enabled),
+      datasetsRoot: resolveMaybeRelative(baseDir, raw.pinnedData?.datasetsRoot),
+      cacheRoot: resolveMaybeRelative(baseDir, raw.pinnedData?.cacheRoot || '../pine/dump/data/candle'),
+      exchangeName: raw.pinnedData?.exchangeName || primarySource.exchange || 'ccxt-exchange',
+      sourceExchangeId: raw.pinnedData?.sourceExchangeId || 'binance',
+    },
   };
 
   return config;
@@ -192,6 +204,24 @@ async function ensureDirs(config) {
   await fs.mkdir(config.digestRoot, { recursive: true });
   await fs.mkdir(manifestsDir(config), { recursive: true });
   await fs.mkdir(evaluationsRoot(config), { recursive: true });
+}
+
+async function stagePinnedData(config, labs) {
+  if (!config.pinnedData?.enabled) return [];
+  if (!config.pinnedData.datasetsRoot) {
+    throw new Error('pinnedData.datasetsRoot is required when pinnedData.enabled=true');
+  }
+
+  const staged = [];
+  for (const lab of labs) {
+    staged.push(await stagePinnedDatasetForLab({
+      datasetsRoot: config.pinnedData.datasetsRoot,
+      cacheRoot: config.pinnedData.cacheRoot,
+      exchangeName: config.pinnedData.exchangeName,
+      lab,
+    }));
+  }
+  return staged;
 }
 
 function buildRunId(config) {
@@ -275,6 +305,9 @@ async function ensureChampionState(config) {
 
 async function runPrimarySweep(config, runId) {
   const lab = config.primaryLab;
+  const effectiveExchange = lab.exchange || (config.pinnedData?.enabled ? config.pinnedData.exchangeName : null);
+  await stagePinnedData(config, [lab]);
+
   const sweepArgs = [
     path.resolve(config.projectRoot, 'scripts', 'pine-sweep.mjs'),
     '--input', config.scriptPath,
@@ -292,8 +325,11 @@ async function runPrimarySweep(config, runId) {
   if (lab.when) {
     sweepArgs.push('--when', lab.when);
   }
-  if (lab.exchange) {
-    sweepArgs.push('--exchange', lab.exchange);
+  if (effectiveExchange) {
+    sweepArgs.push('--exchange', effectiveExchange);
+  }
+  if (config.pinnedData?.enabled) {
+    sweepArgs.push('--no-cache', '--require-cache-complete', '--cache-root', config.pinnedData.cacheRoot, '--cache-exchange', config.pinnedData.exchangeName);
   }
 
   await runNode(sweepArgs, config.projectRoot);
@@ -311,7 +347,9 @@ async function runPrimarySweep(config, runId) {
 
 async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }) {
   const evalDir = path.join(evaluationsRoot(config), runId, lab.labId);
+  const effectiveExchange = lab.exchange || (config.pinnedData?.enabled ? config.pinnedData.exchangeName : null);
   await fs.mkdir(evalDir, { recursive: true });
+  await stagePinnedData(config, [lab]);
 
   const source = await fs.readFile(config.scriptPath, 'utf8');
   const patched = applyPatchPlan(source, buildPatchPlan(candidate.config || {}));
@@ -333,8 +371,11 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
   if (lab.when) {
     args.push('--when', lab.when);
   }
-  if (lab.exchange) {
-    args.push('--exchange', lab.exchange);
+  if (effectiveExchange) {
+    args.push('--exchange', effectiveExchange);
+  }
+  if (config.pinnedData?.enabled) {
+    args.push('--no-cache', '--require-cache-complete', '--cache-root', config.pinnedData.cacheRoot, '--cache-exchange', config.pinnedData.exchangeName);
   }
 
   await runNode(args, config.projectRoot);
@@ -422,8 +463,15 @@ async function runScout(config) {
     generatedAt: isoNow(),
     matrixId: config.matrixId,
     runId,
+    profile: config.selectedProfile,
     primaryLab: config.primaryLab,
     shadowLabs: config.shadowLabs,
+    pinnedData: config.pinnedData?.enabled ? {
+      enabled: true,
+      datasetsRoot: config.pinnedData.datasetsRoot,
+      cacheRoot: config.pinnedData.cacheRoot,
+      exchangeName: config.pinnedData.exchangeName,
+    } : { enabled: false },
     incumbent: summarizeResult(championState),
     champion: summarizeResult(championState),
     challenger: challengerSummary,
@@ -594,6 +642,7 @@ async function main() {
     when: args.when,
     exchange: args.exchange,
     grid: args.grid,
+    profile: args.profile,
     maxConfigs: args['max-configs'],
     minTrades: args['min-trades'],
   });

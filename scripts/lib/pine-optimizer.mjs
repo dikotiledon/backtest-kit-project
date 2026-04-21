@@ -75,8 +75,18 @@ export function simulateTrades(rows, options = {}) {
     if (position) {
       const close = row.Close;
       const heldBars = i - position.entryIndex;
+      const simPos = Number(row?.Feature_SimPos);
       let exitReason = null;
       let exitPrice = null;
+
+      if (position.side === 'long' && simPos === 1) {
+        if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
+        if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
+      }
+      if (position.side === 'short' && simPos === -1) {
+        if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
+        if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
+      }
 
       if (position.side === 'long') {
         if (Number.isFinite(position.stopLoss) && close <= position.stopLoss) {
@@ -237,6 +247,10 @@ export function summarizeSignalDiagnostics(rows) {
     emaCrossBearCount: countHits(normalized, 'Feature_EmaCrossBear'),
     longFusionPassCount: countHits(normalized, 'Feature_LongFusionPass'),
     shortFusionPassCount: countHits(normalized, 'Feature_ShortFusionPass'),
+    supertrendBullCount: countHits(normalized, 'Feature_SupertrendBull'),
+    supertrendBearCount: countHits(normalized, 'Feature_SupertrendBear'),
+    supertrendPassLongCount: countHits(normalized, 'Feature_SupertrendPassLong'),
+    supertrendPassShortCount: countHits(normalized, 'Feature_SupertrendPassShort'),
     longFusionScoreSum: scoreSum('Feature_LongFusionScore'),
     shortFusionScoreSum: scoreSum('Feature_ShortFusionScore'),
     longFusionBonusSum: scoreSum('Feature_LongFusionBonus'),
@@ -256,6 +270,12 @@ export function summarizeSignalDiagnostics(rows) {
     blockShortCooldownCount: countHits(normalized, 'Feature_BlockShort_Cooldown'),
     blockLongFusionCount: countHits(normalized, 'Feature_BlockLong_Fusion'),
     blockShortFusionCount: countHits(normalized, 'Feature_BlockShort_Fusion'),
+    blockLongSupertrendCount: countHits(normalized, 'Feature_BlockLong_Supertrend'),
+    blockShortSupertrendCount: countHits(normalized, 'Feature_BlockShort_Supertrend'),
+    trailActiveCount: countHits(normalized, 'Feature_TrailActive'),
+    trailMovedCount: countHits(normalized, 'Feature_TrailMoved'),
+    trailExitLongCount: countHits(normalized, 'Feature_TrailExitLong'),
+    trailExitShortCount: countHits(normalized, 'Feature_TrailExitShort'),
     startLongCount: countHits(normalized, 'Feature_StartLong'),
     startShortCount: countHits(normalized, 'Feature_StartShort'),
   };

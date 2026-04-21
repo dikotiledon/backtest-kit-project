@@ -381,6 +381,10 @@ fusionV4LongEmaWeight = input.float(0.0, title="Fusion V4 Long EMA Weight", step
 fusionV4ShortAtrWeight = input.float(-0.5, title="Fusion V4 Short ATR Weight", step=0.05, group="Signal Fusion V4")
 fusionV4ShortEngulfWeight = input.float(-0.1, title="Fusion V4 Short Engulf Weight", step=0.05, group="Signal Fusion V4")
 fusionV4ShortEmaWeight = input.float(0.0, title="Fusion V4 Short EMA Weight", step=0.05, group="Signal Fusion V4")
+useSupertrendFilter = input.bool(false, title="Use Supertrend Filter", group="Phase 3: Supertrend")
+useSupertrendEntryConfirm = input.bool(false, title="Require Supertrend Flip Confirm", group="Phase 3: Supertrend")
+supertrendAtrLen = input.int(14, title="Supertrend ATR Length", minval=1, group="Phase 3: Supertrend")
+supertrendFactor = input.float(2.0, title="Supertrend Factor", minval=0.1, step=0.1, group="Phase 3: Supertrend")
 
 fusion3LineBull = close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
 fusion3LineBear = close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
@@ -407,11 +411,29 @@ effectiveShortStrength = -prediction + shortFusionBonus - shortFusionPenalty + s
 longFusionPass = (useFusionV2 or useFusionV3 or useFusionV4) ? true : (not useSignalFusion or minFusionScore <= 0 or fusionEnabledCount == 0 or longFusionScore >= minFusionScore)
 shortFusionPass = (useFusionV2 or useFusionV3 or useFusionV4) ? true : (not useSignalFusion or minFusionScore <= 0 or fusionEnabledCount == 0 or shortFusionScore >= minFusionScore)
 
+supertrendAtr = ta.atr(supertrendAtrLen)
+supertrendUp = hl2 - supertrendFactor * supertrendAtr
+supertrendUp1 = nz(supertrendUp[1], supertrendUp)
+supertrendUp := close[1] > supertrendUp1 ? math.max(supertrendUp, supertrendUp1) : supertrendUp
+supertrendDn = hl2 + supertrendFactor * supertrendAtr
+supertrendDn1 = nz(supertrendDn[1], supertrendDn)
+supertrendDn := close[1] < supertrendDn1 ? math.min(supertrendDn, supertrendDn1) : supertrendDn
+supertrendTrend = 1
+supertrendTrend := nz(supertrendTrend[1], supertrendTrend)
+supertrendTrend := supertrendTrend == -1 and close > supertrendDn1 ? 1 : supertrendTrend == 1 and close < supertrendUp1 ? -1 : supertrendTrend
+supertrendBull = supertrendTrend == 1
+supertrendBear = supertrendTrend == -1
+supertrendFlipBull = supertrendBull and supertrendTrend[1] == -1
+supertrendFlipBear = supertrendBear and supertrendTrend[1] == 1
+supertrendLine = supertrendBull ? supertrendUp : supertrendDn
+supertrendPassLong = (not useSupertrendFilter or supertrendBull) and (not useSupertrendEntryConfirm or supertrendFlipBull)
+supertrendPassShort = (not useSupertrendFilter or supertrendBear) and (not useSupertrendEntryConfirm or supertrendFlipBear)
+
 var int lastEntryBar = na
 cooldownOk = na(lastEntryBar) or (bar_index - lastEntryBar >= minBarsBetween)
 
-startLongTrade = baseStartLong and (not useTrendXConf or trendx == 1) and (effectiveLongStrength >= minPredSum) and cooldownOk and longFusionPass
-startShortTrade = baseStartShort and (not useTrendXConf or trendx == -1) and (effectiveShortStrength >= minPredSum) and cooldownOk and shortFusionPass
+startLongTrade = baseStartLong and (not useTrendXConf or trendx == 1) and (effectiveLongStrength >= minPredSum) and cooldownOk and longFusionPass and supertrendPassLong
+startShortTrade = baseStartShort and (not useTrendXConf or trendx == -1) and (effectiveShortStrength >= minPredSum) and cooldownOk and shortFusionPass and supertrendPassShort
 
 // Dynamic Exit Conditions: Booleans for ML Model Position Exits based on Fractal Filters and Kernel Regression Filters
 lastSignalWasBullish = ta.barssince(startLongTrade) < ta.barssince(startShortTrade)
@@ -443,43 +465,77 @@ riskAtrLen     = input.int(14,     title="ATR Length", minval=1, group="Strategy
 slAtrMult      = input.float(1.0,  title="SL ATR x", minval=0.1, step=0.1, group="Strategy")
 tpAtrMult      = input.float(2.5,  title="TP ATR x (1:1 R:R by default)", minval=0.1, step=0.1, group="Strategy")
 useSignalExits = input.bool(false, title="Use Signal-Based Exits (in addition to SL/TP)", group="Strategy")
+useTrailingStop = input.bool(false, title="Use ATR Trailing Stop", group="Strategy")
+trailAtrLen = input.int(14, title="Trail ATR Length", minval=1, group="Strategy")
+trailAtrMult = input.float(1.5, title="Trail ATR x", minval=0.1, step=0.1, group="Strategy")
+trailActivateR = input.float(1.0, title="Trail Activate at R", minval=0.0, step=0.25, group="Strategy")
 
 var int simPos = 0
 var float simEntryPrice = na
-var float atrNow     = na
-var float longStop   = na
-var float longLimit  = na
-var float shortStop  = na
-var float shortLimit = na
+var float atrNow = na
+var float trailAtrNow = na
+var float simRiskDistance = na
+var float simBaseStop = na
+var float simTakeProfit = na
+var float simTrailStop = na
+var float activeStop = na
+var float activeTakeProfit = na
 
 atrNow := ta.atr(riskAtrLen)
+trailAtrNow := ta.atr(trailAtrLen)
 
 if enableStrategy
     if startLongTrade and simPos <= 0
         simPos := 1
         simEntryPrice := close
+        simRiskDistance := slAtrMult * atrNow
+        simBaseStop := useStopsTP ? close - simRiskDistance : na
+        simTakeProfit := useStopsTP ? close + tpAtrMult * atrNow : na
+        simTrailStop := na
         lastEntryBar := bar_index
     if startShortTrade and simPos >= 0
         simPos := -1
         simEntryPrice := close
+        simRiskDistance := slAtrMult * atrNow
+        simBaseStop := useStopsTP ? close + simRiskDistance : na
+        simTakeProfit := useStopsTP ? close - tpAtrMult * atrNow : na
+        simTrailStop := na
         lastEntryBar := bar_index
 
-longStop   := useStopsTP and simPos == 1 ? simEntryPrice - slAtrMult * atrNow : na
-longLimit  := useStopsTP and simPos == 1 ? simEntryPrice + tpAtrMult * atrNow : na
-shortStop  := useStopsTP and simPos == -1 ? simEntryPrice + slAtrMult * atrNow : na
-shortLimit := useStopsTP and simPos == -1 ? simEntryPrice - tpAtrMult * atrNow : na
+longTrailActive = useTrailingStop and simPos == 1 and not na(simRiskDistance) and close >= simEntryPrice + trailActivateR * simRiskDistance
+shortTrailActive = useTrailingStop and simPos == -1 and not na(simRiskDistance) and close <= simEntryPrice - trailActivateR * simRiskDistance
+longTrailCandidate = longTrailActive ? close - trailAtrMult * trailAtrNow : na
+shortTrailCandidate = shortTrailActive ? close + trailAtrMult * trailAtrNow : na
 
-longStopHit  = useStopsTP and simPos == 1 and (ta.crossunder(close, longStop) or close <= longStop)
-longTakeHit  = useStopsTP and simPos == 1 and (ta.crossover(close, longLimit) or close >= longLimit)
-shortStopHit = useStopsTP and simPos == -1 and (ta.crossover(close, shortStop) or close >= shortStop)
-shortTakeHit = useStopsTP and simPos == -1 and (ta.crossunder(close, shortLimit) or close <= shortLimit)
+if simPos == 1 and longTrailActive
+    simTrailStop := na(simTrailStop) ? longTrailCandidate : math.max(simTrailStop, longTrailCandidate)
+if simPos == -1 and shortTrailActive
+    simTrailStop := na(simTrailStop) ? shortTrailCandidate : math.min(simTrailStop, shortTrailCandidate)
+
+activeStop := simPos == 1 ? (na(simTrailStop) ? simBaseStop : math.max(simBaseStop, simTrailStop)) : simPos == -1 ? (na(simTrailStop) ? simBaseStop : math.min(simBaseStop, simTrailStop)) : na
+activeTakeProfit := simPos != 0 ? simTakeProfit : na
+
+longStopHit = useStopsTP and simPos == 1 and not na(activeStop) and (ta.crossunder(close, activeStop) or close <= activeStop)
+longTakeHit = useStopsTP and simPos == 1 and not na(activeTakeProfit) and (ta.crossover(close, activeTakeProfit) or close >= activeTakeProfit)
+shortStopHit = useStopsTP and simPos == -1 and not na(activeStop) and (ta.crossover(close, activeStop) or close >= activeStop)
+shortTakeHit = useStopsTP and simPos == -1 and not na(activeTakeProfit) and (ta.crossunder(close, activeTakeProfit) or close <= activeTakeProfit)
+longTrailExit = useTrailingStop and simPos == 1 and not na(simTrailStop) and longStopHit
+shortTrailExit = useTrailingStop and simPos == -1 and not na(simTrailStop) and shortStopHit
 
 if simPos == 1 and ((useSignalExits and endLongTrade) or longStopHit or longTakeHit)
     simPos := 0
     simEntryPrice := na
+    simRiskDistance := na
+    simBaseStop := na
+    simTakeProfit := na
+    simTrailStop := na
 if simPos == -1 and ((useSignalExits and endShortTrade) or shortStopHit or shortTakeHit)
     simPos := 0
     simEntryPrice := na
+    simRiskDistance := na
+    simBaseStop := na
+    simTakeProfit := na
+    simTrailStop := na
 
 // =========================
 // ======== Alerts =========
@@ -503,8 +559,8 @@ alertcondition(shortStopAlert, title="Short Stop Hit", message="Short stop hit o
 // ==== Backtest-kit Outputs
 // =========================
 pineSignal = startLongTrade ? 1 : startShortTrade ? -1 : 0
-pineStopLoss = pineSignal == 1 ? close - slAtrMult * atrNow : pineSignal == -1 ? close + slAtrMult * atrNow : close
-pineTakeProfit = pineSignal == 1 ? close + tpAtrMult * atrNow : pineSignal == -1 ? close - tpAtrMult * atrNow : close
+pineStopLoss = simPos != 0 and not na(activeStop) ? activeStop : pineSignal == 1 ? close - slAtrMult * atrNow : pineSignal == -1 ? close + slAtrMult * atrNow : close
+pineTakeProfit = simPos != 0 and not na(activeTakeProfit) ? activeTakeProfit : pineSignal == 1 ? close + tpAtrMult * atrNow : pineSignal == -1 ? close - tpAtrMult * atrNow : close
 pineEstimatedTime = 240
 
 // Optimizer-ready numeric exports
@@ -556,6 +612,10 @@ featureEffectiveLongStrength = effectiveLongStrength
 featureEffectiveShortStrength = effectiveShortStrength
 featureLongFusionPass = longFusionPass ? 1 : 0
 featureShortFusionPass = shortFusionPass ? 1 : 0
+featureSupertrendBull = supertrendBull ? 1 : 0
+featureSupertrendBear = supertrendBear ? 1 : 0
+featureSupertrendPassLong = supertrendPassLong ? 1 : 0
+featureSupertrendPassShort = supertrendPassShort ? 1 : 0
 featureBlockLongTrendX = baseStartLong and not trendXLongPass ? 1 : 0
 featureBlockShortTrendX = baseStartShort and not trendXShortPass ? 1 : 0
 featureBlockLongPred = baseStartLong and trendXLongPass and not predLongStrengthPass ? 1 : 0
@@ -564,10 +624,17 @@ featureBlockLongCooldown = baseStartLong and trendXLongPass and predLongStrength
 featureBlockShortCooldown = baseStartShort and trendXShortPass and predShortStrengthPass and not cooldownOk ? 1 : 0
 featureBlockLongFusion = baseStartLong and trendXLongPass and predLongStrengthPass and cooldownOk and not longFusionPass ? 1 : 0
 featureBlockShortFusion = baseStartShort and trendXShortPass and predShortStrengthPass and cooldownOk and not shortFusionPass ? 1 : 0
+featureBlockLongSupertrend = baseStartLong and trendXLongPass and predLongStrengthPass and cooldownOk and longFusionPass and not supertrendPassLong ? 1 : 0
+featureBlockShortSupertrend = baseStartShort and trendXShortPass and predShortStrengthPass and cooldownOk and shortFusionPass and not supertrendPassShort ? 1 : 0
 featureStartLong = startLongTrade ? 1 : 0
 featureStartShort = startShortTrade ? 1 : 0
 featureEndLong = endLongTrade ? 1 : 0
 featureEndShort = endShortTrade ? 1 : 0
+featureTrailActive = ((longTrailActive and simPos == 1) or (shortTrailActive and simPos == -1)) ? 1 : 0
+featureTrailStopDistance = simPos == 1 and not na(activeStop) ? close - activeStop : simPos == -1 and not na(activeStop) ? activeStop - close : 0
+featureTrailMoved = not na(simTrailStop) ? 1 : 0
+featureTrailExitLong = longTrailExit ? 1 : 0
+featureTrailExitShort = shortTrailExit ? 1 : 0
 featureSimPos = simPos
 
 plot(close, "Close", display=display.data_window)
@@ -618,6 +685,10 @@ plot(featureEffectiveLongStrength, "Feature_EffectiveLongStrength", display=disp
 plot(featureEffectiveShortStrength, "Feature_EffectiveShortStrength", display=display.data_window)
 plot(featureLongFusionPass, "Feature_LongFusionPass", display=display.data_window)
 plot(featureShortFusionPass, "Feature_ShortFusionPass", display=display.data_window)
+plot(featureSupertrendBull, "Feature_SupertrendBull", display=display.data_window)
+plot(featureSupertrendBear, "Feature_SupertrendBear", display=display.data_window)
+plot(featureSupertrendPassLong, "Feature_SupertrendPassLong", display=display.data_window)
+plot(featureSupertrendPassShort, "Feature_SupertrendPassShort", display=display.data_window)
 plot(featureBlockLongTrendX, "Feature_BlockLong_TrendX", display=display.data_window)
 plot(featureBlockShortTrendX, "Feature_BlockShort_TrendX", display=display.data_window)
 plot(featureBlockLongPred, "Feature_BlockLong_Pred", display=display.data_window)
@@ -626,10 +697,17 @@ plot(featureBlockLongCooldown, "Feature_BlockLong_Cooldown", display=display.dat
 plot(featureBlockShortCooldown, "Feature_BlockShort_Cooldown", display=display.data_window)
 plot(featureBlockLongFusion, "Feature_BlockLong_Fusion", display=display.data_window)
 plot(featureBlockShortFusion, "Feature_BlockShort_Fusion", display=display.data_window)
+plot(featureBlockLongSupertrend, "Feature_BlockLong_Supertrend", display=display.data_window)
+plot(featureBlockShortSupertrend, "Feature_BlockShort_Supertrend", display=display.data_window)
 plot(featureStartLong, "Feature_StartLong", display=display.data_window)
 plot(featureStartShort, "Feature_StartShort", display=display.data_window)
 plot(featureEndLong, "Feature_EndLong", display=display.data_window)
 plot(featureEndShort, "Feature_EndShort", display=display.data_window)
+plot(featureTrailActive, "Feature_TrailActive", display=display.data_window)
+plot(featureTrailStopDistance, "Feature_TrailStopDistance", display=display.data_window)
+plot(featureTrailMoved, "Feature_TrailMoved", display=display.data_window)
+plot(featureTrailExitLong, "Feature_TrailExitLong", display=display.data_window)
+plot(featureTrailExitShort, "Feature_TrailExitShort", display=display.data_window)
 plot(featureSimPos, "Feature_SimPos", display=display.data_window)
 
 // =========================

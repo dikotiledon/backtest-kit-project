@@ -81,6 +81,18 @@ export function filterSweepCombos(combos) {
       }
     }
 
+    if (normalized.useSupertrendFilter !== true) {
+      delete normalized.useSupertrendEntryConfirm;
+      delete normalized.supertrendAtrLen;
+      delete normalized.supertrendFactor;
+    }
+
+    if (normalized.useTrailingStop !== true) {
+      delete normalized.trailAtrLen;
+      delete normalized.trailAtrMult;
+      delete normalized.trailActivateR;
+    }
+
     const key = JSON.stringify(normalized);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -217,12 +229,44 @@ const PATCHERS = {
     regex: /(title="Use Dynamic Exits",\s*defval=)(true|false)(,\s*group="General Settings".*inline="exits"\)\))/,
     replace: `$1${toLiteral(value)}$3`,
   }),
+  useSupertrendFilter: (value) => ({
+    regex: /(useSupertrendFilter\s*=\s*input\.bool\()(true|false)(,\s+title="Use Supertrend Filter".*)/,
+    replace: `$1${toLiteral(value)}$3`,
+  }),
+  useSupertrendEntryConfirm: (value) => ({
+    regex: /(useSupertrendEntryConfirm\s*=\s*input\.bool\()(true|false)(,\s+title="Require Supertrend Flip Confirm".*)/,
+    replace: `$1${toLiteral(value)}$3`,
+  }),
+  supertrendAtrLen: (value) => ({
+    regex: /(supertrendAtrLen\s*=\s*input\.int\()[-\d.]+(,\s+title="Supertrend ATR Length".*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
+  supertrendFactor: (value) => ({
+    regex: /(supertrendFactor\s*=\s*input\.float\()[-\d.]+(,\s+title="Supertrend Factor".*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
   slAtrMult: (value) => ({
     regex: /(slAtrMult\s*=\s*input\.float\()[-\d.]+(,\s+title="SL ATR x".*)/,
     replace: `$1${toLiteral(value)}$2`,
   }),
   tpAtrMult: (value) => ({
     regex: /(tpAtrMult\s*=\s*input\.float\()[-\d.]+(,\s+title="TP ATR x \(1:1 R:R by default\)".*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
+  useTrailingStop: (value) => ({
+    regex: /(useTrailingStop\s*=\s*input\.bool\()(true|false)(,\s+title="Use ATR Trailing Stop".*)/,
+    replace: `$1${toLiteral(value)}$3`,
+  }),
+  trailAtrLen: (value) => ({
+    regex: /(trailAtrLen\s*=\s*input\.int\()[-\d.]+(,\s+title="Trail ATR Length".*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
+  trailAtrMult: (value) => ({
+    regex: /(trailAtrMult\s*=\s*input\.float\()[-\d.]+(,\s+title="Trail ATR x".*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
+  trailActivateR: (value) => ({
+    regex: /(trailActivateR\s*=\s*input\.float\()[-\d.]+(,\s+title="Trail Activate at R".*)/,
     replace: `$1${toLiteral(value)}$2`,
   }),
   useVolatilityFilter: (value) => ({
@@ -439,6 +483,44 @@ export function fusionV4CandidateGrid() {
   };
 }
 
+export function phase3CoreCandidateGrid() {
+  return {
+    useRegimeFilter: [false],
+    useVolatilityFilter: [false],
+    useAdxFilter: [true],
+    adxThreshold: [20],
+    minPredSum: [2.0],
+    useTrendXConf: [true],
+    minBarsBetween: [2],
+    slAtrMult: [1.0],
+    tpAtrMult: [2.5],
+    useSignalFusion: [true],
+    useFusionV2: [false],
+    useFusionV3: [false],
+    useFusionV4: [true],
+    fusionV4MinAbsPrediction: [2.0],
+    fusionV4MaxAbsPrediction: [4.0],
+    useAtrFlipConfirm: [true],
+    use3LineConfirm: [false],
+    useEngulfingConfirm: [true],
+    useEmaCrossConfirm: [false],
+    fusionV4LongAtrWeight: [-0.25],
+    fusionV4LongEngulfWeight: [-0.25],
+    fusionV4LongEmaWeight: [0.0],
+    fusionV4ShortAtrWeight: [-0.5],
+    fusionV4ShortEngulfWeight: [-0.1],
+    fusionV4ShortEmaWeight: [0.0],
+    useSupertrendFilter: [true],
+    useSupertrendEntryConfirm: [false, true],
+    supertrendAtrLen: [10, 14],
+    supertrendFactor: [1.5, 2.0],
+    useTrailingStop: [false, true],
+    trailAtrLen: [14],
+    trailAtrMult: [1.0, 1.5],
+    trailActivateR: [0.5, 1.0],
+  };
+}
+
 export function getCandidateGrid(name = 'default') {
   if (name === 'focused') return focusedCandidateGrid();
   if (name === 'root-cause') return rootCauseCandidateGrid();
@@ -448,6 +530,7 @@ export function getCandidateGrid(name = 'default') {
   if (name === 'fusion-v2') return fusionV2CandidateGrid();
   if (name === 'fusion-v3') return fusionV3CandidateGrid();
   if (name === 'fusion-v4') return fusionV4CandidateGrid();
+  if (name === 'phase3-core') return phase3CoreCandidateGrid();
   return defaultCandidateGrid();
 }
 

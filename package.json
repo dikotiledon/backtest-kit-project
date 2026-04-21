@@ -1,0 +1,32 @@
+{
+  "name": "backtest-kit-project",
+  "version": "1.0.0",
+  "description": "Backtest Kit trading bot project",
+  "main": "index.js",
+  "homepage": "https://backtest-kit.github.io/documents/article_07_ai_news_trading_signals.html",
+  "scripts": {
+    "start": "node ./node_modules/@backtest-kit/cli/build/index.mjs",
+    "test": "node --test",
+    "sync:lib": "node ./scripts/fetch_docs.mjs",
+    "pine:run": "node ./scripts/pine-import-run-clean.mjs",
+    "pine:analyze": "node ./scripts/pine-optimize.mjs",
+    "pine:sweep": "node ./scripts/pine-sweep.mjs"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "@backtest-kit/cli": "^7.1.0",
+    "@backtest-kit/graph": "^7.1.0",
+    "@backtest-kit/pinets": "^7.1.0",
+    "@backtest-kit/ui": "^7.1.0",
+    "agent-swarm-kit": "^2.5.1",
+    "backtest-kit": "^7.1.0",
+    "functools-kit": "^2.2.0",
+    "garch": "^1.2.3",
+    "get-moment-stamp": "^1.1.2",
+    "ollama": "^0.6.3",
+    "volume-anomaly": "^1.2.3"
+  }
+}

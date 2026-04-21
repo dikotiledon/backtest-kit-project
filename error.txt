@@ -1,0 +1,196 @@
+21/04/2026 09:52
+{
+  "message": "Failed to transpile Pine Script version 5: Unexpected token KEYWORD 'import' at 4:7",
+  "data": {
+    "message": "Failed to transpile Pine Script version 5: Unexpected token KEYWORD 'import' at 4:7"
+  }
+}
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 68
+Function: dumpStackTrace
+Method: none
+---
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 97
+Function: ErrorService.handleGlobalError
+Method: handleGlobalError
+---
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 107
+Function: anonymous
+Method: none
+---
+File: node:events
+Line: 518
+Function: emit
+Method: emit
+---
+File: node:internal/process/promises
+Line: 252
+Function: emitUnhandledRejection
+Method: none
+---
+File: node:internal/process/promises
+Line: 388
+Function: throwUnhandledRejectionsMode
+Method: none
+---
+File: node:internal/process/promises
+Line: 475
+Function: processPromiseRejections
+Method: none
+---
+File: node:internal/process/task_queues
+Line: 106
+Function: processTicksAndRejections
+Method: none
+---
+
+21/04/2026 09:59
+{
+  "message": "Failed to transpile Pine Script version 5: Unexpected token KEYWORD 'import' at 4:7",
+  "data": {
+    "message": "Failed to transpile Pine Script version 5: Unexpected token KEYWORD 'import' at 4:7"
+  }
+}
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 68
+Function: dumpStackTrace
+Method: none
+---
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 97
+Function: ErrorService.handleGlobalError
+Method: handleGlobalError
+---
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 107
+Function: anonymous
+Method: none
+---
+File: node:events
+Line: 518
+Function: emit
+Method: emit
+---
+File: node:internal/process/promises
+Line: 252
+Function: emitUnhandledRejection
+Method: none
+---
+File: node:internal/process/promises
+Line: 388
+Function: throwUnhandledRejectionsMode
+Method: none
+---
+File: node:internal/process/promises
+Line: 475
+Function: processPromiseRejections
+Method: none
+---
+File: node:internal/process/task_queues
+Line: 106
+Function: processTicksAndRejections
+Method: none
+---
+
+21/04/2026 10:01
+{
+  "message": "Failed to transpile Pine Script version 5: Unexpected token KEYWORD 'import' at 4:7",
+  "data": {
+    "message": "Failed to transpile Pine Script version 5: Unexpected token KEYWORD 'import' at 4:7"
+  }
+}
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 68
+Function: dumpStackTrace
+Method: none
+---
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 97
+Function: ErrorService.handleGlobalError
+Method: handleGlobalError
+---
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 107
+Function: anonymous
+Method: none
+---
+File: node:events
+Line: 518
+Function: emit
+Method: emit
+---
+File: node:internal/process/promises
+Line: 252
+Function: emitUnhandledRejection
+Method: none
+---
+File: node:internal/process/promises
+Line: 388
+Function: throwUnhandledRejectionsMode
+Method: none
+---
+File: node:internal/process/promises
+Line: 475
+Function: processPromiseRejections
+Method: none
+---
+File: node:internal/process/task_queues
+Line: 106
+Function: processTicksAndRejections
+Method: none
+---
+
+21/04/2026 10:50
+{
+  "message": "ENOENT: no such file or directory, access 'D:\\Code\\Experiment\\backtest-kit-project\\test.pine'",
+  "data": {
+    "message": "ENOENT: no such file or directory, access 'D:\\Code\\Experiment\\backtest-kit-project\\test.pine'",
+    "errno": -4058,
+    "code": "ENOENT",
+    "syscall": "access",
+    "path": "D:\\Code\\Experiment\\backtest-kit-project\\test.pine"
+  }
+}
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 68
+Function: dumpStackTrace
+Method: none
+---
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 97
+Function: ErrorService.handleGlobalError
+Method: handleGlobalError
+---
+File: file:///D:/Code/Experiment/backtest-kit-project/node_modules/@backtest-kit/cli/build/index.mjs
+Line: 107
+Function: anonymous
+Method: none
+---
+File: node:events
+Line: 518
+Function: emit
+Method: emit
+---
+File: node:internal/process/promises
+Line: 252
+Function: emitUnhandledRejection
+Method: none
+---
+File: node:internal/process/promises
+Line: 388
+Function: throwUnhandledRejectionsMode
+Method: none
+---
+File: node:internal/process/promises
+Line: 475
+Function: processPromiseRejections
+Method: none
+---
+File: node:internal/process/task_queues
+Line: 106
+Function: processTicksAndRejections
+Method: none
+---
+

@@ -1,0 +1,216 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
+import {
+  analyzeJsonlFile,
+} from './lib/pine-optimizer.mjs';
+import {
+  applyPatchPlan,
+  buildPatchPlan,
+  cartesianProduct,
+  configIdFromCombo,
+  filterSweepCombos,
+  getCandidateGrid,
+  leaderboardMarkdown,
+  rankSweepResults,
+} from './lib/pine-tuner.mjs';
+
+function parseArgs(argv) {
+  const out = { _: [] };
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (!arg.startsWith('--')) {
+      out._.push(arg);
+      continue;
+    }
+    const key = arg.slice(2);
+    const next = argv[i + 1];
+    if (!next || next.startsWith('--')) {
+      out[key] = true;
+      continue;
+    }
+    out[key] = next;
+    i++;
+  }
+  return out;
+}
+
+function timestampId() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+function serializeGrid(grid) {
+  return Object.fromEntries(Object.entries(grid).map(([k, v]) => [k, [...v]]));
+}
+
+async function runNode(args, cwd) {
+  return new Promise((resolve, reject) => {
+    const child = spawn('node', args, { cwd, stdio: 'pipe', shell: false });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => {
+      const text = chunk.toString();
+      stdout += text;
+      process.stdout.write(text);
+    });
+
+    child.stderr.on('data', (chunk) => {
+      const text = chunk.toString();
+      stderr += text;
+      process.stderr.write(text);
+    });
+
+    child.on('error', reject);
+    child.on('close', (code) => {
+      if (code === 0) {
+        resolve({ stdout, stderr, code });
+      } else {
+        reject(new Error(`node ${args.join(' ')} failed with code ${code}`));
+      }
+    });
+  });
+}
+
+async function safeUnlink(filePath) {
+  try {
+    await fs.unlink(filePath);
+  } catch {}
+}
+
+async function writeSweepFiles(runDir, results, meta) {
+  const ranked = rankSweepResults(results.filter((r) => r.status === 'ok'));
+  const payload = {
+    meta,
+    generatedAt: new Date().toISOString(),
+    resultCount: results.length,
+    ranked,
+    failures: results.filter((r) => r.status !== 'ok'),
+  };
+
+  await fs.mkdir(runDir, { recursive: true });
+  await fs.writeFile(path.join(runDir, 'leaderboard.json'), JSON.stringify(payload, null, 2), 'utf8');
+  await fs.writeFile(path.join(runDir, 'leaderboard.md'), leaderboardMarkdown(ranked), 'utf8');
+
+  if (ranked[0]?.patchedSource) {
+    await fs.writeFile(path.join(runDir, 'best-config.pine'), ranked[0].patchedSource, 'utf8');
+    await fs.writeFile(path.join(runDir, 'best-config.json'), JSON.stringify(ranked[0], null, 2), 'utf8');
+  }
+}
+
+async function main() {
+  const cwd = process.cwd();
+  const args = parseArgs(process.argv.slice(2));
+
+  const input = args.input || args._[0] || './pine/test.pine';
+  const symbol = args.symbol || args._[1] || 'XRPUSDT';
+  const timeframe = args.timeframe || args._[2] || '15m';
+  const limit = String(args.limit || args._[3] || '5000');
+  const maxConfigs = args['max-configs'] ? Number(args['max-configs']) : null;
+  const keepArtifacts = Boolean(args['keep-artifacts']);
+  const minTrades = args['min-trades'] ? Number(args['min-trades']) : 10;
+  const gridName = String(args.grid || 'default');
+  const runId = args['run-id'] || `sweep-${gridName}-${symbol}-${timeframe}-${limit}-${timestampId()}`;
+
+  const inputPath = path.resolve(cwd, input);
+  const source = await fs.readFile(inputPath, 'utf8');
+  const grid = getCandidateGrid(gridName);
+  const combos = filterSweepCombos(cartesianProduct(grid)).slice(0, maxConfigs || undefined);
+
+  const runDir = path.resolve(cwd, 'pine', 'sweeps', runId);
+  const variantsDir = path.join(runDir, 'variants');
+  await fs.mkdir(variantsDir, { recursive: true });
+
+  const meta = {
+    runId,
+    inputPath,
+    symbol,
+    timeframe,
+    limit: Number(limit),
+    minTrades,
+    candidateGrid: serializeGrid(grid),
+    gridName,
+    configCount: combos.length,
+  };
+  await fs.writeFile(path.join(runDir, 'meta.json'), JSON.stringify(meta, null, 2), 'utf8');
+
+  const results = [];
+  const cliScript = path.resolve(cwd, 'scripts', 'pine-import-run-clean.mjs');
+
+  for (let index = 0; index < combos.length; index++) {
+    const combo = combos[index];
+    const configId = configIdFromCombo(index, combo);
+    const artifactId = `cfg-${String(index + 1).padStart(4, '0')}`;
+    const patchPlan = buildPatchPlan(combo);
+    const patchedSource = applyPatchPlan(source, patchPlan);
+    const variantPath = path.join(variantsDir, `${artifactId}.pine`);
+    const outputBase = artifactId;
+    const flattenedPath = variantPath.replace(/\.pine$/i, '.flattened.pine');
+    const dumpDir = path.join(variantsDir, 'dump');
+    const rawPath = path.join(dumpDir, `${outputBase}.jsonl`);
+    const cleanedPath = path.join(dumpDir, `${outputBase}.cleaned.jsonl`);
+    const signalsPath = path.join(dumpDir, `${outputBase}.signals.jsonl`);
+
+    console.log(`\n[sweep ${index + 1}/${combos.length}] ${configId}`);
+
+    try {
+      await fs.writeFile(variantPath, patchedSource, 'utf8');
+      await runNode([
+        cliScript,
+        '--input', variantPath,
+        '--symbol', symbol,
+        '--timeframe', timeframe,
+        '--limit', limit,
+        '--output', outputBase,
+      ], cwd);
+
+      const analysis = await analyzeJsonlFile(cleanedPath, { minTrades });
+      const result = {
+        status: 'ok',
+        configId,
+        artifactId,
+        config: combo,
+        score: analysis.score,
+        rowCount: analysis.rowCount,
+        timeframeMinutes: analysis.timeframeMinutes,
+        metrics: analysis.metrics,
+        diagnostics: analysis.diagnostics,
+        tradePreview: analysis.trades.slice(0, 10),
+        patchedSource,
+      };
+      results.push(result);
+
+      console.log(`[result] score=${result.score} trades=${result.metrics.tradeCount} roi=${result.metrics.roiPct} winRate=${result.metrics.winRatePct} baseLong=${result.diagnostics.baseStartLongCount} baseShort=${result.diagnostics.baseStartShortCount}`);
+    } catch (error) {
+      results.push({
+        status: 'failed',
+        configId,
+        artifactId,
+        config: combo,
+        error: error?.message || String(error),
+      });
+      console.error(`[failed] ${configId}: ${error?.message || error}`);
+    }
+
+    await writeSweepFiles(runDir, results, meta);
+
+    if (!keepArtifacts) {
+      await safeUnlink(variantPath);
+      await safeUnlink(flattenedPath);
+      await safeUnlink(rawPath);
+      await safeUnlink(cleanedPath);
+      await safeUnlink(signalsPath);
+    }
+  }
+
+  const ranked = rankSweepResults(results.filter((r) => r.status === 'ok'));
+  console.log(`\n[done] runDir=${runDir}`);
+  if (ranked[0]) {
+    console.log(`[best] ${ranked[0].configId} score=${ranked[0].score} trades=${ranked[0].metrics.tradeCount} roi=${ranked[0].metrics.roiPct} winRate=${ranked[0].metrics.winRatePct}`);
+  }
+}
+
+main().catch((err) => {
+  console.error(err?.stack || err?.message || String(err));
+  process.exit(1);
+});

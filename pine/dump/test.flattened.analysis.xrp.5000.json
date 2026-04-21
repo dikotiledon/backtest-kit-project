@@ -1,0 +1,21 @@
+{
+  "filePath": "D:\\Code\\Experiment\\backtest-kit-project\\pine\\dump\\test.flattened.cleaned.jsonl",
+  "rowCount": 5000,
+  "timeframeMinutes": 15,
+  "score": -50,
+  "metrics": {
+    "tradeCount": 0,
+    "winCount": 0,
+    "lossCount": 0,
+    "winRatePct": 0,
+    "roiPct": 0,
+    "avgReturnPct": 0,
+    "avgPnl": 0,
+    "totalPnl": 0,
+    "totalProfit": 0,
+    "totalLossAbs": 0,
+    "profitFactor": 0,
+    "maxDrawdownPct": 0
+  },
+  "tradePreview": []
+}

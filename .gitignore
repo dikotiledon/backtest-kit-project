@@ -1,0 +1,7 @@
+node_modules/
+pine/sweeps/
+tmp/
+*.log
+coverage/
+.DS_Store
+Thumbs.db

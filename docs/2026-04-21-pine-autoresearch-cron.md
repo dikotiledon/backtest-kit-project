@@ -42,8 +42,8 @@ The loop is built on the existing project primitives, not a second pipeline:
 - `scripts/pine-sweep.mjs`
 - `scripts/lib/pine-tuner.mjs`
 - `scripts/lib/pine-optimizer.mjs`
-- locked seed champion artifact:
-  - `pine/sweeps/fixed-window-fusion-v4-XRPUSDT-15m-10000-2026-04-21T10-30-00Z/best-config.json`
+- tracked seed bootstrap:
+  - `config/pine-autoresearch.seed.json`
 
 ## Config
 
@@ -190,12 +190,51 @@ Backtest-kit candle cache used for strict replay:
 
 ## OpenClaw cron shape
 
-### Scout job
-Cadence: every 6 hours for full profile, optional higher cadence for micro profile
+### Recommended cadence
+- **Micro scout**: every 15 minutes
+- **Full scout**: every 6 hours, optional
+- **Digest**: daily at 08:10 local machine time
+- **Autopromote**: daily at 08:20 local machine time, opt-in only
 
+### Windows task wrappers
+Concrete wrappers now live in:
+- `scripts/ops/pine-autoresearch-micro.ps1`
+- `scripts/ops/pine-autoresearch-full.ps1`
+- `scripts/ops/pine-autoresearch-digest.ps1`
+- `scripts/ops/pine-autoresearch-autopromote.ps1`
+- `scripts/ops/install-pine-autoresearch-tasks.ps1`
+- `scripts/ops/remove-pine-autoresearch-tasks.ps1`
+
+Installer entrypoints:
+```bash
+npm run pine:ops:install-tasks
+npm run pine:ops:remove-tasks
+```
+
+Preview install without changing scheduler:
+```bash
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -WhatIf
+```
+
+Install micro + digest only (recommended baseline):
+```bash
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1
+```
+
+Install full cadence too:
+```bash
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull
+```
+
+Install autopromote too:
+```bash
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableAutopromote
+```
+
+### Scout job
 Behavior:
-- run `pine-autoresearch.mjs cycle`
-- or run `pine-autoresearch.mjs cycle --profile micro` for smaller high-cadence scouting
+- run `pine-autoresearch.mjs cycle --profile micro` for high-cadence scouting
+- optional full cadence runs `pine-autoresearch.mjs cycle`
 - quiet delivery
 - stage pinned datasets into cache first
 - require complete cache coverage for the exact locked window
@@ -203,19 +242,15 @@ Behavior:
 - do not patch `pine/test.pine`
 
 ### Digest job
-Cadence: daily morning
-
 Behavior:
 - run `pine-autoresearch.mjs digest`
-- announce concise matrix status to Telegram
+- summarize latest matrix state into a durable digest file
 
 ### Auto-promotion job
-Cadence: daily after digest
-
 Behavior:
 - run `pine-autoresearch.mjs autopromote`
 - only patches `pine/test.pine` when all guards pass
-- otherwise exits with a no-op summary
+- therefore keep it opt-in until you are comfortable with unattended shipping
 
 ## Why this shape
 

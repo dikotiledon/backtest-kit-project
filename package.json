@@ -18,7 +18,9 @@
     "pine:autoresearch:micro": "node ./scripts/pine-autoresearch.mjs cycle --config ./config/pine-autoresearch.default.json --profile micro",
     "pine:autoresearch:digest": "node ./scripts/pine-autoresearch.mjs digest --config ./config/pine-autoresearch.default.json",
     "pine:autoresearch:promote": "node ./scripts/pine-autoresearch.mjs promote --config ./config/pine-autoresearch.default.json",
-    "pine:autoresearch:autopromote": "node ./scripts/pine-autoresearch.mjs autopromote --config ./config/pine-autoresearch.default.json"
+    "pine:autoresearch:autopromote": "node ./scripts/pine-autoresearch.mjs autopromote --config ./config/pine-autoresearch.default.json",
+    "pine:ops:install-tasks": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-tasks.ps1",
+    "pine:ops:remove-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-tasks.ps1"
   },
   "keywords": [],
   "author": "",

@@ -64,10 +64,14 @@ Current matrix:
 - scout grid: `phase3-core`
 
 ### Phase 3 strategy layer
-Current phase 3 optimizer scope is intentionally narrow:
-- add **Supertrend filter / flip confirm** as new entry gate
-- add **ATR trailing stop** as new exit upgrade
-- keep the rest of Fusion V4 locked as the base so search space stays controlled
+Current phase 3 optimizer scope is broader, but still curated rather than brute-force:
+- keep the hardened Fusion V4 baseline as the anchor
+- expand search across ML/filter, kernel, entry-gating, Supertrend, and exit-management knobs
+- use a curated rotating variant list instead of naive full cartesian expansion, so hourly scouts explore new territory without blowing memory
+- keep non-strategy / display inputs out of the champion loop
+
+Detailed input audit:
+- `docs/2026-04-22-pine-phase3-input-audit.md`
 
 ### Scout profiles
 - `full`: `maxConfigs=8`
@@ -75,11 +79,11 @@ Current phase 3 optimizer scope is intentionally narrow:
 
 The new `phase3-core` grid is designed to stay optimizer-safe:
 - always starts from the hardened Fusion V4 baseline
-- only sweeps a small Supertrend parameter surface
-- only sweeps a small ATR trailing parameter surface
+- covers broader ML/filter/kernel/Phase-3/exit knobs
+- uses explicit rotating candidate batches so `maxConfigs` does not keep re-testing the same front slice
 - removes irrelevant params when a feature is disabled
 
-Micro still uses the same locked window and matrix logic, but explores less config space per run.
+Micro still uses the same matrix logic, but explores a smaller rotating batch when used manually.
 
 ### Promotion logic
 
@@ -93,18 +97,22 @@ Micro still uses the same locked window and matrix logic, but explores less conf
 
 #### Shadow lab gates
 Softer, used for generalization checks:
-- score delta >= `0`
-- ROI delta >= `-0.5`
-- profit factor delta >= `-0.05`
-- max drawdown delta <= `1.0`
-- trade count >= `100`
-- trade ratio vs incumbent >= `0.65`
+- current-window shadows:
+  - score delta >= `0`
+  - ROI delta >= `-0.5`
+  - profit factor delta >= `-0.05`
+  - max drawdown delta <= `1.0`
+  - trade count >= `100`
+  - trade ratio vs incumbent >= `0.65`
+- older-window shadows use slightly looser trade/drawdown gates to account for smaller windows:
+  - March shadows: min trade count `80`, trade ratio `0.6`, max drawdown delta `1.25`
+  - February shadow: min trade count `60`, trade ratio `0.55`, max drawdown delta `1.5`
 
 #### Matrix policy
 Promotion requires:
 - primary lab recommendation = `promote`
-- at least `1` shadow lab also recommends `promote`
-- shadow pass ratio >= `0.5`
+- at least `3` shadow labs also recommend `promote`
+- shadow pass ratio >= `0.6`
 - candidate config must differ from current champion
 
 #### Auto-promotion guard
@@ -192,9 +200,9 @@ Backtest-kit candle cache used for strict replay:
 ## OpenClaw cron shape
 
 ### Recommended cadence
-- **Micro scout**: every 15 minutes
-- **Full scout**: optional, hourly is supported and useful when you want broader search than micro. Earlier 6h guidance was only a conservative default, not a hard rule.
-- **Digest**: daily at 08:10 local machine time, plus live digest refresh after each scout
+- **Full scout**: hourly
+- **Micro scout**: disable when the objective is broad exploration instead of short-loop regression checking
+- **Digest**: optional, because `latest-digest.md` refreshes after each scout already
 - **Autopromote**: daily at 08:20 local machine time, opt-in only
 
 ### Windows task wrappers
@@ -217,17 +225,17 @@ Preview install without changing scheduler:
 pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -WhatIf
 ```
 
-Install micro + digest only (recommended baseline):
+Install micro + digest only:
 ```bash
 pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1
 ```
 
-Install full cadence too (hourly by default):
+Install hourly full only:
 ```bash
-pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -FullEveryHours 1 -DisableMicro -DisableDigest
 ```
 
-Install full cadence with a custom hourly interval:
+Install full cadence with a custom hourly interval while keeping other jobs enabled:
 ```bash
 pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -FullEveryHours 1
 ```
@@ -239,11 +247,12 @@ pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableA
 
 ### Scout job
 Behavior:
-- run `pine-autoresearch.mjs cycle --profile micro` for high-cadence scouting
-- optional full cadence runs `pine-autoresearch.mjs cycle`
+- hourly production cadence runs `pine-autoresearch.mjs cycle`
+- manual micro remains available for spot checks, but is not the default production scheduler shape
 - quiet delivery
 - stage pinned datasets into cache first
-- require complete cache coverage for the exact locked window
+- require complete cache coverage for every pinned lab window
+- rotate candidate batches across cycles instead of re-testing the same first `maxConfigs`
 - write manifest, matrix evaluation artifacts, history, and refresh `latest-digest.md`
 - detect steady-state loops where challenger == champion and report them honestly as regression validation, not fake discovery
 - do not patch `pine/test.pine`

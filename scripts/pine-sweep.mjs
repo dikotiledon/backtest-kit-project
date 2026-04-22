@@ -7,12 +7,11 @@ import {
 import {
   applyPatchPlan,
   buildPatchPlan,
-  cartesianProduct,
   configIdFromCombo,
-  filterSweepCombos,
   getCandidateGrid,
   leaderboardMarkdown,
   rankSweepResults,
+  selectSweepCombos,
 } from './lib/pine-tuner.mjs';
 
 function parseArgs(argv) {
@@ -40,7 +39,11 @@ function timestampId() {
 }
 
 function serializeGrid(grid) {
-  return Object.fromEntries(Object.entries(grid).map(([k, v]) => [k, [...v]]));
+  return Object.fromEntries(
+    Object.entries(grid)
+      .filter(([key]) => !key.startsWith('__'))
+      .map(([key, values]) => [key, [...values]]),
+  );
 }
 
 async function runNode(args, cwd) {
@@ -107,6 +110,7 @@ async function main() {
   const timeframe = args.timeframe || args._[2] || '15m';
   const limit = String(args.limit || args._[3] || '5000');
   const maxConfigs = args['max-configs'] ? Number(args['max-configs']) : null;
+  const offset = args.offset ? Number(args.offset) : 0;
   const keepArtifacts = Boolean(args['keep-artifacts']);
   const minTrades = args['min-trades'] ? Number(args['min-trades']) : 10;
   const when = args.when ? String(args.when) : null;
@@ -121,7 +125,7 @@ async function main() {
   const inputPath = path.resolve(cwd, input);
   const source = await fs.readFile(inputPath, 'utf8');
   const grid = getCandidateGrid(gridName);
-  const combos = filterSweepCombos(cartesianProduct(grid)).slice(0, maxConfigs || undefined);
+  const combos = selectSweepCombos(grid, { maxConfigs, offset });
 
   const runDir = path.resolve(cwd, 'pine', 'sweeps', runId);
   const variantsDir = path.join(runDir, 'variants');
@@ -137,6 +141,7 @@ async function main() {
     candidateGrid: serializeGrid(grid),
     gridName,
     configCount: combos.length,
+    sweepOffset: offset,
     when,
     exchange,
   };

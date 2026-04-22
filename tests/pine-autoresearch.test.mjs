@@ -1,6 +1,8 @@
+import fs from 'node:fs/promises';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  computeSweepOffset,
   decideAutoPromotionAction,
   decideAutoresearchOutcome,
   decideMatrixPromotion,
@@ -363,4 +365,28 @@ test('summarizeDigestAnnouncement compresses steady-state loops', () => {
 
   assert.match(text, /pine autoresearch steady-state/);
   assert.match(text, /streak 4/);
+});
+
+test('computeSweepOffset advances hourly scout batches across prior cycles', () => {
+  const offset = computeSweepOffset({
+    historyEvents: [
+      { type: 'cycle' },
+      { type: 'cycle' },
+      { type: 'promote' },
+      { type: 'cycle' },
+    ],
+    maxConfigs: 8,
+    totalCombos: 30,
+  });
+
+  assert.equal(offset, 24);
+});
+
+test('default autoresearch config rotates across multiple pinned windows', async () => {
+  const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
+  const config = JSON.parse(raw);
+  const whens = new Set([config.primaryLab.when, ...config.shadowLabs.map((lab) => lab.when)]);
+
+  assert.ok(whens.size >= 3);
+  assert.ok(config.shadowLabs.length >= 5);
 });

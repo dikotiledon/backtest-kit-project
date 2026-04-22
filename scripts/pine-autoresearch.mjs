@@ -2,9 +2,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { analyzeJsonlFile } from './lib/pine-optimizer.mjs';
-import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
+import { applyPatchPlan, buildPatchPlan, countSweepCombos, getCandidateGrid } from './lib/pine-tuner.mjs';
 import {
   appendJsonl,
+  computeSweepOffset,
   configFingerprint,
   decideAutoPromotionAction,
   decideAutoresearchOutcome,
@@ -348,7 +349,7 @@ async function ensureChampionState(config) {
   }
 }
 
-async function runPrimarySweep(config, runId) {
+async function runPrimarySweep(config, runId, { sweepOffset = 0, totalCombos = null } = {}) {
   const lab = config.primaryLab;
   const effectiveExchange = lab.exchange || (config.pinnedData?.enabled ? config.pinnedData.exchangeName : null);
   await stagePinnedData(config, [lab]);
@@ -366,6 +367,9 @@ async function runPrimarySweep(config, runId) {
 
   if (config.maxConfigs != null) {
     sweepArgs.push('--max-configs', String(config.maxConfigs));
+  }
+  if (sweepOffset) {
+    sweepArgs.push('--offset', String(sweepOffset));
   }
   if (lab.when) {
     sweepArgs.push('--when', lab.when);
@@ -385,6 +389,8 @@ async function runPrimarySweep(config, runId) {
   return {
     runDir,
     gridName: config.grid,
+    totalCombos,
+    sweepOffset,
     topConfigs: (leaderboard.ranked || []).slice(0, 5).map((item) => summarizeResult(item)),
     best: leaderboard.ranked?.[0] || null,
   };
@@ -499,11 +505,17 @@ async function runScout(config) {
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
-  const primarySweep = await runPrimarySweep(config, runId);
+  const historyEventsBefore = await loadHistoryEvents(config);
+  const totalCombos = countSweepCombos(getCandidateGrid(config.grid));
+  const sweepOffset = computeSweepOffset({
+    historyEvents: historyEventsBefore,
+    maxConfigs: config.maxConfigs,
+    totalCombos,
+  });
+  const primarySweep = await runPrimarySweep(config, runId, { sweepOffset, totalCombos });
   const challengerSummary = summarizeResult(primarySweep.best);
 
   const { labResults, matrixDecision } = await evaluateMatrix(config, runId, championState, challengerSummary);
-  const historyEventsBefore = await loadHistoryEvents(config);
   const steadyState = matrixDecision?.gates?.candidateChanged === false;
   const noChangeStreak = steadyState ? (countTrailingSteadyStateCycles(historyEventsBefore) + 1) : 0;
 

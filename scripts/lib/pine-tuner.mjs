@@ -102,6 +102,29 @@ export function filterSweepCombos(combos) {
   return filtered;
 }
 
+function explicitVariantCombos(grid) {
+  return Array.isArray(grid?.__variants) ? filterSweepCombos(grid.__variants.map((combo) => ({ ...combo }))) : null;
+}
+
+export function countSweepCombos(grid) {
+  const explicit = explicitVariantCombos(grid);
+  if (explicit) return explicit.length;
+  return filterSweepCombos(cartesianProduct(grid)).length;
+}
+
+export function selectSweepCombos(grid, { maxConfigs = null, offset = 0 } = {}) {
+  const combos = explicitVariantCombos(grid) || filterSweepCombos(cartesianProduct(grid));
+  if (!combos.length) return [];
+  if (maxConfigs == null || maxConfigs >= combos.length) return combos;
+
+  const normalizedOffset = ((Number(offset) || 0) % combos.length + combos.length) % combos.length;
+  const batch = [];
+  for (let index = 0; index < maxConfigs; index++) {
+    batch.push(combos[(normalizedOffset + index) % combos.length]);
+  }
+  return batch;
+}
+
 function toLiteral(value) {
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : String(value);
@@ -226,8 +249,24 @@ const PATCHERS = {
     replace: `$1${toLiteral(value)}`,
   }),
   useDynamicExits: (value) => ({
-    regex: /(title="Use Dynamic Exits",\s*defval=)(true|false)(,\s*group="General Settings".*inline="exits"\)\))/,
+    regex: /(title="Use Dynamic Exits",\s*defval=)(true|false)(,\s*group="General Settings".*inline="exits"\)\))/, 
     replace: `$1${toLiteral(value)}$3`,
+  }),
+  h: (value) => ({
+    regex: /(h\s*=\s*input\.int\()[-\d.]+(,\s*'Lookback Window'.*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
+  r: (value) => ({
+    regex: /(r\s*=\s*input\.float\()[-\d.]+(,\s*'Relative Weighting'.*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
+  x: (value) => ({
+    regex: /(x\s*=\s*input\.int\()[-\d.]+(,\s*"Regression Level".*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
+  lag: (value) => ({
+    regex: /(lag\s*=\s*input\.int\()[-\d.]+(,\s*"Lag".*)/,
+    replace: `$1${toLiteral(value)}$2`,
   }),
   useSupertrendFilter: (value) => ({
     regex: /(useSupertrendFilter\s*=\s*input\.bool\()(true|false)(,\s+title="Use Supertrend Filter".*)/,
@@ -252,6 +291,18 @@ const PATCHERS = {
   tpAtrMult: (value) => ({
     regex: /(tpAtrMult\s*=\s*input\.float\()[-\d.]+(,\s+title="TP ATR x \(1:1 R:R by default\)".*)/,
     replace: `$1${toLiteral(value)}$2`,
+  }),
+  useStopsTP: (value) => ({
+    regex: /(useStopsTP\s*=\s*input\.bool\()(true|false)(,\s+title="Use ATR Stop\/Target".*)/,
+    replace: `$1${toLiteral(value)}$3`,
+  }),
+  riskAtrLen: (value) => ({
+    regex: /(riskAtrLen\s*=\s*input\.int\()[-\d.]+(,\s+title="ATR Length".*)/,
+    replace: `$1${toLiteral(value)}$2`,
+  }),
+  useSignalExits: (value) => ({
+    regex: /(useSignalExits\s*=\s*input\.bool\()(true|false)(,\s+title="Use Signal-Based Exits \(in addition to SL\/TP\)".*)/,
+    replace: `$1${toLiteral(value)}$3`,
   }),
   useTrailingStop: (value) => ({
     regex: /(useTrailingStop\s*=\s*input\.bool\()(true|false)(,\s+title="Use ATR Trailing Stop".*)/,
@@ -483,18 +534,131 @@ export function fusionV4CandidateGrid() {
   };
 }
 
+function phase3CoreBaseConfig() {
+  return {
+    neighborsCount: 32,
+    useVolatilityFilter: false,
+    useRegimeFilter: false,
+    useAdxFilter: true,
+    regimeThreshold: -0.1,
+    adxThreshold: 20,
+    useEmaFilter: false,
+    emaPeriod: 200,
+    useSmaFilter: false,
+    smaPeriod: 200,
+    h: 8,
+    r: 8.0,
+    x: 25,
+    lag: 2,
+    minPredSum: 2.0,
+    useTrendXConf: true,
+    minBarsBetween: 2,
+    useSignalFusion: true,
+    minFusionScore: 1,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    fusionV4MinAbsPrediction: 2.0,
+    fusionV4MaxAbsPrediction: 4.0,
+    useAtrFlipConfirm: true,
+    use3LineConfirm: false,
+    useEngulfingConfirm: true,
+    useEmaCrossConfirm: false,
+    fusionV4LongAtrWeight: -0.25,
+    fusionV4LongEngulfWeight: -0.25,
+    fusionV4LongEmaWeight: 0.0,
+    fusionV4ShortAtrWeight: -0.5,
+    fusionV4ShortEngulfWeight: -0.1,
+    fusionV4ShortEmaWeight: 0.0,
+    useSupertrendFilter: true,
+    useSupertrendEntryConfirm: false,
+    supertrendAtrLen: 10,
+    supertrendFactor: 1.5,
+    useStopsTP: true,
+    riskAtrLen: 14,
+    useSignalExits: false,
+    slAtrMult: 1.0,
+    tpAtrMult: 2.5,
+    useTrailingStop: true,
+    trailAtrLen: 14,
+    trailAtrMult: 1.0,
+    trailActivateR: 0.5,
+  };
+}
+
+function buildPhase3CoreVariants() {
+  const base = phase3CoreBaseConfig();
+  const patches = [
+    { neighborsCount: 24 },
+    { neighborsCount: 48 },
+    { useVolatilityFilter: true },
+    { useRegimeFilter: true, regimeThreshold: -0.5 },
+    { useRegimeFilter: true, regimeThreshold: 0.5 },
+    { adxThreshold: 15 },
+    { adxThreshold: 25 },
+    { useEmaFilter: true, emaPeriod: 100 },
+    { useEmaFilter: true, emaPeriod: 200 },
+    { useSmaFilter: true, smaPeriod: 100 },
+    { useSmaFilter: true, smaPeriod: 200 },
+    { h: 5 },
+    { h: 13 },
+    { r: 4.0 },
+    { x: 15 },
+    { lag: 1 },
+    { minPredSum: 1.5 },
+    { minPredSum: 2.5 },
+    { minBarsBetween: 1 },
+    { minBarsBetween: 4 },
+    { minFusionScore: 2 },
+    { useSupertrendEntryConfirm: true },
+    { supertrendAtrLen: 7 },
+    { supertrendAtrLen: 14 },
+    { supertrendFactor: 2.0 },
+    { supertrendFactor: 2.5 },
+    { riskAtrLen: 21 },
+    { useSignalExits: true },
+    { slAtrMult: 1.25 },
+    { tpAtrMult: 3.0 },
+    { useTrailingStop: false },
+    { trailAtrLen: 7 },
+    { trailAtrLen: 21 },
+    { trailAtrMult: 1.5 },
+    { trailAtrMult: 2.0 },
+    { trailActivateR: 1.0 },
+    { trailActivateR: 1.5 },
+    { useVolatilityFilter: true, adxThreshold: 25 },
+    { useEmaFilter: true, emaPeriod: 100, useSmaFilter: true, smaPeriod: 200 },
+    { h: 5, lag: 1 },
+    { minPredSum: 2.5, minBarsBetween: 4 },
+    { useSignalExits: true, useTrailingStop: false },
+    { useSupertrendEntryConfirm: true, supertrendFactor: 2.0 },
+    { riskAtrLen: 21, slAtrMult: 1.25, tpAtrMult: 3.0 },
+  ];
+
+  return patches.map((patch) => ({ ...base, ...patch }));
+}
+
 export function phase3CoreCandidateGrid() {
   return {
-    useRegimeFilter: [false],
-    useVolatilityFilter: [false],
+    neighborsCount: [24, 32, 48],
+    useVolatilityFilter: [false, true],
+    useRegimeFilter: [false, true],
     useAdxFilter: [true],
-    adxThreshold: [20],
-    minPredSum: [2.0],
+    regimeThreshold: [-0.5, -0.1, 0.5],
+    adxThreshold: [15, 20, 25],
+    useEmaFilter: [false, true],
+    emaPeriod: [100, 200],
+    useSmaFilter: [false, true],
+    smaPeriod: [100, 200],
+    h: [5, 8, 13],
+    r: [4.0, 8.0],
+    x: [15, 25],
+    lag: [1, 2],
+    minPredSum: [1.5, 2.0, 2.5],
     useTrendXConf: [true],
-    minBarsBetween: [2],
-    slAtrMult: [1.0],
-    tpAtrMult: [2.5],
+    minBarsBetween: [1, 2, 4],
     useSignalFusion: [true],
+    minFusionScore: [1, 2],
     useFusionV2: [false],
     useFusionV3: [false],
     useFusionV4: [true],
@@ -512,12 +676,18 @@ export function phase3CoreCandidateGrid() {
     fusionV4ShortEmaWeight: [0.0],
     useSupertrendFilter: [true],
     useSupertrendEntryConfirm: [false, true],
-    supertrendAtrLen: [10, 14],
-    supertrendFactor: [1.5, 2.0],
+    supertrendAtrLen: [7, 10, 14],
+    supertrendFactor: [1.5, 2.0, 2.5],
+    useStopsTP: [true],
+    riskAtrLen: [14, 21],
+    useSignalExits: [false, true],
+    slAtrMult: [1.0, 1.25],
+    tpAtrMult: [2.5, 3.0],
     useTrailingStop: [false, true],
-    trailAtrLen: [14],
-    trailAtrMult: [1.0, 1.5],
-    trailActivateR: [0.5, 1.0],
+    trailAtrLen: [7, 14, 21],
+    trailAtrMult: [1.0, 1.5, 2.0],
+    trailActivateR: [0.5, 1.0, 1.5],
+    __variants: buildPhase3CoreVariants(),
   };
 }
 

@@ -40,6 +40,14 @@ export function sameConfig(left, right) {
   return configFingerprint(left) === configFingerprint(right);
 }
 
+export function computeSweepOffset({ historyEvents = [], maxConfigs, totalCombos }) {
+  if (!(Number.isFinite(maxConfigs) && maxConfigs > 0 && Number.isFinite(totalCombos) && totalCombos > 0)) {
+    return 0;
+  }
+  const priorCycleCount = historyEvents.filter((event) => event?.type === 'cycle').length;
+  return (priorCycleCount * maxConfigs) % totalCombos;
+}
+
 function isSteadyStateCandidate(incumbent, challenger) {
   return Boolean(incumbent?.config && challenger?.config && sameConfig(incumbent.config, challenger.config));
 }

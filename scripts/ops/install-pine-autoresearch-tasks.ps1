@@ -8,6 +8,8 @@ param(
   [string]$AutopromoteStart = '08:20',
   [switch]$EnableFull,
   [switch]$EnableAutopromote,
+  [switch]$DisableMicro,
+  [switch]$DisableDigest,
   [switch]$WhatIf
 )
 
@@ -41,8 +43,13 @@ function Register-Task($Name, $ScheduleArgs, $ScriptPath) {
   }
 }
 
-Register-Task 'Micro' @('/SC', 'MINUTE', '/MO', '15', '/ST', $MicroStart) $microScript
-Register-Task 'Digest' @('/SC', 'DAILY', '/ST', $DigestStart) $digestScript
+if (-not $DisableMicro) {
+  Register-Task 'Micro' @('/SC', 'MINUTE', '/MO', '15', '/ST', $MicroStart) $microScript
+}
+
+if (-not $DisableDigest) {
+  Register-Task 'Digest' @('/SC', 'DAILY', '/ST', $DigestStart) $digestScript
+}
 
 if ($EnableFull) {
   if ($FullEveryHours -lt 1) {

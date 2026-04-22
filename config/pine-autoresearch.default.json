@@ -44,7 +44,7 @@
   },
   "shadowLabs": [
     {
-      "labId": "btcusdt-15m-shadow",
+      "labId": "btcusdt-15m-current-shadow",
       "symbol": "BTCUSDT",
       "timeframe": "15m",
       "limit": 10000,
@@ -60,7 +60,7 @@
       }
     },
     {
-      "labId": "ethusdt-15m-shadow",
+      "labId": "ethusdt-15m-current-shadow",
       "symbol": "ETHUSDT",
       "timeframe": "15m",
       "limit": 10000,
@@ -74,12 +74,60 @@
         "minTradeCount": 100,
         "minTradeRatioVsIncumbent": 0.65
       }
+    },
+    {
+      "labId": "xrpusdt-15m-march-shadow",
+      "symbol": "XRPUSDT",
+      "timeframe": "15m",
+      "limit": 5000,
+      "when": "2026-03-17T10:30:00.000Z",
+      "exchange": "ccxt-exchange",
+      "thresholds": {
+        "minScoreDelta": 0,
+        "minRoiDeltaPct": -0.75,
+        "minProfitFactorDelta": -0.08,
+        "maxDrawdownDeltaPct": 1.25,
+        "minTradeCount": 80,
+        "minTradeRatioVsIncumbent": 0.6
+      }
+    },
+    {
+      "labId": "btcusdt-15m-march-shadow",
+      "symbol": "BTCUSDT",
+      "timeframe": "15m",
+      "limit": 5000,
+      "when": "2026-03-17T10:30:00.000Z",
+      "exchange": "ccxt-exchange",
+      "thresholds": {
+        "minScoreDelta": 0,
+        "minRoiDeltaPct": -0.75,
+        "minProfitFactorDelta": -0.08,
+        "maxDrawdownDeltaPct": 1.25,
+        "minTradeCount": 80,
+        "minTradeRatioVsIncumbent": 0.6
+      }
+    },
+    {
+      "labId": "ethusdt-15m-feb-shadow",
+      "symbol": "ETHUSDT",
+      "timeframe": "15m",
+      "limit": 2500,
+      "when": "2026-02-14T10:30:00.000Z",
+      "exchange": "ccxt-exchange",
+      "thresholds": {
+        "minScoreDelta": 0,
+        "minRoiDeltaPct": -1,
+        "minProfitFactorDelta": -0.1,
+        "maxDrawdownDeltaPct": 1.5,
+        "minTradeCount": 60,
+        "minTradeRatioVsIncumbent": 0.55
+      }
     }
   ],
   "matrixPolicy": {
     "requirePrimaryPromote": true,
-    "minShadowPassCount": 1,
-    "minShadowPassRatio": 0.5,
+    "minShadowPassCount": 3,
+    "minShadowPassRatio": 0.6,
     "requireCandidateChange": true
   },
   "autoPromotion": {

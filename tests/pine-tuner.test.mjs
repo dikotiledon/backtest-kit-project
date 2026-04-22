@@ -9,6 +9,7 @@ import {
   filterSweepCombos,
   rankSweepResults,
   getCandidateGrid,
+  selectSweepCombos,
 } from '../scripts/lib/pine-tuner.mjs';
 
 test('cartesianProduct expands candidate grid into all combinations', () => {
@@ -367,6 +368,50 @@ test('filterSweepCombos collapses redundant fusion-v4 weight combos when related
 
   assert.equal(filtered.length, 1);
   assert.deepEqual(filtered[0], combos[0]);
+});
+
+test('getCandidateGrid returns expanded phase3-core grid with broader strategy knobs', () => {
+  const grid = getCandidateGrid('phase3-core');
+
+  assert.deepEqual(grid.neighborsCount, [24, 32, 48]);
+  assert.deepEqual(grid.useVolatilityFilter, [false, true]);
+  assert.deepEqual(grid.useRegimeFilter, [false, true]);
+  assert.deepEqual(grid.regimeThreshold, [-0.5, -0.1, 0.5]);
+  assert.deepEqual(grid.adxThreshold, [15, 20, 25]);
+  assert.deepEqual(grid.useEmaFilter, [false, true]);
+  assert.deepEqual(grid.emaPeriod, [100, 200]);
+  assert.deepEqual(grid.useSmaFilter, [false, true]);
+  assert.deepEqual(grid.smaPeriod, [100, 200]);
+  assert.deepEqual(grid.h, [5, 8, 13]);
+  assert.deepEqual(grid.r, [4.0, 8.0]);
+  assert.deepEqual(grid.x, [15, 25]);
+  assert.deepEqual(grid.lag, [1, 2]);
+  assert.deepEqual(grid.useStopsTP, [true]);
+  assert.deepEqual(grid.riskAtrLen, [14, 21]);
+  assert.deepEqual(grid.useSignalExits, [false, true]);
+  assert.deepEqual(grid.slAtrMult, [1.0, 1.25]);
+  assert.deepEqual(grid.tpAtrMult, [2.5, 3.0]);
+  assert.deepEqual(grid.supertrendAtrLen, [7, 10, 14]);
+  assert.deepEqual(grid.supertrendFactor, [1.5, 2.0, 2.5]);
+  assert.deepEqual(grid.trailAtrLen, [7, 14, 21]);
+  assert.deepEqual(grid.trailAtrMult, [1.0, 1.5, 2.0]);
+  assert.deepEqual(grid.trailActivateR, [0.5, 1.0, 1.5]);
+});
+
+test('selectSweepCombos rotates candidate batches with wrap-around', () => {
+  const grid = {
+    a: [1, 2, 3],
+    b: ['x', 'y'],
+  };
+
+  const batch = selectSweepCombos(grid, { maxConfigs: 4, offset: 4 });
+
+  assert.deepEqual(batch, [
+    { a: 3, b: 'x' },
+    { a: 3, b: 'y' },
+    { a: 1, b: 'x' },
+    { a: 1, b: 'y' },
+  ]);
 });
 
 test('pine test script defaults to the hardened fusion v4 profile', async () => {

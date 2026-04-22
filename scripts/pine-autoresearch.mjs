@@ -78,6 +78,10 @@ function historyMarkdownPath(config) {
   return path.join(config.digestRoot, 'history.md');
 }
 
+function latestDigestPath(config) {
+  return path.join(config.digestRoot, 'latest-digest.md');
+}
+
 function evaluationsRoot(config) {
   return path.join(config.researchRoot, 'evaluations');
 }
@@ -257,10 +261,35 @@ async function loadHistoryEvents(config) {
   return readJsonl(historyPath(config));
 }
 
+function countTrailingSteadyStateCycles(events = []) {
+  let count = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    const legacySteadyState = typeof event?.summary === 'string' && event.summary.includes('candidateChanged');
+    if (event?.type !== 'cycle' || !(event?.steadyState || legacySteadyState)) {
+      break;
+    }
+    count += 1;
+  }
+  return count;
+}
+
 async function rebuildHistoryArtifacts(config, championState) {
   const events = await loadHistoryEvents(config);
   await writeText(historyMarkdownPath(config), renderHistoryMarkdown({ config, championState, historyEvents: events }));
   return events;
+}
+
+async function writeCurrentDigest(config, latestManifest, championState, previousManifest, historyEvents) {
+  const digestText = renderDigestMarkdown({
+    config,
+    latestManifest,
+    previousManifest,
+    historyEvents,
+    championState,
+  });
+  await writeText(latestDigestPath(config), digestText);
+  return latestDigestPath(config);
 }
 
 async function seedChampionState(config) {
@@ -474,6 +503,9 @@ async function runScout(config) {
   const challengerSummary = summarizeResult(primarySweep.best);
 
   const { labResults, matrixDecision } = await evaluateMatrix(config, runId, championState, challengerSummary);
+  const historyEventsBefore = await loadHistoryEvents(config);
+  const steadyState = matrixDecision?.gates?.candidateChanged === false;
+  const noChangeStreak = steadyState ? (countTrailingSteadyStateCycles(historyEventsBefore) + 1) : 0;
 
   const manifest = {
     generatedAt: isoNow(),
@@ -494,6 +526,10 @@ async function runScout(config) {
     primarySweep,
     labResults,
     matrixDecision,
+    researchState: {
+      steadyState,
+      noChangeStreak,
+    },
   };
 
   const manifestName = `${runId}.json`;
@@ -511,10 +547,14 @@ async function runScout(config) {
     challengerConfigId: manifest.challenger?.configId,
     recommendation: manifest.matrixDecision.recommendation,
     summary: manifest.matrixDecision.summary,
+    steadyState,
+    noChangeStreak,
   });
-  await rebuildHistoryArtifacts(config, championState);
+  const updatedHistoryEvents = await rebuildHistoryArtifacts(config, championState);
+  const previousManifest = await readPreviousManifest(config, manifestName);
+  const liveDigestPath = await writeCurrentDigest(config, { ...manifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);
 
-  return { manifest, manifestPath, scoutPath };
+  return { manifest, manifestPath, scoutPath, liveDigestPath };
 }
 
 async function runDigest(config) {
@@ -538,10 +578,12 @@ async function runDigest(config) {
     championState,
   });
   await writeText(digestPath, digestText);
+  await writeText(latestDigestPath(config), digestText);
 
   return {
     digestId,
     digestPath,
+    liveDigestPath: latestDigestPath(config),
     summary: summarizeDigestAnnouncement({ latestManifest: latest, previousManifest: previous }),
     latest,
     previous,
@@ -615,7 +657,10 @@ async function runPromote(config, args, mode = 'manual') {
     summary: `Promoted ${latest.challenger.configId} from ${championState.configId}`,
     note: notePath,
   });
-  await rebuildHistoryArtifacts(config, nextChampion);
+  const updatedHistoryEvents = await rebuildHistoryArtifacts(config, nextChampion);
+  const latestName = path.basename(latest.manifestPath || '');
+  const previousManifest = await readPreviousManifest(config, latestName);
+  await writeCurrentDigest(config, latest, nextChampion, previousManifest, updatedHistoryEvents);
 
   return { promoted: true, notePath, appliedConfigId: latest.challenger.configId };
 }
@@ -668,6 +713,7 @@ async function main() {
     console.log(`\n[autoresearch] manifest=${result.manifestPath}`);
     console.log(`[autoresearch] scout=${result.scoutPath}`);
     console.log(`[autoresearch] recommendation=${result.manifest.matrixDecision.recommendation}`);
+    console.log(`[autoresearch] live-digest=${result.liveDigestPath}`);
     return;
   }
 
@@ -675,6 +721,7 @@ async function main() {
     const result = await runDigest(config);
     console.log(result.summary);
     console.log(`[autoresearch] digest=${result.digestPath}`);
+    console.log(`[autoresearch] live-digest=${result.liveDigestPath}`);
     return;
   }
 

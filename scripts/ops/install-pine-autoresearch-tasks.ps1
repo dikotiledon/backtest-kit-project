@@ -3,6 +3,7 @@ param(
   [string]$TaskPrefix = 'BacktestKit-Pine',
   [string]$MicroStart = '00:05',
   [string]$FullStart = '01:00',
+  [int]$FullEveryHours = 1,
   [string]$DigestStart = '08:10',
   [string]$AutopromoteStart = '08:20',
   [switch]$EnableFull,
@@ -44,7 +45,10 @@ Register-Task 'Micro' @('/SC', 'MINUTE', '/MO', '15', '/ST', $MicroStart) $micro
 Register-Task 'Digest' @('/SC', 'DAILY', '/ST', $DigestStart) $digestScript
 
 if ($EnableFull) {
-  Register-Task 'Full' @('/SC', 'HOURLY', '/MO', '6', '/ST', $FullStart) $fullScript
+  if ($FullEveryHours -lt 1) {
+    throw 'FullEveryHours must be >= 1'
+  }
+  Register-Task 'Full' @('/SC', 'HOURLY', '/MO', "$FullEveryHours", '/ST', $FullStart) $fullScript
 }
 
 if ($EnableAutopromote) {

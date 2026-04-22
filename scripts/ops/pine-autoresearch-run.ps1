@@ -6,6 +6,7 @@ param(
   [string]$Command,
 
   [string]$RepoRoot,
+  [string]$LockName = 'Global\BacktestKit-Pine-Autoresearch',
   [switch]$DryRun
 )
 
@@ -21,17 +22,28 @@ $logPath = Join-Path $logDir ("$TaskName-$timestamp.log")
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 Push-Location $RepoRoot
+$mutex = $null
+$hasLock = $false
 try {
   if ($DryRun) {
     Write-Host "[dry-run] repo=$RepoRoot"
     Write-Host "[dry-run] command=$Command"
     Write-Host "[dry-run] log=$logPath"
+    Write-Host "[dry-run] lock=$LockName"
+    exit 0
+  }
+
+  $mutex = [System.Threading.Mutex]::new($false, $LockName)
+  $hasLock = $mutex.WaitOne(0, $false)
+  if (-not $hasLock) {
+    "[$TaskName] skip=lock-busy lock=$LockName" | Tee-Object -FilePath $logPath
     exit 0
   }
 
   Write-Host "[$TaskName] repo=$RepoRoot"
   Write-Host "[$TaskName] command=$Command"
   Write-Host "[$TaskName] log=$logPath"
+  Write-Host "[$TaskName] lock=$LockName"
 
   $output = & pwsh -NoProfile -Command $Command 2>&1
   $output | Tee-Object -FilePath $logPath
@@ -40,5 +52,11 @@ try {
     throw "Task $TaskName failed with exit code $LASTEXITCODE"
   }
 } finally {
+  if ($mutex) {
+    if ($hasLock) {
+      $mutex.ReleaseMutex() | Out-Null
+    }
+    $mutex.Dispose()
+  }
   Pop-Location
 }

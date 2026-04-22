@@ -109,6 +109,45 @@ test('decideAutoresearchOutcome recommends hold when trade ratio collapses', () 
   assert.deepEqual(result.failedGates, ['tradeFloor', 'tradeRatio']);
 });
 
+test('decideAutoresearchOutcome marks unchanged challenger as steady-state hold', () => {
+  const incumbent = makeResult({
+    configId: 'champion',
+    score: 70.78,
+    tradeCount: 239,
+    roiPct: 47.19,
+    profitFactor: 1.8,
+    maxDrawdownPct: 4.45,
+    config: { minPredSum: 2, useTrailingStop: true },
+  });
+
+  const challenger = makeResult({
+    configId: 'champion',
+    score: 70.78,
+    tradeCount: 239,
+    roiPct: 47.19,
+    profitFactor: 1.8,
+    maxDrawdownPct: 4.45,
+    config: { useTrailingStop: true, minPredSum: 2 },
+  });
+
+  const result = decideAutoresearchOutcome({
+    incumbent,
+    challenger,
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.deepEqual(result.failedGates, ['candidateChanged']);
+  assert.match(result.summary, /steady-state validation only/);
+});
+
 test('decideMatrixPromotion recommends promote when primary and enough shadows pass', () => {
   const champion = {
     configId: 'champion',
@@ -161,6 +200,28 @@ test('decideMatrixPromotion recommends hold when primary wins but shadows reject
 
   assert.equal(result.recommendation, 'hold');
   assert.deepEqual(result.failedGates, ['shadowPassCount', 'shadowPassRatio']);
+});
+
+test('decideMatrixPromotion explains steady-state hold clearly', () => {
+  const result = decideMatrixPromotion({
+    labResults: [
+      { decision: { recommendation: 'hold' } },
+      { decision: { recommendation: 'hold' } },
+      { decision: { recommendation: 'hold' } },
+    ],
+    champion: { configId: 'champion', config: { minPredSum: 2 } },
+    challenger: { configId: 'champion', config: { minPredSum: 2 } },
+    policy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 1,
+      minShadowPassRatio: 0.5,
+      requireCandidateChange: true,
+    },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.deepEqual(result.failedGates, ['candidateChanged', 'primaryPromote', 'shadowPassCount', 'shadowPassRatio']);
+  assert.match(result.summary, /No new candidate/);
 });
 
 test('decideAutoPromotionAction requires matrix pass, change, cooldown, and quota', () => {
@@ -248,6 +309,11 @@ test('summarizeDigestAnnouncement includes matrix lab counts', () => {
         configId: 'challenger',
         score: 60.9,
         roiPct: 39.2,
+        config: { minPredSum: 1.5 },
+      },
+      champion: {
+        configId: 'champion',
+        config: { minPredSum: 2 },
       },
       matrixDecision: {
         recommendation: 'hold',
@@ -268,4 +334,33 @@ test('summarizeDigestAnnouncement includes matrix lab counts', () => {
   assert.match(text, /pine autoresearch hold/);
   assert.match(text, /labs 1\/3/);
   assert.match(text, /prev previous score 60.1/);
+});
+
+test('summarizeDigestAnnouncement compresses steady-state loops', () => {
+  const text = summarizeDigestAnnouncement({
+    latestManifest: {
+      champion: {
+        configId: 'champion',
+        score: 70.78,
+        roiPct: 47.19,
+        config: { minPredSum: 2 },
+      },
+      challenger: {
+        configId: 'champion',
+        score: 70.78,
+        roiPct: 47.19,
+        config: { minPredSum: 2 },
+      },
+      researchState: {
+        steadyState: true,
+        noChangeStreak: 4,
+      },
+      matrixDecision: {
+        recommendation: 'hold',
+      },
+    },
+  });
+
+  assert.match(text, /pine autoresearch steady-state/);
+  assert.match(text, /streak 4/);
 });

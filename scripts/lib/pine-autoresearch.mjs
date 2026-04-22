@@ -40,6 +40,15 @@ export function sameConfig(left, right) {
   return configFingerprint(left) === configFingerprint(right);
 }
 
+function isSteadyStateCandidate(incumbent, challenger) {
+  return Boolean(incumbent?.config && challenger?.config && sameConfig(incumbent.config, challenger.config));
+}
+
+function findBestAlternative(primarySweep, champion) {
+  const topConfigs = primarySweep?.topConfigs || [];
+  return topConfigs.find((item) => !sameConfig(item?.config, champion?.config)) || null;
+}
+
 export async function readJson(filePath) {
   const raw = await fs.readFile(filePath, 'utf8');
   return JSON.parse(raw);
@@ -151,6 +160,26 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
     tradeRatioVsIncumbent: round((challenger.metrics?.tradeCount ?? 0) / Math.max(1, incumbent.metrics?.tradeCount ?? 0), 3),
   };
 
+  if (isSteadyStateCandidate(incumbent, challenger)) {
+    return {
+      recommendation: 'hold',
+      summary: `No new candidate on ${incumbent.configId}: challenger matches incumbent, so this run is steady-state validation only.`,
+      comparisons,
+      gates: {
+        candidateChanged: false,
+      },
+      failedGates: ['candidateChanged'],
+      thresholds: {
+        minScoreDelta,
+        minRoiDeltaPct,
+        minProfitFactorDelta,
+        maxDrawdownDeltaPct,
+        minTradeCount,
+        minTradeRatioVsIncumbent,
+      },
+    };
+  }
+
   const gates = {
     score: comparisons.scoreDelta >= minScoreDelta,
     roi: comparisons.roiDeltaPct >= minRoiDeltaPct,
@@ -211,9 +240,11 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
     .map(([name]) => name);
 
   const recommendation = failedGates.length === 0 ? 'promote' : 'hold';
-  const summary = recommendation === 'promote'
-    ? `Promote challenger ${challenger?.configId}: matrix guards passed (${allPassCount}/${labResults.length} labs promote).`
-    : `Hold champion ${champion?.configId}: matrix failed ${failedGates.join(', ')} gate(s).`;
+  const summary = !candidateChanged
+    ? `No new candidate. Current champion ${champion?.configId} remains best on the pinned matrix.`
+    : recommendation === 'promote'
+      ? `Promote challenger ${challenger?.configId}: matrix guards passed (${allPassCount}/${labResults.length} labs promote).`
+      : `Hold champion ${champion?.configId}: matrix failed ${failedGates.join(', ')} gate(s).`;
 
   return {
     recommendation,
@@ -305,6 +336,9 @@ export function renderScoutMarkdown({ config, manifest }) {
   const champion = manifest.champion || manifest.incumbent;
   const challenger = manifest.challenger;
   const decision = manifest.matrixDecision || manifest.decision;
+  const steadyState = manifest.researchState?.steadyState || isSteadyStateCandidate(champion, challenger);
+  const noChangeStreak = manifest.researchState?.noChangeStreak || 0;
+  const bestAlternative = findBestAlternative(manifest.primarySweep, champion);
   const lines = [
     `# Pine Autoresearch Scout - ${config.matrixId}`,
     '',
@@ -321,7 +355,7 @@ export function renderScoutMarkdown({ config, manifest }) {
     '',
     '## Challenger',
     '',
-    challenger ? `- ${challenger.configId}` : '- none',
+    steadyState ? '- No new candidate. Latest scout matched the current champion.' : (challenger ? `- ${challenger.configId}` : '- none'),
     challenger ? `- score ${challenger.score}, trades ${challenger.tradeCount}, ROI ${challenger.roiPct}%, PF ${challenger.profitFactor}, max DD ${challenger.maxDrawdownPct}%` : '',
     '',
     '## Matrix decision',
@@ -330,12 +364,26 @@ export function renderScoutMarkdown({ config, manifest }) {
     `- ${decision?.summary || 'No matrix decision.'}`,
   ];
 
+  if (steadyState) {
+    lines.push('- Mode: **STEADY STATE**');
+    if (noChangeStreak > 0) {
+      lines.push(`- No new candidate streak: ${noChangeStreak} cycle(s)`);
+    }
+    if (bestAlternative) {
+      lines.push(`- Best alternate tested: ${bestAlternative.configId}`);
+      lines.push(`- Best alternate metrics: score ${bestAlternative.score}, trades ${bestAlternative.tradeCount}, ROI ${bestAlternative.roiPct}%, PF ${bestAlternative.profitFactor}, max DD ${bestAlternative.maxDrawdownPct}%`);
+      lines.push(`- Alternate delta vs champion: score ${round(bestAlternative.score - (champion?.score ?? 0), 2)}, ROI ${round(bestAlternative.roiPct - (champion?.roiPct ?? 0), 2)}%, PF ${round(bestAlternative.profitFactor - (champion?.profitFactor ?? 0), 2)}, DD ${round(bestAlternative.maxDrawdownPct - (champion?.maxDrawdownPct ?? 0), 2)}%`);
+    } else {
+      lines.push('- No alternate config beat or differentiated from the current champion in this scout window.');
+    }
+  }
+
   if (decision?.counts) {
     lines.push(`- Labs promoting: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
     lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
   }
 
-  if (manifest.labResults?.length) {
+  if (manifest.labResults?.length && !(steadyState && noChangeStreak >= 3)) {
     lines.push('', '## Lab matrix', '', renderLabRowTable(manifest.labResults));
   }
 
@@ -355,6 +403,9 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
   const decision = latestManifest?.matrixDecision || latestManifest?.decision;
   const previous = previousManifest?.challenger;
   const recentEvents = historyEvents.slice(-8).reverse();
+  const steadyState = latestManifest?.researchState?.steadyState || isSteadyStateCandidate(champion, challenger);
+  const noChangeStreak = latestManifest?.researchState?.noChangeStreak || 0;
+  const bestAlternative = findBestAlternative(latestManifest?.primarySweep, champion);
 
   const lines = [
     `# Pine Autoresearch Digest - ${config.matrixId}`,
@@ -367,9 +418,22 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
     '## Current state',
     '',
     champion ? `- Champion: ${champion.configId} (score ${champion.score ?? 'n/a'}, ROI ${champion.roiPct ?? 'n/a'}%)` : '- Champion: n/a',
-    challenger ? `- Latest challenger: ${challenger.configId} (score ${challenger.score}, ROI ${challenger.roiPct}%)` : '- Latest challenger: none',
+    steadyState
+      ? '- Latest challenger: no new candidate, latest scout matched the current champion'
+      : challenger ? `- Latest challenger: ${challenger.configId} (score ${challenger.score}, ROI ${challenger.roiPct}%)` : '- Latest challenger: none',
     decision ? `- Matrix recommendation: **${decision.recommendation.toUpperCase()}**` : '- Matrix recommendation: n/a',
   ];
+
+  if (steadyState) {
+    lines.push('- State: **STEADY STATE**');
+    if (noChangeStreak > 0) {
+      lines.push(`- No new candidate streak: ${noChangeStreak} cycle(s)`);
+    }
+    if (bestAlternative) {
+      lines.push(`- Best alternate tested this cycle: ${bestAlternative.configId} (score ${bestAlternative.score}, ROI ${bestAlternative.roiPct}%)`);
+      lines.push(`- Alternate delta vs champion: score ${round(bestAlternative.score - (champion?.score ?? 0), 2)}, ROI ${round(bestAlternative.roiPct - (champion?.roiPct ?? 0), 2)}%`);
+    }
+  }
 
   if (decision?.counts) {
     lines.push(`- Promote labs: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
@@ -380,12 +444,14 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
     lines.push('', '## Latest matrix', '', renderLabRowTable(latestManifest.labResults));
   }
 
-  if (challenger && previous) {
+  if (challenger && previous && (!steadyState || !sameConfig(previous?.config, challenger?.config))) {
     lines.push('', '## Change since previous scout', '');
     lines.push(`- previous challenger: ${previous.configId} (score ${previous.score}, ROI ${previous.roiPct}%)`);
     lines.push(`- latest challenger: ${challenger.configId} (score ${challenger.score}, ROI ${challenger.roiPct}%)`);
     lines.push(`- challenger score delta: ${round(challenger.score - previous.score, 2)}`);
     lines.push(`- challenger ROI delta: ${round(challenger.roiPct - previous.roiPct, 2)}%`);
+  } else if (steadyState) {
+    lines.push('', '## Change since previous scout', '', '- No challenger change. This loop is currently acting as pinned-matrix regression validation.');
   }
 
   if (recentEvents.length) {
@@ -424,8 +490,25 @@ export function summarizeDigestAnnouncement({ latestManifest, previousManifest }
   const decision = latestManifest?.matrixDecision || latestManifest?.decision;
   const latest = latestManifest?.challenger;
   const previous = previousManifest?.challenger;
+  const champion = latestManifest?.champion || latestManifest?.incumbent;
+  const steadyState = latestManifest?.researchState?.steadyState || isSteadyStateCandidate(champion, latest);
   if (!latest || !decision) {
     return 'pine autoresearch digest: no challenger data yet';
+  }
+
+  if (steadyState) {
+    const parts = [
+      'pine autoresearch steady-state',
+      `champion ${champion?.configId || 'n/a'}`,
+      `score ${champion?.score ?? 'n/a'}`,
+      `ROI ${champion?.roiPct ?? 'n/a'}%`,
+    ];
+
+    if (latestManifest?.researchState?.noChangeStreak) {
+      parts.push(`streak ${latestManifest.researchState.noChangeStreak}`);
+    }
+
+    return parts.join(' | ');
   }
 
   const parts = [

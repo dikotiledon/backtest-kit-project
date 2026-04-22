@@ -180,6 +180,7 @@ Pinned datasets:
 
 Human-readable reports:
 - `report/pine-autoresearch/pine-fusion-v4-core-15m-locked-window/*.md`
+- `report/pine-autoresearch/pine-fusion-v4-core-15m-locked-window/latest-digest.md`
 - `report/pine-autoresearch/pine-fusion-v4-core-15m-locked-window/history.md`
 
 Raw sweep outputs still stay in:
@@ -192,8 +193,8 @@ Backtest-kit candle cache used for strict replay:
 
 ### Recommended cadence
 - **Micro scout**: every 15 minutes
-- **Full scout**: every 6 hours, optional
-- **Digest**: daily at 08:10 local machine time
+- **Full scout**: optional, hourly is supported and useful when you want broader search than micro. Earlier 6h guidance was only a conservative default, not a hard rule.
+- **Digest**: daily at 08:10 local machine time, plus live digest refresh after each scout
 - **Autopromote**: daily at 08:20 local machine time, opt-in only
 
 ### Windows task wrappers
@@ -221,9 +222,14 @@ Install micro + digest only (recommended baseline):
 pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1
 ```
 
-Install full cadence too:
+Install full cadence too (hourly by default):
 ```bash
 pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull
+```
+
+Install full cadence with a custom hourly interval:
+```bash
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -FullEveryHours 1
 ```
 
 Install autopromote too:
@@ -238,7 +244,8 @@ Behavior:
 - quiet delivery
 - stage pinned datasets into cache first
 - require complete cache coverage for the exact locked window
-- write manifest, matrix evaluation artifacts, and history
+- write manifest, matrix evaluation artifacts, history, and refresh `latest-digest.md`
+- detect steady-state loops where challenger == champion and report them honestly as regression validation, not fake discovery
 - do not patch `pine/test.pine`
 
 ### Digest job
@@ -250,6 +257,7 @@ Behavior:
 Behavior:
 - run `pine-autoresearch.mjs autopromote`
 - only patches `pine/test.pine` when all guards pass
+- task wrappers now use a shared lock to avoid overlapping scout/digest/autopromote executions
 - therefore keep it opt-in until you are comfortable with unattended shipping
 
 ## Why this shape

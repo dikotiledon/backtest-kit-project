@@ -16,6 +16,7 @@ import {
   renderHistoryMarkdown,
   renderScoutMarkdown,
   sameConfig,
+  selectChampionBootstrapSource,
   summarizeDigestAnnouncement,
   summarizeResult,
   timestampId,
@@ -263,23 +264,38 @@ async function rebuildHistoryArtifacts(config, championState) {
 }
 
 async function seedChampionState(config) {
-  if (!config.seedChampionPath) {
-    throw new Error('seedChampion.path (or legacy incumbent.path) is required to initialize champion state');
+  let latest = null;
+  let seedPayload = null;
+  let seedReadError = null;
+
+  latest = await readLatestManifest(config);
+
+  if (config.seedChampionPath) {
+    try {
+      seedPayload = await readJson(config.seedChampionPath);
+    } catch (error) {
+      seedReadError = error;
+    }
   }
 
-  const seeded = await readJson(config.seedChampionPath);
-  const source = seeded.status ? seeded : seeded.ranked?.[0];
-  if (!source?.config) {
-    throw new Error(`Could not load seed champion config from ${config.seedChampionPath}`);
+  const bootstrap = selectChampionBootstrapSource({ latestManifest: latest, seedPayload });
+  if (!bootstrap?.source?.config) {
+    const attempts = [];
+    if (latest) attempts.push(`latest manifest at ${latestManifestPath(config)}`);
+    if (config.seedChampionPath) attempts.push(`seed file at ${config.seedChampionPath}`);
+    const suffix = seedReadError?.message ? ` Last seed read error: ${seedReadError.message}` : '';
+    throw new Error(`Could not initialize champion state from available bootstrap sources (${attempts.join(', ') || 'none'}).${suffix}`);
   }
 
+  const source = bootstrap.source;
   const championState = {
     ...summarizeResult(source),
     configFingerprint: configFingerprint(source.config),
     promotedAt: isoNow(),
-    sourcePath: config.seedChampionPath,
-    sourceRunId: null,
+    sourcePath: bootstrap.kind === 'seed-file' ? config.seedChampionPath : (latest?.manifestPath || latestManifestPath(config)),
+    sourceRunId: latest?.runId || source.sourceRunId || null,
     mode: 'seed',
+    bootstrapKind: bootstrap.kind,
   };
 
   await writeJson(championPath(config), championState);
@@ -287,7 +303,7 @@ async function seedChampionState(config) {
     timestamp: championState.promotedAt,
     type: 'seedChampion',
     championConfigId: championState.configId,
-    summary: `Seeded champion from ${path.basename(config.seedChampionPath)}`,
+    summary: `Seeded champion from ${bootstrap.kind}`,
     recommendation: 'seed',
   });
   return championState;

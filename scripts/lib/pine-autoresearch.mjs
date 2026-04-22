@@ -87,6 +87,37 @@ export function summarizeResult(result) {
   };
 }
 
+export function extractChampionBootstrapCandidate(payload) {
+  if (!payload) return null;
+  if (payload.config) return payload;
+  if (payload.status?.config) return payload.status;
+  if (payload.ranked?.[0]?.config) return payload.ranked[0];
+  if (payload.champion?.config) return payload.champion;
+  if (payload.incumbent?.config) return payload.incumbent;
+  return null;
+}
+
+export function selectChampionBootstrapSource({ latestManifest, seedPayload } = {}) {
+  const candidates = [];
+
+  if (latestManifest?.matrixDecision?.recommendation === 'promote' && latestManifest?.challenger?.config) {
+    candidates.push({ kind: 'latest-promoted-challenger', source: latestManifest.challenger });
+  }
+  if (latestManifest?.champion?.config) {
+    candidates.push({ kind: 'latest-champion', source: latestManifest.champion });
+  }
+  if (latestManifest?.incumbent?.config) {
+    candidates.push({ kind: 'latest-incumbent', source: latestManifest.incumbent });
+  }
+
+  const seedSource = extractChampionBootstrapCandidate(seedPayload);
+  if (seedSource?.config) {
+    candidates.push({ kind: 'seed-file', source: seedSource });
+  }
+
+  return candidates[0] || null;
+}
+
 export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = {} }) {
   if (!incumbent) {
     throw new Error('Incumbent result is required');

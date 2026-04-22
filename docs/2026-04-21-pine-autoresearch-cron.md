@@ -234,6 +234,7 @@ Auto-promotion stays guarded, not impulsive.
 - Phase 3 adds `--no-cache`, `--require-cache-complete`, `--cache-root`, and `--cache-exchange` plumbing through the Pine run chain.
 - Dataset pinning now uses existing local candle cache by default (`pinnedData.sourceMode=local-cache`) and only uses network when explicitly requested.
 - When pinned data is enabled, autoresearch stages each lab dataset into `pine/dump/data/candle/...` and fails fast if any candle is missing, instead of silently refetching network data during the run.
+- Champion bootstrap is hardened: runtime prefers existing `champion.json`, then latest promoted/latest champion manifest state, then tracked seed file `config/pine-autoresearch.seed.json`, instead of relying on a single untracked sweep artifact.
 - When full cross-symbol cache coverage is unavailable, an emergency fallback mode can temporarily trim the matrix to XRPUSDT only and anchor `when` to the latest proven local cache tail until one-time network backfill restores the full matrix.
 - The config is backward-compatible in spirit with phase 1 and 2, but now also supports `pinnedData`, `defaultProfile`, and `scoutProfiles`.
 - Runtime output dirs are ignored in `.gitignore`; only config, scripts, docs, and tests are meant to be committed.

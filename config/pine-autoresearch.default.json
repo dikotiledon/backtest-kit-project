@@ -24,7 +24,7 @@
     "sourceMode": "local-cache"
   },
   "seedChampion": {
-    "path": "../pine/sweeps/fixed-window-fusion-v4-XRPUSDT-15m-10000-2026-04-21T10-30-00Z/best-config.json"
+    "path": "./pine-autoresearch.seed.json"
   },
   "primaryLab": {
     "labId": "xrpusdt-15m-primary",

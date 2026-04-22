@@ -4,7 +4,9 @@ import {
   decideAutoPromotionAction,
   decideAutoresearchOutcome,
   decideMatrixPromotion,
+  extractChampionBootstrapCandidate,
   sameConfig,
+  selectChampionBootstrapSource,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
 
@@ -202,6 +204,41 @@ test('decideAutoPromotionAction blocks when candidate is unchanged', () => {
 
   assert.equal(result.recommendation, 'hold');
   assert.deepEqual(result.failedGates, ['candidateChanged']);
+});
+
+test('extractChampionBootstrapCandidate accepts direct seed payloads', () => {
+  const source = extractChampionBootstrapCandidate({
+    configId: 'seed-direct',
+    config: { minPredSum: 2 },
+    score: 70,
+  });
+
+  assert.equal(source.configId, 'seed-direct');
+  assert.deepEqual(source.config, { minPredSum: 2 });
+});
+
+test('selectChampionBootstrapSource prefers latest promoted challenger before seed file', () => {
+  const selected = selectChampionBootstrapSource({
+    latestManifest: {
+      matrixDecision: { recommendation: 'promote' },
+      challenger: { configId: 'latest-promote', config: { minPredSum: 1.5 } },
+      champion: { configId: 'latest-champion', config: { minPredSum: 2 } },
+    },
+    seedPayload: { configId: 'seed-file', config: { minPredSum: 2.5 } },
+  });
+
+  assert.equal(selected.kind, 'latest-promoted-challenger');
+  assert.equal(selected.source.configId, 'latest-promote');
+});
+
+test('selectChampionBootstrapSource falls back to tracked seed file when latest manifest is absent', () => {
+  const selected = selectChampionBootstrapSource({
+    latestManifest: null,
+    seedPayload: { configId: 'seed-file', config: { minPredSum: 2.5 } },
+  });
+
+  assert.equal(selected.kind, 'seed-file');
+  assert.equal(selected.source.configId, 'seed-file');
 });
 
 test('summarizeDigestAnnouncement includes matrix lab counts', () => {

@@ -7,6 +7,7 @@ import {
   decideAutoresearchOutcome,
   decideMatrixPromotion,
   extractChampionBootstrapCandidate,
+  planArtifactPrune,
   sameConfig,
   selectChampionBootstrapSource,
   summarizeDigestAnnouncement,
@@ -380,6 +381,39 @@ test('computeSweepOffset advances hourly scout batches across prior cycles', () 
   });
 
   assert.equal(offset, 24);
+});
+
+test('planArtifactPrune keeps latest manifest-backed runs and deletes older plus partial artifacts', () => {
+  const result = planArtifactPrune({
+    manifestRunIds: ['run-1', 'run-2', 'run-3', 'run-4'],
+    sweepRunIds: ['run-0', 'run-1', 'run-2', 'run-3', 'run-4', 'run-x'],
+    evaluationRunIds: ['run-2', 'run-3', 'run-4', 'run-y'],
+    keepLatestRuns: 2,
+  });
+
+  assert.deepEqual(result.keepRunIds, ['run-3', 'run-4']);
+  assert.deepEqual(result.partialSweepRunIds, ['run-0', 'run-x']);
+  assert.deepEqual(result.oldSweepRunIds, ['run-1', 'run-2']);
+  assert.deepEqual(result.partialEvaluationRunIds, ['run-y']);
+  assert.deepEqual(result.oldEvaluationRunIds, ['run-2']);
+  assert.deepEqual(result.deleteSweepRunIds, ['run-0', 'run-1', 'run-2', 'run-x']);
+  assert.deepEqual(result.deleteEvaluationRunIds, ['run-2', 'run-y']);
+});
+
+test('planArtifactPrune can preserve all manifest-backed runs when keepLatestRuns covers them', () => {
+  const result = planArtifactPrune({
+    manifestRunIds: ['run-1', 'run-2'],
+    sweepRunIds: ['run-1', 'run-2', 'run-x'],
+    evaluationRunIds: ['run-1', 'run-2'],
+    keepLatestRuns: 10,
+  });
+
+  assert.deepEqual(result.keepRunIds, ['run-1', 'run-2']);
+  assert.deepEqual(result.oldSweepRunIds, []);
+  assert.deepEqual(result.oldEvaluationRunIds, []);
+  assert.deepEqual(result.partialSweepRunIds, ['run-x']);
+  assert.deepEqual(result.deleteSweepRunIds, ['run-x']);
+  assert.deepEqual(result.deleteEvaluationRunIds, []);
 });
 
 test('default autoresearch config rotates across multiple pinned windows', async () => {

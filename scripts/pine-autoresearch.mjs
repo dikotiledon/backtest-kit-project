@@ -11,6 +11,7 @@ import {
   decideAutoresearchOutcome,
   decideMatrixPromotion,
   isoNow,
+  planArtifactPrune,
   readJson,
   readJsonl,
   renderDigestMarkdown,
@@ -200,6 +201,12 @@ async function loadConfig(cwd, configPath, overrides = {}) {
       exchangeName: raw.pinnedData?.exchangeName || primarySource.exchange || 'ccxt-exchange',
       sourceExchangeId: raw.pinnedData?.sourceExchangeId || 'binance',
     },
+    retention: {
+      keepLatestRuns: Number(raw.retention?.keepLatestRuns ?? 8),
+      pruneSweepRuns: raw.retention?.pruneSweepRuns ?? true,
+      pruneEvaluationRuns: raw.retention?.pruneEvaluationRuns ?? true,
+      prunePartialRuns: raw.retention?.prunePartialRuns ?? true,
+    },
   };
 
   return config;
@@ -249,6 +256,68 @@ async function readLatestManifest(config) {
   } catch {
     return null;
   }
+}
+
+async function listRunDirectories(rootDir, prefix = null) {
+  try {
+    const entries = await fs.readdir(rootDir, { withFileTypes: true });
+    return entries
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .filter((name) => !prefix || name.startsWith(prefix))
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+async function pruneRunArtifacts(config) {
+  const keepLatestRuns = Number(config.retention?.keepLatestRuns ?? 8);
+  if (!(keepLatestRuns >= 0)) return null;
+
+  const manifestRunIds = (await listManifestFiles(config)).map((name) => name.replace(/\.json$/, ''));
+  const sweepRunIds = await listRunDirectories(path.resolve(config.projectRoot, 'pine', 'sweeps'), `${slug(config.matrixId)}-`);
+  const evaluationRunIds = await listRunDirectories(evaluationsRoot(config));
+  const plan = planArtifactPrune({
+    manifestRunIds,
+    sweepRunIds,
+    evaluationRunIds,
+    keepLatestRuns,
+  });
+
+  const deleteSweepRunIds = config.retention?.pruneSweepRuns
+    ? (config.retention?.prunePartialRuns ? plan.deleteSweepRunIds : plan.oldSweepRunIds)
+    : [];
+  const deleteEvaluationRunIds = config.retention?.pruneEvaluationRuns
+    ? (config.retention?.prunePartialRuns ? plan.deleteEvaluationRunIds : plan.oldEvaluationRunIds)
+    : [];
+  const deleteFailures = [];
+  const deletedSweepRunIds = [];
+  const deletedEvaluationRunIds = [];
+
+  for (const runId of deleteSweepRunIds) {
+    try {
+      await fs.rm(path.resolve(config.projectRoot, 'pine', 'sweeps', runId), { recursive: true, force: true });
+      deletedSweepRunIds.push(runId);
+    } catch (error) {
+      deleteFailures.push({ kind: 'sweep', runId, error: error?.message || String(error) });
+    }
+  }
+  for (const runId of deleteEvaluationRunIds) {
+    try {
+      await fs.rm(path.join(evaluationsRoot(config), runId), { recursive: true, force: true });
+      deletedEvaluationRunIds.push(runId);
+    } catch (error) {
+      deleteFailures.push({ kind: 'evaluation', runId, error: error?.message || String(error) });
+    }
+  }
+
+  return {
+    ...plan,
+    deletedSweepRunIds,
+    deletedEvaluationRunIds,
+    deleteFailures,
+  };
 }
 
 async function readPreviousManifest(config, latestFileName) {
@@ -565,8 +634,9 @@ async function runScout(config) {
   const updatedHistoryEvents = await rebuildHistoryArtifacts(config, championState);
   const previousManifest = await readPreviousManifest(config, manifestName);
   const liveDigestPath = await writeCurrentDigest(config, { ...manifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);
+  const pruneResult = await pruneRunArtifacts(config);
 
-  return { manifest, manifestPath, scoutPath, liveDigestPath };
+  return { manifest, manifestPath, scoutPath, liveDigestPath, pruneResult };
 }
 
 async function runDigest(config) {
@@ -726,6 +796,9 @@ async function main() {
     console.log(`[autoresearch] scout=${result.scoutPath}`);
     console.log(`[autoresearch] recommendation=${result.manifest.matrixDecision.recommendation}`);
     console.log(`[autoresearch] live-digest=${result.liveDigestPath}`);
+    if (result.pruneResult) {
+      console.log(`[autoresearch] prune sweeps=${result.pruneResult.deletedSweepRunIds.length} evaluations=${result.pruneResult.deletedEvaluationRunIds.length} failures=${result.pruneResult.deleteFailures.length}`);
+    }
     return;
   }
 

@@ -48,6 +48,33 @@ export function computeSweepOffset({ historyEvents = [], maxConfigs, totalCombos
   return (priorCycleCount * maxConfigs) % totalCombos;
 }
 
+export function planArtifactPrune({
+  manifestRunIds = [],
+  sweepRunIds = [],
+  evaluationRunIds = [],
+  keepLatestRuns = 8,
+} = {}) {
+  const sortedManifestRunIds = [...manifestRunIds].sort();
+  const keepRunIds = keepLatestRuns > 0 ? sortedManifestRunIds.slice(-keepLatestRuns) : [];
+  const keepSet = new Set(keepRunIds);
+  const manifestSet = new Set(sortedManifestRunIds);
+
+  const partialSweepRunIds = [...sweepRunIds].filter((runId) => !manifestSet.has(runId)).sort();
+  const oldSweepRunIds = [...sweepRunIds].filter((runId) => manifestSet.has(runId) && !keepSet.has(runId)).sort();
+  const partialEvaluationRunIds = [...evaluationRunIds].filter((runId) => !manifestSet.has(runId)).sort();
+  const oldEvaluationRunIds = [...evaluationRunIds].filter((runId) => manifestSet.has(runId) && !keepSet.has(runId)).sort();
+
+  return {
+    keepRunIds,
+    partialSweepRunIds,
+    oldSweepRunIds,
+    partialEvaluationRunIds,
+    oldEvaluationRunIds,
+    deleteSweepRunIds: [...new Set([...partialSweepRunIds, ...oldSweepRunIds])].sort(),
+    deleteEvaluationRunIds: [...new Set([...partialEvaluationRunIds, ...oldEvaluationRunIds])].sort(),
+  };
+}
+
 function isSteadyStateCandidate(incumbent, challenger) {
   return Boolean(incumbent?.config && challenger?.config && sameConfig(incumbent.config, challenger.config));
 }

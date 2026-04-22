@@ -136,6 +136,12 @@
     "maxPromotionsPerDay": 1,
     "requireMatrixPromotion": true
   },
+  "retention": {
+    "keepLatestRuns": 8,
+    "pruneSweepRuns": true,
+    "pruneEvaluationRuns": true,
+    "prunePartialRuns": true
+  },
   "outputs": {
     "researchRoot": "../pine/autoresearch/pine-fusion-v4-core-15m-locked-window",
     "digestRoot": "../report/pine-autoresearch/pine-fusion-v4-core-15m-locked-window"

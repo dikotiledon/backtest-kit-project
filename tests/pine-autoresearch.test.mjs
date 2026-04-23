@@ -451,6 +451,21 @@ test('selectRobustMatrixCandidate prefers multi-window strength over single prim
   assert.equal(selected.challenger.configId, 'robust-winner');
 });
 
+test('default autoresearch config enables incumbent-local shortlist policy', async () => {
+  const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
+  const config = JSON.parse(raw);
+
+  assert.deepEqual(config.searchPolicy, {
+    mode: 'incumbent-local',
+    exploitRatio: 0.8,
+    freezeArchitecture: true,
+    exploitFamilies: ['signal', 'risk'],
+    exploreFamilies: ['signal'],
+    paretoShortlistSize: 4,
+    matrixCandidateLimit: 3,
+  });
+});
+
 test('default autoresearch config rotates across multiple pinned windows', async () => {
   const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
   const config = JSON.parse(raw);

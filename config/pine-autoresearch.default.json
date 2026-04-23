@@ -2,6 +2,15 @@
   "matrixId": "pine-fusion-v4-core-15m-locked-window",
   "scriptPath": "../pine/test.pine",
   "grid": "phase3-core",
+  "searchPolicy": {
+    "mode": "incumbent-local",
+    "exploitRatio": 0.8,
+    "freezeArchitecture": true,
+    "exploitFamilies": ["signal", "risk"],
+    "exploreFamilies": ["signal"],
+    "paretoShortlistSize": 4,
+    "matrixCandidateLimit": 3
+  },
   "defaultProfile": "full",
   "scoutProfiles": {
     "full": {

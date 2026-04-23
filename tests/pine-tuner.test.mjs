@@ -12,6 +12,105 @@ import {
   selectSweepCombos,
 } from '../scripts/lib/pine-tuner.mjs';
 
+import { buildIncumbentSearchBatch, allocateLaneBudget } from '../scripts/lib/pine-search-policy.mjs';
+
+test('allocateLaneBudget keeps an 80/20 split while guaranteeing at least one explore slot', () => {
+  assert.deepEqual(allocateLaneBudget(8, 0.8), { exploit: 6, explore: 2 });
+  assert.deepEqual(allocateLaneBudget(5, 0.8), { exploit: 4, explore: 1 });
+  assert.deepEqual(allocateLaneBudget(1, 0.8), { exploit: 1, explore: 0 });
+});
+
+test('buildIncumbentSearchBatch freezes strategy architecture and emits lane metadata', () => {
+  const incumbent = {
+    useSignalFusion: true,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    useSupertrendFilter: true,
+    useTrailingStop: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    lag: 2,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 2.5,
+    trailAtrLen: 14,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 8,
+    historyEvents: [],
+    policy: {
+      exploitRatio: 0.8,
+      freezeArchitecture: true,
+      exploitFamilies: ['signal', 'risk'],
+      exploreFamilies: ['signal'],
+    },
+  });
+
+  assert.equal(batch.length, 8);
+  assert.equal(batch.filter((item) => item.lane === 'exploit').length, 6);
+  assert.equal(batch.filter((item) => item.lane === 'explore').length, 2);
+
+  for (const item of batch) {
+    assert.equal(item.config.useSignalFusion, true);
+    assert.equal(item.config.useFusionV2, false);
+    assert.equal(item.config.useFusionV3, false);
+    assert.equal(item.config.useFusionV4, true);
+    assert.equal(item.config.useSupertrendFilter, true);
+    assert.equal(item.config.useTrailingStop, true);
+    assert.match(item.variantId, /^(exploit|explore)-/);
+  }
+});
+
+test('buildIncumbentSearchBatch rotates exploit families by cycle count', () => {
+  const incumbent = {
+    useSignalFusion: true,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    useSupertrendFilter: true,
+    useTrailingStop: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    lag: 2,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 2.5,
+    trailAtrLen: 14,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+
+  const cycle0 = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 6,
+    historyEvents: [],
+    policy: { exploitRatio: 0.8, freezeArchitecture: true, exploitFamilies: ['signal', 'risk'], exploreFamilies: ['signal'] },
+  });
+  const cycle1 = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 6,
+    historyEvents: [{ type: 'cycle' }],
+    policy: { exploitRatio: 0.8, freezeArchitecture: true, exploitFamilies: ['signal', 'risk'], exploreFamilies: ['signal'] },
+  });
+
+  assert.notEqual(cycle0[0].family, cycle1[0].family);
+});
+
 test('cartesianProduct expands candidate grid into all combinations', () => {
   const combos = cartesianProduct({
     a: [1, 2],

@@ -101,6 +101,21 @@ async function writeSweepFiles(runDir, results, meta) {
   }
 }
 
+function normalizeVariantRecord(record, index) {
+  if (!record || typeof record !== 'object') {
+    throw new Error(`variant-file entries must be objects with a config field (index ${index})`);
+  }
+
+  const config = record.config && typeof record.config === 'object' ? record.config : record;
+  return {
+    ...record,
+    variantId: record.variantId || `variant-${String(index + 1).padStart(4, '0')}`,
+    lane: record.lane,
+    family: record.family,
+    config,
+  };
+}
+
 async function main() {
   const cwd = process.cwd();
   const args = parseArgs(process.argv.slice(2));
@@ -119,13 +134,24 @@ async function main() {
   const requireCacheComplete = Boolean(args['require-cache-complete']);
   const cacheRoot = args['cache-root'] ? String(args['cache-root']) : null;
   const cacheExchange = args['cache-exchange'] ? String(args['cache-exchange']) : null;
+  const variantFile = args['variant-file'] ? String(args['variant-file']) : null;
   const gridName = String(args.grid || 'default');
   const runId = args['run-id'] || `sweep-${gridName}-${symbol}-${timeframe}-${limit}-${timestampId()}`;
 
   const inputPath = path.resolve(cwd, input);
   const source = await fs.readFile(inputPath, 'utf8');
   const grid = getCandidateGrid(gridName);
-  const combos = selectSweepCombos(grid, { maxConfigs, offset });
+  let combos;
+  if (variantFile) {
+    const variantPath = path.resolve(cwd, variantFile);
+    const rawVariants = JSON.parse(await fs.readFile(variantPath, 'utf8'));
+    if (rawVariants && !Array.isArray(rawVariants)) {
+      throw new Error(`variant-file must contain a JSON array of variant records: ${variantPath}`);
+    }
+    combos = (rawVariants || []).map((record, index) => normalizeVariantRecord(record, index));
+  } else {
+    combos = selectSweepCombos(grid, { maxConfigs, offset });
+  }
 
   const runDir = path.resolve(cwd, 'pine', 'sweeps', runId);
   const variantsDir = path.join(runDir, 'variants');
@@ -202,6 +228,9 @@ async function main() {
         status: 'ok',
         configId,
         artifactId,
+        variantId: combo.variantId,
+        lane: combo.lane,
+        family: combo.family,
         config: combo,
         score: analysis.score,
         rowCount: analysis.rowCount,
@@ -219,6 +248,9 @@ async function main() {
         status: 'failed',
         configId,
         artifactId,
+        variantId: combo.variantId,
+        lane: combo.lane,
+        family: combo.family,
         config: combo,
         error: error?.message || String(error),
       });

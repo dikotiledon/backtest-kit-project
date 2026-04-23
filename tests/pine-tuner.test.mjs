@@ -1,4 +1,8 @@
 import fs from 'node:fs/promises';
+import { mkdtemp } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { spawn } from 'node:child_process';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -450,4 +454,27 @@ test('pine test script does not expose long-only or short-only controls', async 
   assert.doesNotMatch(source, /Enable Shorts/);
   assert.doesNotMatch(source, /useLongSide/);
   assert.doesNotMatch(source, /useShortSide/);
+});
+
+
+test('pine-sweep rejects non-array variant files with a useful error', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'pine-sweep-'));
+  const variantFile = path.join(tempDir, 'variants.json');
+  await fs.writeFile(variantFile, JSON.stringify({ variantId: 'bad' }), 'utf8');
+
+  const scriptPath = new URL('../scripts/pine-sweep.mjs', import.meta.url);
+  const inputPath = new URL('../pine/test.pine', import.meta.url);
+
+  const result = await new Promise((resolve) => {
+    const child = spawn('node', [scriptPath.pathname, '--input', inputPath.pathname, '--variant-file', variantFile, '--max-configs', '1'], {
+      cwd: path.resolve(path.dirname(scriptPath.pathname), '..'),
+      shell: false,
+    });
+    let stderr = '';
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('close', (code) => resolve({ code, stderr }));
+  });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr, /variant-file must contain a JSON array of variant records/);
 });

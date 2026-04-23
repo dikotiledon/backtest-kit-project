@@ -11,8 +11,7 @@ import {
   getCandidateGrid,
   selectSweepCombos,
 } from '../scripts/lib/pine-tuner.mjs';
-
-import { buildIncumbentSearchBatch, allocateLaneBudget } from '../scripts/lib/pine-search-policy.mjs';
+import { allocateLaneBudget, buildIncumbentSearchBatch } from '../scripts/lib/pine-search-policy.mjs';
 
 test('allocateLaneBudget keeps an 80/20 split while guaranteeing at least one explore slot', () => {
   assert.deepEqual(allocateLaneBudget(8, 0.8), { exploit: 6, explore: 2 });
@@ -95,20 +94,32 @@ test('buildIncumbentSearchBatch rotates exploit families by cycle count', () => 
     trailActivateR: 0.5,
   };
 
-  const cycle0 = buildIncumbentSearchBatch({
+  const cycle0Families = buildIncumbentSearchBatch({
     incumbent,
-    maxConfigs: 6,
+    maxConfigs: 4,
     historyEvents: [],
-    policy: { exploitRatio: 0.8, freezeArchitecture: true, exploitFamilies: ['signal', 'risk'], exploreFamilies: ['signal'] },
-  });
-  const cycle1 = buildIncumbentSearchBatch({
-    incumbent,
-    maxConfigs: 6,
-    historyEvents: [{ type: 'cycle' }],
-    policy: { exploitRatio: 0.8, freezeArchitecture: true, exploitFamilies: ['signal', 'risk'], exploreFamilies: ['signal'] },
-  });
+    policy: {
+      exploitRatio: 0.5,
+      freezeArchitecture: true,
+      exploitFamilies: ['signal', 'risk'],
+      exploreFamilies: ['signal'],
+    },
+  }).map((variant) => variant.family);
 
-  assert.notEqual(cycle0[0].family, cycle1[0].family);
+  const cycle1Families = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 4,
+    historyEvents: [{ type: 'cycle' }],
+    policy: {
+      exploitRatio: 0.5,
+      freezeArchitecture: true,
+      exploitFamilies: ['signal', 'risk'],
+      exploreFamilies: ['signal'],
+    },
+  }).map((variant) => variant.family);
+
+  assert.deepEqual(cycle0Families, ['signal', 'risk', 'signal', 'signal']);
+  assert.deepEqual(cycle1Families, ['risk', 'signal', 'signal', 'signal']);
 });
 
 test('cartesianProduct expands candidate grid into all combinations', () => {
@@ -511,6 +522,52 @@ test('selectSweepCombos rotates candidate batches with wrap-around', () => {
     { a: 1, b: 'x' },
     { a: 1, b: 'y' },
   ]);
+});
+
+test('buildIncumbentSearchBatch preserves incumbent architecture when freezeArchitecture is false', () => {
+  const incumbent = {
+    useSignalFusion: false,
+    useFusionV2: true,
+    useFusionV3: true,
+    useFusionV4: false,
+    useSupertrendFilter: false,
+    useTrailingStop: false,
+    useStopsTP: false,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    lag: 2,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 2.5,
+    trailAtrLen: 14,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+
+  const [variant] = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: {
+      freezeArchitecture: false,
+      exploitRatio: 0.8,
+      exploitFamilies: ['signal'],
+      exploreFamilies: ['signal'],
+    },
+  });
+
+  assert.equal(variant.config.useSignalFusion, false);
+  assert.equal(variant.config.useFusionV2, true);
+  assert.equal(variant.config.useFusionV3, true);
+  assert.equal(variant.config.useFusionV4, false);
+  assert.equal(variant.config.useSupertrendFilter, false);
+  assert.equal(variant.config.useTrailingStop, false);
+  assert.equal(variant.config.useStopsTP, false);
 });
 
 test('pine test script defaults to the hardened fusion v4 profile', async () => {

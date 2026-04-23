@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { pathToFileURL } from 'node:url';
 import { analyzeJsonlFile } from './lib/pine-optimizer.mjs';
 import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
 import { buildIncumbentSearchBatch } from './lib/pine-search-policy.mjs';
@@ -61,6 +62,73 @@ function slug(value) {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates }) {
+  const paretoShortlist = buildParetoShortlist({
+    champion: summarizeResult(championState),
+    rankedResults: primarySweep.topConfigs,
+    limit: config.searchPolicy.paretoShortlistSize,
+  });
+
+  const selectedCandidate = selectRobustMatrixCandidate({ candidates: matrixCandidates });
+  const challengerSummary = selectedCandidate?.challenger || summarizeResult(championState);
+  const labResults = selectedCandidate?.labResults || [];
+  const matrixDecision = selectedCandidate?.matrixDecision || decideMatrixPromotion({
+    labResults,
+    policy: config.matrixPolicy,
+    champion: championState,
+    challenger: challengerSummary,
+  });
+  const steadyState = matrixDecision?.gates?.candidateChanged === false;
+  const noChangeStreak = steadyState ? (countTrailingSteadyStateCycles(historyEventsBefore) + 1) : 0;
+
+  return {
+    variantFilePath: path.join(config.researchRoot, `${runId}-variants.json`),
+    paretoShortlist,
+    selectedCandidate,
+    challengerSummary,
+    labResults,
+    matrixDecision,
+    steadyState,
+    noChangeStreak,
+    manifest: {
+      generatedAt: isoNow(),
+      matrixId: config.matrixId,
+      runId,
+      profile: config.selectedProfile,
+      primaryLab: config.primaryLab,
+      shadowLabs: config.shadowLabs,
+      pinnedData: config.pinnedData?.enabled ? {
+        enabled: true,
+        datasetsRoot: config.pinnedData.datasetsRoot,
+        cacheRoot: config.pinnedData.cacheRoot,
+        exchangeName: config.pinnedData.exchangeName,
+      } : { enabled: false },
+      incumbent: summarizeResult(championState),
+      champion: summarizeResult(championState),
+      challenger: challengerSummary,
+      primarySweep,
+      searchPlan: {
+        mode: config.searchPolicy.mode,
+        exploitRatio: config.searchPolicy.exploitRatio,
+        variantCount: searchBatch.length,
+        variants: searchBatch.map(({ variantId, lane, family, config: variantConfig }) => ({ variantId, lane, family, config: variantConfig })),
+      },
+      paretoShortlist,
+      matrixCandidates: matrixCandidates.map((item) => ({
+        challenger: item.challenger,
+        matrixDecision: item.matrixDecision,
+        robustness: item.robustness,
+      })),
+      labResults,
+      matrixDecision,
+      researchState: {
+        steadyState,
+        noChangeStreak,
+      },
+    },
+  };
 }
 
 function manifestsDir(config) {
@@ -623,54 +691,16 @@ async function runScout(config) {
     matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, robustness });
   }
 
-  const selectedCandidate = selectRobustMatrixCandidate({ candidates: matrixCandidates });
-  const challengerSummary = selectedCandidate?.challenger || summarizeResult(championState);
-  const labResults = selectedCandidate?.labResults || [];
-  const matrixDecision = selectedCandidate?.matrixDecision || decideMatrixPromotion({
-    labResults,
-    policy: config.matrixPolicy,
-    champion: championState,
-    challenger: challengerSummary,
-  });
-  const steadyState = matrixDecision?.gates?.candidateChanged === false;
-  const noChangeStreak = steadyState ? (countTrailingSteadyStateCycles(historyEventsBefore) + 1) : 0;
-
-  const manifest = {
-    generatedAt: isoNow(),
-    matrixId: config.matrixId,
+  const orchestration = buildScoutOrchestrationState({
+    config,
     runId,
-    profile: config.selectedProfile,
-    primaryLab: config.primaryLab,
-    shadowLabs: config.shadowLabs,
-    pinnedData: config.pinnedData?.enabled ? {
-      enabled: true,
-      datasetsRoot: config.pinnedData.datasetsRoot,
-      cacheRoot: config.pinnedData.cacheRoot,
-      exchangeName: config.pinnedData.exchangeName,
-    } : { enabled: false },
-    incumbent: summarizeResult(championState),
-    champion: summarizeResult(championState),
-    challenger: challengerSummary,
-    searchPlan: {
-      mode: config.searchPolicy.mode,
-      exploitRatio: config.searchPolicy.exploitRatio,
-      variantCount: searchBatch.length,
-      variants: searchBatch.map(({ variantId, lane, family, config: variantConfig }) => ({ variantId, lane, family, config: variantConfig })),
-    },
+    championState,
+    historyEventsBefore,
+    searchBatch,
     primarySweep,
-    paretoShortlist,
-    matrixCandidates: matrixCandidates.map((item) => ({
-      challenger: item.challenger,
-      matrixDecision: item.matrixDecision,
-      robustness: item.robustness,
-    })),
-    labResults,
-    matrixDecision,
-    researchState: {
-      steadyState,
-      noChangeStreak,
-    },
-  };
+    matrixCandidates,
+  });
+  const { challengerSummary, labResults, matrixDecision, steadyState, noChangeStreak, manifest } = orchestration;
 
   const manifestName = `${runId}.json`;
   const manifestPath = path.join(manifestsDir(config), manifestName);
@@ -894,7 +924,9 @@ async function main() {
   throw new Error(`Unknown command: ${command}`);
 }
 
-main().catch((err) => {
-  console.error(err?.stack || err?.message || String(err));
-  process.exit(1);
-});
+if (pathToFileURL(process.argv[1] || '').href === import.meta.url) {
+  main().catch((err) => {
+    console.error(err?.stack || err?.message || String(err));
+    process.exit(1);
+  });
+}

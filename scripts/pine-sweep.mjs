@@ -128,6 +128,9 @@ async function main() {
   const grid = getCandidateGrid(gridName);
   const variantFile = args['variant-file'] ? path.resolve(cwd, args['variant-file']) : null;
   const rawVariants = variantFile ? JSON.parse(await fs.readFile(variantFile, 'utf8')) : null;
+  if (rawVariants && !Array.isArray(rawVariants)) {
+    throw new Error(`variant-file must contain a JSON array of variant records: ${variantFile}`);
+  }
   const variantRecords = rawVariants
     ? normalizeVariantRecords(rawVariants)
     : selectSweepCombos(grid, { maxConfigs, offset }).map((config, index) => ({
@@ -234,6 +237,9 @@ async function main() {
       results.push({
         status: 'failed',
         configId,
+        variantId: record.variantId,
+        lane: record.lane,
+        family: record.family,
         artifactId,
         config: combo,
         error: error?.message || String(error),

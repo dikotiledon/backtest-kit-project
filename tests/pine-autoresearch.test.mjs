@@ -9,6 +9,7 @@ import {
   decideMatrixPromotion,
   extractChampionBootstrapCandidate,
   planArtifactPrune,
+  renderDigestMarkdown,
   sameConfig,
   selectChampionBootstrapSource,
   selectRobustMatrixCandidate,
@@ -516,6 +517,28 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
   assert.equal(result.manifest.challenger.configId, 'c1');
   assert.equal(result.manifest.researchState.steadyState, false);
   assert.equal(result.manifest.pinnedData.enabled, true);
+});
+
+test('renderDigestMarkdown includes search-plan and shortlist summary', () => {
+  const markdown = renderDigestMarkdown({
+    config: { matrixId: 'pine-fusion-v4-core-15m-locked-window', primaryLab: { labId: 'xrpusdt-15m-primary' }, shadowLabs: [{}, {}] },
+    championState: { configId: 'champion', score: 70.78, roiPct: 47.19 },
+    latestManifest: {
+      runId: 'run-1',
+      champion: { configId: 'champion', score: 70.78, roiPct: 47.19, config: { minPredSum: 2 } },
+      challenger: { configId: 'robust-winner', score: 68.9, roiPct: 45.1, config: { minPredSum: 1.5 } },
+      searchPlan: { variantCount: 8, exploitRatio: 0.8 },
+      paretoShortlist: [{ configId: 'champion' }, { configId: 'robust-winner' }],
+      matrixDecision: { recommendation: 'promote', counts: { allPassCount: 5, totalLabs: 6, shadowPassRatio: 0.8 }, summary: 'Promote robust-winner' },
+    },
+    previousManifest: null,
+    historyEvents: [],
+  });
+
+  assert.match(markdown, /Search plan/);
+  assert.match(markdown, /variantCount: 8/);
+  assert.match(markdown, /Pareto shortlist/);
+  assert.match(markdown, /robust-winner/);
 });
 
 test('default autoresearch config enables incumbent-local shortlist policy', async () => {

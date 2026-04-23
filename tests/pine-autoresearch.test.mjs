@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildParetoShortlist,
   computeSweepOffset,
   decideAutoPromotionAction,
   decideAutoresearchOutcome,
@@ -10,6 +11,7 @@ import {
   planArtifactPrune,
   sameConfig,
   selectChampionBootstrapSource,
+  selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
 
@@ -414,6 +416,39 @@ test('planArtifactPrune can preserve all manifest-backed runs when keepLatestRun
   assert.deepEqual(result.partialSweepRunIds, ['run-x']);
   assert.deepEqual(result.deleteSweepRunIds, ['run-x']);
   assert.deepEqual(result.deleteEvaluationRunIds, []);
+});
+
+test('buildParetoShortlist keeps non-dominated configs and always retains champion', () => {
+  const shortlist = buildParetoShortlist({
+    champion: { configId: 'champion', score: 70.78, roiPct: 47.19, profitFactor: 1.8, maxDrawdownPct: 4.45, tradeCount: 239 },
+    rankedResults: [
+      { configId: 'c1', score: 71.2, roiPct: 46.5, profitFactor: 1.9, maxDrawdownPct: 4.2, tradeCount: 220 },
+      { configId: 'c2', score: 68.1, roiPct: 49.1, profitFactor: 1.7, maxDrawdownPct: 5.8, tradeCount: 260 },
+      { configId: 'dominated', score: 65, roiPct: 40, profitFactor: 1.3, maxDrawdownPct: 7.5, tradeCount: 180 },
+    ],
+    limit: 3,
+  });
+
+  assert.deepEqual(shortlist.map((item) => item.configId), ['champion', 'c1', 'c2']);
+});
+
+test('selectRobustMatrixCandidate prefers multi-window strength over single primary peak', () => {
+  const selected = selectRobustMatrixCandidate({
+    candidates: [
+      {
+        challenger: { configId: 'primary-hero' },
+        matrixDecision: { recommendation: 'hold', counts: { allPassCount: 2, totalLabs: 6, shadowPassCount: 1, shadowPassRatio: 0.2 } },
+        robustness: { aggregateScoreDelta: 5.1, aggregateRoiDeltaPct: 7.0, aggregateProfitFactorDelta: 0.2, aggregateDrawdownDeltaPct: 1.8 },
+      },
+      {
+        challenger: { configId: 'robust-winner' },
+        matrixDecision: { recommendation: 'promote', counts: { allPassCount: 5, totalLabs: 6, shadowPassCount: 4, shadowPassRatio: 0.8 } },
+        robustness: { aggregateScoreDelta: 2.4, aggregateRoiDeltaPct: 3.1, aggregateProfitFactorDelta: 0.1, aggregateDrawdownDeltaPct: -0.4 },
+      },
+    ],
+  });
+
+  assert.equal(selected.challenger.configId, 'robust-winner');
 });
 
 test('default autoresearch config rotates across multiple pinned windows', async () => {

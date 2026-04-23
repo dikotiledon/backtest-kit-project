@@ -10,6 +10,7 @@ import {
   rankSweepResults,
   getCandidateGrid,
   selectSweepCombos,
+  normalizeVariantRecords,
 } from '../scripts/lib/pine-tuner.mjs';
 import { allocateLaneBudget, buildIncumbentSearchBatch } from '../scripts/lib/pine-search-policy.mjs';
 
@@ -597,6 +598,38 @@ test('pine test script defaults to the hardened fusion v4 profile', async () => 
   assert.match(source, /fusionV4ShortEmaWeight\s*=\s*input\.float\(0(?:\.0)?,\s+title="Fusion V4 Short EMA Weight"/);
   assert.match(source, /slAtrMult\s*=\s*input\.float\(1(?:\.0)?,\s+title="SL ATR x"/);
   assert.match(source, /tpAtrMult\s*=\s*input\.float\(2\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
+});
+
+test('normalizeVariantRecords accepts metadata-backed search variants', () => {
+  const records = normalizeVariantRecords([
+    {
+      variantId: 'exploit-signal-1',
+      lane: 'exploit',
+      family: 'signal',
+      config: { neighborsCount: 24, adxThreshold: 20 },
+    },
+  ]);
+
+  assert.deepEqual(records, [
+    {
+      variantId: 'exploit-signal-1',
+      lane: 'exploit',
+      family: 'signal',
+      config: { neighborsCount: 24, adxThreshold: 20 },
+    },
+  ]);
+});
+
+test('normalizeVariantRecords also accepts legacy plain combo arrays', () => {
+  const records = normalizeVariantRecords([{ neighborsCount: 24, adxThreshold: 20 }]);
+  assert.deepEqual(records, [
+    {
+      variantId: 'variant-1',
+      lane: 'legacy',
+      family: 'legacy',
+      config: { neighborsCount: 24, adxThreshold: 20 },
+    },
+  ]);
 });
 
 test('pine test script does not expose long-only or short-only controls', async () => {

@@ -10,6 +10,7 @@ import {
   configIdFromCombo,
   getCandidateGrid,
   leaderboardMarkdown,
+  normalizeVariantRecords,
   rankSweepResults,
   selectSweepCombos,
 } from './lib/pine-tuner.mjs';
@@ -125,7 +126,16 @@ async function main() {
   const inputPath = path.resolve(cwd, input);
   const source = await fs.readFile(inputPath, 'utf8');
   const grid = getCandidateGrid(gridName);
-  const combos = selectSweepCombos(grid, { maxConfigs, offset });
+  const variantFile = args['variant-file'] ? path.resolve(cwd, args['variant-file']) : null;
+  const rawVariants = variantFile ? JSON.parse(await fs.readFile(variantFile, 'utf8')) : null;
+  const variantRecords = rawVariants
+    ? normalizeVariantRecords(rawVariants)
+    : selectSweepCombos(grid, { maxConfigs, offset }).map((config, index) => ({
+        variantId: `variant-${index + 1}`,
+        lane: 'grid',
+        family: gridName,
+        config,
+      }));
 
   const runDir = path.resolve(cwd, 'pine', 'sweeps', runId);
   const variantsDir = path.join(runDir, 'variants');
@@ -140,7 +150,9 @@ async function main() {
     minTrades,
     candidateGrid: serializeGrid(grid),
     gridName,
-    configCount: combos.length,
+    configCount: variantRecords.length,
+    variantFile,
+    variantCount: variantRecords.length,
     sweepOffset: offset,
     when,
     exchange,
@@ -150,8 +162,9 @@ async function main() {
   const results = [];
   const cliScript = path.resolve(cwd, 'scripts', 'pine-import-run-clean.mjs');
 
-  for (let index = 0; index < combos.length; index++) {
-    const combo = combos[index];
+  for (let index = 0; index < variantRecords.length; index++) {
+    const record = variantRecords[index];
+    const combo = record.config;
     const configId = configIdFromCombo(index, combo);
     const artifactId = `cfg-${String(index + 1).padStart(4, '0')}`;
     const patchPlan = buildPatchPlan(combo);
@@ -164,7 +177,7 @@ async function main() {
     const cleanedPath = path.join(dumpDir, `${outputBase}.cleaned.jsonl`);
     const signalsPath = path.join(dumpDir, `${outputBase}.signals.jsonl`);
 
-    console.log(`\n[sweep ${index + 1}/${combos.length}] ${configId}`);
+    console.log(`\n[sweep ${index + 1}/${variantRecords.length}] ${configId}`);
 
     try {
       await fs.writeFile(variantPath, patchedSource, 'utf8');
@@ -201,6 +214,9 @@ async function main() {
       const result = {
         status: 'ok',
         configId,
+        variantId: record.variantId,
+        lane: record.lane,
+        family: record.family,
         artifactId,
         config: combo,
         score: analysis.score,

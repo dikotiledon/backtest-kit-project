@@ -15,6 +15,7 @@ import {
   selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
+import { buildScoutOrchestrationState } from '../scripts/pine-autoresearch.mjs';
 
 function makeResult({
   configId,
@@ -371,28 +372,6 @@ test('summarizeDigestAnnouncement compresses steady-state loops', () => {
   assert.match(text, /streak 4/);
 });
 
-test('renderDigestMarkdown includes search-plan and shortlist summary', () => {
-  const markdown = renderDigestMarkdown({
-    config: { matrixId: 'pine-fusion-v4-core-15m-locked-window', primaryLab: { labId: 'xrpusdt-15m-primary' }, shadowLabs: [{}, {}] },
-    championState: { configId: 'champion', score: 70.78, roiPct: 47.19 },
-    latestManifest: {
-      runId: 'run-1',
-      champion: { configId: 'champion', score: 70.78, roiPct: 47.19, config: { minPredSum: 2 } },
-      challenger: { configId: 'robust-winner', score: 68.9, roiPct: 45.1, config: { minPredSum: 1.5 } },
-      searchPlan: { variantCount: 8, exploitRatio: 0.8 },
-      paretoShortlist: [{ configId: 'champion' }, { configId: 'robust-winner' }],
-      matrixDecision: { recommendation: 'promote', counts: { allPassCount: 5, totalLabs: 6, shadowPassRatio: 0.8 }, summary: 'Promote robust-winner' },
-    },
-    previousManifest: null,
-    historyEvents: [],
-  });
-
-  assert.match(markdown, /Search plan/);
-  assert.match(markdown, /variantCount: 8/);
-  assert.match(markdown, /Pareto shortlist/);
-  assert.match(markdown, /robust-winner/);
-});
-
 test('computeSweepOffset advances hourly scout batches across prior cycles', () => {
   const offset = computeSweepOffset({
     historyEvents: [
@@ -474,6 +453,109 @@ test('selectRobustMatrixCandidate prefers multi-window strength over single prim
   assert.equal(selected.challenger.configId, 'robust-winner');
 });
 
+test('buildScoutOrchestrationState wires variant files, shortlist, matrix selection, and manifest fields', () => {
+  const config = {
+    matrixId: 'pine-autoresearch',
+    selectedProfile: 'full',
+    researchRoot: '/tmp/research',
+    searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+    primaryLab: { labId: 'primary' },
+    shadowLabs: [{ labId: 'shadow-1' }],
+    pinnedData: { enabled: true, datasetsRoot: '/data', cacheRoot: '/cache', exchangeName: 'binance' },
+  };
+
+  const championState = {
+    configId: 'champion',
+    score: 70,
+    config: { minPredSum: 2 },
+  };
+
+  const historyEventsBefore = [
+    { type: 'cycle', steadyState: true },
+    { type: 'cycle', steadyState: true },
+  ];
+
+  const searchBatch = [
+    { variantId: 'v1', lane: 'exploit', family: 'signal', config: { minPredSum: 1.5 } },
+    { variantId: 'v2', lane: 'explore', family: 'risk', config: { minPredSum: 1.6 } },
+  ];
+
+  const primarySweep = {
+    topConfigs: [
+      { configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230 },
+      { configId: 'c2', score: 71, roiPct: 47, profitFactor: 1.8, maxDrawdownPct: 4.3, tradeCount: 225 },
+      { configId: 'c3', score: 69, roiPct: 46, profitFactor: 1.7, maxDrawdownPct: 4.6, tradeCount: 220 },
+    ],
+  };
+
+  const matrixCandidates = [
+    {
+      challenger: { configId: 'c1', config: { minPredSum: 1.5 } },
+      labResults: [{ decision: { recommendation: 'promote', comparisons: { scoreDelta: 1, roiDeltaPct: 2, profitFactorDelta: 0.1, drawdownDeltaPct: -0.2 } } }],
+      matrixDecision: { recommendation: 'promote', gates: { candidateChanged: true } },
+      robustness: { aggregateScoreDelta: 1, aggregateRoiDeltaPct: 2, aggregateProfitFactorDelta: 0.1, aggregateDrawdownDeltaPct: -0.2 },
+    },
+  ];
+
+  const result = buildScoutOrchestrationState({
+    config,
+    runId: 'pine-autoresearch-123',
+    championState,
+    historyEventsBefore,
+    searchBatch,
+    primarySweep,
+    matrixCandidates,
+  });
+
+  assert.match(result.variantFilePath, /pine-autoresearch-123-variants\.json$/);
+  assert.deepEqual(result.paretoShortlist.map((item) => item.configId), ['champion', 'c1']);
+  assert.equal(result.selectedCandidate.challenger.configId, 'c1');
+  assert.equal(result.manifest.searchPlan.variantCount, 2);
+  assert.deepEqual(result.manifest.searchPlan.variants.map((variant) => variant.variantId), ['v1', 'v2']);
+  assert.equal(result.manifest.matrixCandidates[0].challenger.configId, 'c1');
+  assert.equal(result.manifest.challenger.configId, 'c1');
+  assert.equal(result.manifest.researchState.steadyState, false);
+  assert.equal(result.manifest.pinnedData.enabled, true);
+});
+
+test('renderDigestMarkdown includes search-plan and shortlist summary', () => {
+  const markdown = renderDigestMarkdown({
+    config: { matrixId: 'pine-fusion-v4-core-15m-locked-window', primaryLab: { labId: 'xrpusdt-15m-primary' }, shadowLabs: [{}, {}] },
+    championState: { configId: 'champion', score: 70.78, roiPct: 47.19 },
+    latestManifest: {
+      runId: 'run-1',
+      champion: { configId: 'champion', score: 70.78, roiPct: 47.19, config: { minPredSum: 2 } },
+      challenger: { configId: 'robust-winner', score: 68.9, roiPct: 45.1, config: { minPredSum: 1.5 } },
+      searchPlan: { variantCount: 8, exploitRatio: 0.8 },
+      paretoShortlist: [{ configId: 'champion' }, { configId: 'robust-winner' }],
+      matrixDecision: { recommendation: 'promote', counts: { allPassCount: 5, totalLabs: 6, shadowPassRatio: 0.8 }, summary: 'Promote robust-winner' },
+    },
+    previousManifest: null,
+    historyEvents: [],
+  });
+
+  assert.match(markdown, /Search plan/);
+  assert.match(markdown, /variantCount: 8/);
+  assert.match(markdown, /Pareto shortlist/);
+  assert.match(markdown, /robust-winner/);
+});
+
+test('default autoresearch config enables incumbent-local shortlist policy', async () => {
+  const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
+  const config = JSON.parse(raw);
+
+  assert.deepEqual(config.searchPolicy, {
+    mode: 'incumbent-local',
+    exploitRatio: 0.8,
+    freezeArchitecture: true,
+    exploitFamilies: ['signal', 'risk'],
+    exploreFamilies: ['signal'],
+    paretoShortlistSize: 4,
+    matrixCandidateLimit: 3,
+  });
+});
+
 test('default autoresearch config rotates across multiple pinned windows', async () => {
   const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
   const config = JSON.parse(raw);
@@ -481,15 +563,4 @@ test('default autoresearch config rotates across multiple pinned windows', async
 
   assert.ok(whens.size >= 3);
   assert.ok(config.shadowLabs.length >= 5);
-});
-
-test('default autoresearch config includes incumbent-local shortlist policy', async () => {
-  const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
-  const config = JSON.parse(raw);
-
-  assert.equal(config.grid, 'phase3-core');
-  assert.equal(config.searchPolicy?.mode, 'incumbent-local');
-  assert.equal(config.searchPolicy?.exploitRatio, 0.8);
-  assert.equal(config.searchPolicy?.freezeArchitecture, true);
-  assert.equal(config.searchPolicy?.matrixCandidateLimit, 3);
 });

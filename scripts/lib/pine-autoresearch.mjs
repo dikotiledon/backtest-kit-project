@@ -475,6 +475,19 @@ export function renderScoutMarkdown({ config, manifest }) {
     lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
   }
 
+  if (manifest.searchPlan) {
+    lines.push('', '## Search plan', '');
+    lines.push(`- variantCount: ${manifest.searchPlan.variantCount}`);
+    lines.push(`- exploitRatio: ${manifest.searchPlan.exploitRatio}`);
+  }
+
+  if (manifest.paretoShortlist?.length) {
+    lines.push('', '## Pareto shortlist', '');
+    for (const item of manifest.paretoShortlist) {
+      lines.push(`- ${item.configId}: score ${item.score}, ROI ${item.roiPct}%, PF ${item.profitFactor}, max DD ${item.maxDrawdownPct}%`);
+    }
+  }
+
   if (manifest.labResults?.length && !(steadyState && noChangeStreak >= 3)) {
     lines.push('', '## Lab matrix', '', renderLabRowTable(manifest.labResults));
   }

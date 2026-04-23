@@ -3,6 +3,7 @@ import { mkdtemp } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
@@ -14,7 +15,118 @@ import {
   rankSweepResults,
   getCandidateGrid,
   selectSweepCombos,
+  normalizeVariantRecords,
 } from '../scripts/lib/pine-tuner.mjs';
+import { allocateLaneBudget, buildIncumbentSearchBatch } from '../scripts/lib/pine-search-policy.mjs';
+
+test('allocateLaneBudget keeps an 80/20 split while guaranteeing at least one explore slot', () => {
+  assert.deepEqual(allocateLaneBudget(8, 0.8), { exploit: 6, explore: 2 });
+  assert.deepEqual(allocateLaneBudget(5, 0.8), { exploit: 4, explore: 1 });
+  assert.deepEqual(allocateLaneBudget(1, 0.8), { exploit: 1, explore: 0 });
+});
+
+test('buildIncumbentSearchBatch freezes strategy architecture and emits lane metadata', () => {
+  const incumbent = {
+    useSignalFusion: true,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    useSupertrendFilter: true,
+    useTrailingStop: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    lag: 2,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 2.5,
+    trailAtrLen: 14,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 8,
+    historyEvents: [],
+    policy: {
+      exploitRatio: 0.8,
+      freezeArchitecture: true,
+      exploitFamilies: ['signal', 'risk'],
+      exploreFamilies: ['signal'],
+    },
+  });
+
+  assert.equal(batch.length, 8);
+  assert.equal(batch.filter((item) => item.lane === 'exploit').length, 6);
+  assert.equal(batch.filter((item) => item.lane === 'explore').length, 2);
+
+  for (const item of batch) {
+    assert.equal(item.config.useSignalFusion, true);
+    assert.equal(item.config.useFusionV2, false);
+    assert.equal(item.config.useFusionV3, false);
+    assert.equal(item.config.useFusionV4, true);
+    assert.equal(item.config.useSupertrendFilter, true);
+    assert.equal(item.config.useTrailingStop, true);
+    assert.match(item.variantId, /^(exploit|explore)-/);
+  }
+});
+
+test('buildIncumbentSearchBatch rotates exploit families by cycle count', () => {
+  const incumbent = {
+    useSignalFusion: true,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    useSupertrendFilter: true,
+    useTrailingStop: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    lag: 2,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 2.5,
+    trailAtrLen: 14,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+
+  const cycle0Families = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 4,
+    historyEvents: [],
+    policy: {
+      exploitRatio: 0.5,
+      freezeArchitecture: true,
+      exploitFamilies: ['signal', 'risk'],
+      exploreFamilies: ['signal'],
+    },
+  }).map((variant) => variant.family);
+
+  const cycle1Families = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 4,
+    historyEvents: [{ type: 'cycle' }],
+    policy: {
+      exploitRatio: 0.5,
+      freezeArchitecture: true,
+      exploitFamilies: ['signal', 'risk'],
+      exploreFamilies: ['signal'],
+    },
+  }).map((variant) => variant.family);
+
+  assert.deepEqual(cycle0Families, ['signal', 'risk', 'signal', 'signal']);
+  assert.deepEqual(cycle1Families, ['risk', 'signal', 'signal', 'signal']);
+});
 
 test('cartesianProduct expands candidate grid into all combinations', () => {
   const combos = cartesianProduct({
@@ -418,6 +530,52 @@ test('selectSweepCombos rotates candidate batches with wrap-around', () => {
   ]);
 });
 
+test('buildIncumbentSearchBatch preserves incumbent architecture when freezeArchitecture is false', () => {
+  const incumbent = {
+    useSignalFusion: false,
+    useFusionV2: true,
+    useFusionV3: true,
+    useFusionV4: false,
+    useSupertrendFilter: false,
+    useTrailingStop: false,
+    useStopsTP: false,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    lag: 2,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 2.5,
+    trailAtrLen: 14,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+
+  const [variant] = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: {
+      freezeArchitecture: false,
+      exploitRatio: 0.8,
+      exploitFamilies: ['signal'],
+      exploreFamilies: ['signal'],
+    },
+  });
+
+  assert.equal(variant.config.useSignalFusion, false);
+  assert.equal(variant.config.useFusionV2, true);
+  assert.equal(variant.config.useFusionV3, true);
+  assert.equal(variant.config.useFusionV4, false);
+  assert.equal(variant.config.useSupertrendFilter, false);
+  assert.equal(variant.config.useTrailingStop, false);
+  assert.equal(variant.config.useStopsTP, false);
+});
+
 test('pine test script defaults to the hardened fusion v4 profile', async () => {
   const source = await fs.readFile(new URL('../pine/test.pine', import.meta.url), 'utf8');
 
@@ -447,6 +605,38 @@ test('pine test script defaults to the hardened fusion v4 profile', async () => 
   assert.match(source, /tpAtrMult\s*=\s*input\.float\(2\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
 });
 
+test('normalizeVariantRecords accepts metadata-backed search variants', () => {
+  const records = normalizeVariantRecords([
+    {
+      variantId: 'exploit-signal-1',
+      lane: 'exploit',
+      family: 'signal',
+      config: { neighborsCount: 24, adxThreshold: 20 },
+    },
+  ]);
+
+  assert.deepEqual(records, [
+    {
+      variantId: 'exploit-signal-1',
+      lane: 'exploit',
+      family: 'signal',
+      config: { neighborsCount: 24, adxThreshold: 20 },
+    },
+  ]);
+});
+
+test('normalizeVariantRecords also accepts legacy plain combo arrays', () => {
+  const records = normalizeVariantRecords([{ neighborsCount: 24, adxThreshold: 20 }]);
+  assert.deepEqual(records, [
+    {
+      variantId: 'variant-1',
+      lane: 'legacy',
+      family: 'legacy',
+      config: { neighborsCount: 24, adxThreshold: 20 },
+    },
+  ]);
+});
+
 test('pine test script does not expose long-only or short-only controls', async () => {
   const source = await fs.readFile(new URL('../pine/test.pine', import.meta.url), 'utf8');
 
@@ -462,12 +652,12 @@ test('pine-sweep rejects non-array variant files with a useful error', async () 
   const variantFile = path.join(tempDir, 'variants.json');
   await fs.writeFile(variantFile, JSON.stringify({ variantId: 'bad' }), 'utf8');
 
-  const scriptPath = new URL('../scripts/pine-sweep.mjs', import.meta.url);
-  const inputPath = new URL('../pine/test.pine', import.meta.url);
+  const scriptPath = fileURLToPath(new URL('../scripts/pine-sweep.mjs', import.meta.url));
+  const inputPath = fileURLToPath(new URL('../pine/test.pine', import.meta.url));
 
   const result = await new Promise((resolve) => {
-    const child = spawn('node', [scriptPath.pathname, '--input', inputPath.pathname, '--variant-file', variantFile, '--max-configs', '1'], {
-      cwd: path.resolve(path.dirname(scriptPath.pathname), '..'),
+    const child = spawn(process.execPath, [scriptPath, '--input', inputPath, '--variant-file', variantFile, '--max-configs', '1'], {
+      cwd: path.resolve(path.dirname(scriptPath), '..'),
       shell: false,
     });
     let stderr = '';

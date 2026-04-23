@@ -10,6 +10,7 @@ import {
   configIdFromCombo,
   getCandidateGrid,
   leaderboardMarkdown,
+  normalizeVariantRecords,
   rankSweepResults,
   selectSweepCombos,
 } from './lib/pine-tuner.mjs';
@@ -48,7 +49,7 @@ function serializeGrid(grid) {
 
 async function runNode(args, cwd) {
   return new Promise((resolve, reject) => {
-    const child = spawn('node', args, { cwd, stdio: 'pipe', shell: false });
+    const child = spawn(process.execPath, args, { cwd, stdio: 'pipe', shell: false });
     let stdout = '';
     let stderr = '';
 
@@ -101,21 +102,6 @@ async function writeSweepFiles(runDir, results, meta) {
   }
 }
 
-function normalizeVariantRecord(record, index) {
-  if (!record || typeof record !== 'object') {
-    throw new Error(`variant-file entries must be objects with a config field (index ${index})`);
-  }
-
-  const config = record.config && typeof record.config === 'object' ? record.config : record;
-  return {
-    ...record,
-    variantId: record.variantId || `variant-${String(index + 1).padStart(4, '0')}`,
-    lane: record.lane,
-    family: record.family,
-    config,
-  };
-}
-
 async function main() {
   const cwd = process.cwd();
   const args = parseArgs(process.argv.slice(2));
@@ -134,24 +120,25 @@ async function main() {
   const requireCacheComplete = Boolean(args['require-cache-complete']);
   const cacheRoot = args['cache-root'] ? String(args['cache-root']) : null;
   const cacheExchange = args['cache-exchange'] ? String(args['cache-exchange']) : null;
-  const variantFile = args['variant-file'] ? String(args['variant-file']) : null;
   const gridName = String(args.grid || 'default');
   const runId = args['run-id'] || `sweep-${gridName}-${symbol}-${timeframe}-${limit}-${timestampId()}`;
 
   const inputPath = path.resolve(cwd, input);
   const source = await fs.readFile(inputPath, 'utf8');
   const grid = getCandidateGrid(gridName);
-  let combos;
-  if (variantFile) {
-    const variantPath = path.resolve(cwd, variantFile);
-    const rawVariants = JSON.parse(await fs.readFile(variantPath, 'utf8'));
-    if (rawVariants && !Array.isArray(rawVariants)) {
-      throw new Error(`variant-file must contain a JSON array of variant records: ${variantPath}`);
-    }
-    combos = (rawVariants || []).map((record, index) => normalizeVariantRecord(record, index));
-  } else {
-    combos = selectSweepCombos(grid, { maxConfigs, offset });
+  const variantFile = args['variant-file'] ? path.resolve(cwd, args['variant-file']) : null;
+  const rawVariants = variantFile ? JSON.parse(await fs.readFile(variantFile, 'utf8')) : null;
+  if (rawVariants && !Array.isArray(rawVariants)) {
+    throw new Error(`variant-file must contain a JSON array of variant records: ${variantFile}`);
   }
+  const variantRecords = rawVariants
+    ? normalizeVariantRecords(rawVariants)
+    : selectSweepCombos(grid, { maxConfigs, offset }).map((config, index) => ({
+        variantId: `variant-${index + 1}`,
+        lane: 'grid',
+        family: gridName,
+        config,
+      }));
 
   const runDir = path.resolve(cwd, 'pine', 'sweeps', runId);
   const variantsDir = path.join(runDir, 'variants');
@@ -166,7 +153,9 @@ async function main() {
     minTrades,
     candidateGrid: serializeGrid(grid),
     gridName,
-    configCount: combos.length,
+    configCount: variantRecords.length,
+    variantFile,
+    variantCount: variantRecords.length,
     sweepOffset: offset,
     when,
     exchange,
@@ -176,8 +165,9 @@ async function main() {
   const results = [];
   const cliScript = path.resolve(cwd, 'scripts', 'pine-import-run-clean.mjs');
 
-  for (let index = 0; index < combos.length; index++) {
-    const combo = combos[index];
+  for (let index = 0; index < variantRecords.length; index++) {
+    const record = variantRecords[index];
+    const combo = record.config;
     const configId = configIdFromCombo(index, combo);
     const artifactId = `cfg-${String(index + 1).padStart(4, '0')}`;
     const patchPlan = buildPatchPlan(combo);
@@ -190,7 +180,7 @@ async function main() {
     const cleanedPath = path.join(dumpDir, `${outputBase}.cleaned.jsonl`);
     const signalsPath = path.join(dumpDir, `${outputBase}.signals.jsonl`);
 
-    console.log(`\n[sweep ${index + 1}/${combos.length}] ${configId}`);
+    console.log(`\n[sweep ${index + 1}/${variantRecords.length}] ${configId}`);
 
     try {
       await fs.writeFile(variantPath, patchedSource, 'utf8');
@@ -227,10 +217,10 @@ async function main() {
       const result = {
         status: 'ok',
         configId,
+        variantId: record.variantId,
+        lane: record.lane,
+        family: record.family,
         artifactId,
-        variantId: combo.variantId,
-        lane: combo.lane,
-        family: combo.family,
         config: combo,
         score: analysis.score,
         rowCount: analysis.rowCount,
@@ -247,10 +237,10 @@ async function main() {
       results.push({
         status: 'failed',
         configId,
+        variantId: record.variantId,
+        lane: record.lane,
+        family: record.family,
         artifactId,
-        variantId: combo.variantId,
-        lane: combo.lane,
-        family: combo.family,
         config: combo,
         error: error?.message || String(error),
       });

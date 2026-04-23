@@ -1,3 +1,23 @@
+export function normalizeVariantRecords(rawVariants = []) {
+  return rawVariants.map((item, index) => {
+    if (item?.config && typeof item.config === 'object') {
+      return {
+        variantId: item.variantId || `variant-${index + 1}`,
+        lane: item.lane || 'legacy',
+        family: item.family || 'legacy',
+        config: { ...item.config },
+      };
+    }
+
+    return {
+      variantId: `variant-${index + 1}`,
+      lane: 'legacy',
+      family: 'legacy',
+      config: { ...item },
+    };
+  });
+}
+
 export function cartesianProduct(grid) {
   const entries = Object.entries(grid);
   if (!entries.length) return [{}];

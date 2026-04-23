@@ -116,6 +116,63 @@ export async function readJsonl(filePath) {
   }
 }
 
+function dominates(left, right) {
+  const betterOrEqual =
+    (left.score ?? 0) >= (right.score ?? 0) &&
+    (left.roiPct ?? 0) >= (right.roiPct ?? 0) &&
+    (left.profitFactor ?? 0) >= (right.profitFactor ?? 0) &&
+    (left.tradeCount ?? 0) >= (right.tradeCount ?? 0) &&
+    (left.maxDrawdownPct ?? Infinity) <= (right.maxDrawdownPct ?? Infinity);
+
+  const strictlyBetter =
+    (left.score ?? 0) > (right.score ?? 0) ||
+    (left.roiPct ?? 0) > (right.roiPct ?? 0) ||
+    (left.profitFactor ?? 0) > (right.profitFactor ?? 0) ||
+    (left.tradeCount ?? 0) > (right.tradeCount ?? 0) ||
+    (left.maxDrawdownPct ?? Infinity) < (right.maxDrawdownPct ?? Infinity);
+
+  return betterOrEqual && strictlyBetter;
+}
+
+export function buildParetoShortlist({ champion, rankedResults = [], limit = 4 }) {
+  const pool = [champion, ...rankedResults].filter(Boolean);
+  const frontier = pool.filter((candidate, index) => {
+    return !pool.some((other, otherIndex) => otherIndex !== index && dominates(other, candidate));
+  });
+
+  const unique = [];
+  const seen = new Set();
+  for (const item of frontier) {
+    const key = item.configId || JSON.stringify(item.config || item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(item);
+  }
+
+  if (champion && !unique.some((item) => item.configId === champion.configId)) {
+    unique.unshift(champion);
+  }
+
+  return unique.slice(0, limit);
+}
+
+function robustnessScore(candidate) {
+  const counts = candidate.matrixDecision?.counts || {};
+  const robustness = candidate.robustness || {};
+  return (
+    (counts.allPassCount || 0) * 100 +
+    (counts.shadowPassCount || 0) * 25 +
+    (robustness.aggregateScoreDelta || 0) * 2 +
+    (robustness.aggregateRoiDeltaPct || 0) * 3 +
+    (robustness.aggregateProfitFactorDelta || 0) * 20 -
+    (robustness.aggregateDrawdownDeltaPct || 0) * 10
+  );
+}
+
+export function selectRobustMatrixCandidate({ candidates = [] }) {
+  return [...candidates].sort((left, right) => robustnessScore(right) - robustnessScore(left))[0] || null;
+}
+
 export function summarizeResult(result) {
   if (!result) return null;
   return {
@@ -422,6 +479,19 @@ export function renderScoutMarkdown({ config, manifest }) {
     lines.push('', '## Lab matrix', '', renderLabRowTable(manifest.labResults));
   }
 
+  if (manifest.searchPlan) {
+    lines.push('', '## Search plan', '');
+    lines.push(`- variantCount: ${manifest.searchPlan.variantCount}`);
+    lines.push(`- exploitRatio: ${manifest.searchPlan.exploitRatio}`);
+  }
+
+  if (manifest.paretoShortlist?.length) {
+    lines.push('', '## Pareto shortlist', '');
+    for (const item of manifest.paretoShortlist) {
+      lines.push(`- ${item.configId}: score ${item.score}, ROI ${item.roiPct}%, PF ${item.profitFactor}, max DD ${item.maxDrawdownPct}%`);
+    }
+  }
+
   if (manifest.primarySweep?.topConfigs?.length) {
     lines.push('', '## Primary sweep top configs', '');
     for (const item of manifest.primarySweep.topConfigs) {
@@ -473,6 +543,19 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
   if (decision?.counts) {
     lines.push(`- Promote labs: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
     lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
+  }
+
+  if (latestManifest?.searchPlan) {
+    lines.push('', '## Search plan', '');
+    lines.push(`- variantCount: ${latestManifest.searchPlan.variantCount}`);
+    lines.push(`- exploitRatio: ${latestManifest.searchPlan.exploitRatio}`);
+  }
+
+  if (latestManifest?.paretoShortlist?.length) {
+    lines.push('', '## Pareto shortlist', '');
+    for (const item of latestManifest.paretoShortlist) {
+      lines.push(`- ${item.configId}: score ${item.score}, ROI ${item.roiPct}%, PF ${item.profitFactor}, max DD ${item.maxDrawdownPct}%`);
+    }
   }
 
   if (latestManifest?.labResults?.length) {

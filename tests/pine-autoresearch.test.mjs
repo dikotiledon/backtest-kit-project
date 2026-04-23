@@ -2,14 +2,17 @@ import fs from 'node:fs/promises';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildParetoShortlist,
   computeSweepOffset,
   decideAutoPromotionAction,
   decideAutoresearchOutcome,
   decideMatrixPromotion,
   extractChampionBootstrapCandidate,
   planArtifactPrune,
+  renderDigestMarkdown,
   sameConfig,
   selectChampionBootstrapSource,
+  selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
 
@@ -368,6 +371,28 @@ test('summarizeDigestAnnouncement compresses steady-state loops', () => {
   assert.match(text, /streak 4/);
 });
 
+test('renderDigestMarkdown includes search-plan and shortlist summary', () => {
+  const markdown = renderDigestMarkdown({
+    config: { matrixId: 'pine-fusion-v4-core-15m-locked-window', primaryLab: { labId: 'xrpusdt-15m-primary' }, shadowLabs: [{}, {}] },
+    championState: { configId: 'champion', score: 70.78, roiPct: 47.19 },
+    latestManifest: {
+      runId: 'run-1',
+      champion: { configId: 'champion', score: 70.78, roiPct: 47.19, config: { minPredSum: 2 } },
+      challenger: { configId: 'robust-winner', score: 68.9, roiPct: 45.1, config: { minPredSum: 1.5 } },
+      searchPlan: { variantCount: 8, exploitRatio: 0.8 },
+      paretoShortlist: [{ configId: 'champion' }, { configId: 'robust-winner' }],
+      matrixDecision: { recommendation: 'promote', counts: { allPassCount: 5, totalLabs: 6, shadowPassRatio: 0.8 }, summary: 'Promote robust-winner' },
+    },
+    previousManifest: null,
+    historyEvents: [],
+  });
+
+  assert.match(markdown, /Search plan/);
+  assert.match(markdown, /variantCount: 8/);
+  assert.match(markdown, /Pareto shortlist/);
+  assert.match(markdown, /robust-winner/);
+});
+
 test('computeSweepOffset advances hourly scout batches across prior cycles', () => {
   const offset = computeSweepOffset({
     historyEvents: [
@@ -416,6 +441,39 @@ test('planArtifactPrune can preserve all manifest-backed runs when keepLatestRun
   assert.deepEqual(result.deleteEvaluationRunIds, []);
 });
 
+test('buildParetoShortlist keeps non-dominated configs and always retains champion', () => {
+  const shortlist = buildParetoShortlist({
+    champion: { configId: 'champion', score: 70.78, roiPct: 47.19, profitFactor: 1.8, maxDrawdownPct: 4.45, tradeCount: 239 },
+    rankedResults: [
+      { configId: 'c1', score: 71.2, roiPct: 46.5, profitFactor: 1.9, maxDrawdownPct: 4.2, tradeCount: 220 },
+      { configId: 'c2', score: 68.1, roiPct: 49.1, profitFactor: 1.7, maxDrawdownPct: 5.8, tradeCount: 260 },
+      { configId: 'dominated', score: 65, roiPct: 40, profitFactor: 1.3, maxDrawdownPct: 7.5, tradeCount: 180 },
+    ],
+    limit: 3,
+  });
+
+  assert.deepEqual(shortlist.map((item) => item.configId), ['champion', 'c1', 'c2']);
+});
+
+test('selectRobustMatrixCandidate prefers multi-window strength over single primary peak', () => {
+  const selected = selectRobustMatrixCandidate({
+    candidates: [
+      {
+        challenger: { configId: 'primary-hero' },
+        matrixDecision: { recommendation: 'hold', counts: { allPassCount: 2, totalLabs: 6, shadowPassCount: 1, shadowPassRatio: 0.2 } },
+        robustness: { aggregateScoreDelta: 5.1, aggregateRoiDeltaPct: 7.0, aggregateProfitFactorDelta: 0.2, aggregateDrawdownDeltaPct: 1.8 },
+      },
+      {
+        challenger: { configId: 'robust-winner' },
+        matrixDecision: { recommendation: 'promote', counts: { allPassCount: 5, totalLabs: 6, shadowPassCount: 4, shadowPassRatio: 0.8 } },
+        robustness: { aggregateScoreDelta: 2.4, aggregateRoiDeltaPct: 3.1, aggregateProfitFactorDelta: 0.1, aggregateDrawdownDeltaPct: -0.4 },
+      },
+    ],
+  });
+
+  assert.equal(selected.challenger.configId, 'robust-winner');
+});
+
 test('default autoresearch config rotates across multiple pinned windows', async () => {
   const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
   const config = JSON.parse(raw);
@@ -423,4 +481,15 @@ test('default autoresearch config rotates across multiple pinned windows', async
 
   assert.ok(whens.size >= 3);
   assert.ok(config.shadowLabs.length >= 5);
+});
+
+test('default autoresearch config includes incumbent-local shortlist policy', async () => {
+  const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
+  const config = JSON.parse(raw);
+
+  assert.equal(config.grid, 'phase3-core');
+  assert.equal(config.searchPolicy?.mode, 'incumbent-local');
+  assert.equal(config.searchPolicy?.exploitRatio, 0.8);
+  assert.equal(config.searchPolicy?.freezeArchitecture, true);
+  assert.equal(config.searchPolicy?.matrixCandidateLimit, 3);
 });

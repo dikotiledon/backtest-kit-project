@@ -70,6 +70,15 @@ Current phase 3 optimizer scope is broader, but still curated rather than brute-
 - use a curated rotating variant list instead of naive full cartesian expansion, so hourly scouts explore new territory without blowing memory
 - keep non-strategy / display inputs out of the champion loop
 
+## Search policy
+
+The scheduler now uses an incumbent-local search policy instead of a broad static grid.
+
+- 80% of each cycle budget is spent on exploit variants near the current champion.
+- 20% is spent on explore variants from the same frozen architecture family.
+- Strategy architecture stays fixed around the current V4 champion unless `searchPolicy.freezeArchitecture` is explicitly disabled.
+- The primary sweep keeps a Pareto shortlist; the matrix phase can promote a robust shortlist survivor even when it is not the single best primary-lab score.
+
 Detailed input audit:
 - `docs/2026-04-22-pine-phase3-input-audit.md`
 

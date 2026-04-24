@@ -48,7 +48,7 @@
       "minProfitFactorDelta": 0,
       "maxDrawdownDeltaPct": 0.75,
       "minTradeCount": 150,
-      "minTradeRatioVsIncumbent": 0.75
+      "minTradeRatioVsIncumbent": 0.85
     }
   },
   "shadowLabs": [
@@ -64,8 +64,8 @@
         "minRoiDeltaPct": -0.5,
         "minProfitFactorDelta": -0.05,
         "maxDrawdownDeltaPct": 1,
-        "minTradeCount": 100,
-        "minTradeRatioVsIncumbent": 0.65
+        "minTradeCount": 120,
+        "minTradeRatioVsIncumbent": 0.8
       }
     },
     {
@@ -80,8 +80,8 @@
         "minRoiDeltaPct": -0.5,
         "minProfitFactorDelta": -0.05,
         "maxDrawdownDeltaPct": 1,
-        "minTradeCount": 100,
-        "minTradeRatioVsIncumbent": 0.65
+        "minTradeCount": 120,
+        "minTradeRatioVsIncumbent": 0.8
       }
     },
     {
@@ -97,7 +97,7 @@
         "minProfitFactorDelta": -0.08,
         "maxDrawdownDeltaPct": 1.25,
         "minTradeCount": 80,
-        "minTradeRatioVsIncumbent": 0.6
+        "minTradeRatioVsIncumbent": 0.75
       }
     },
     {
@@ -113,7 +113,7 @@
         "minProfitFactorDelta": -0.08,
         "maxDrawdownDeltaPct": 1.25,
         "minTradeCount": 80,
-        "minTradeRatioVsIncumbent": 0.6
+        "minTradeRatioVsIncumbent": 0.75
       }
     },
     {
@@ -129,7 +129,7 @@
         "minProfitFactorDelta": -0.1,
         "maxDrawdownDeltaPct": 1.5,
         "minTradeCount": 60,
-        "minTradeRatioVsIncumbent": 0.55
+        "minTradeRatioVsIncumbent": 0.7
       }
     }
   ],

@@ -190,7 +190,7 @@ export function scoreMetrics(metrics, options = {}) {
   const minTrades = options.minTrades ?? 10;
   const weights = {
     roi: options.roiWeight ?? 1.0,
-    winRate: options.winRateWeight ?? 0.35,
+    winRate: options.winRateWeight ?? 0.8,
     profitFactor: options.profitFactorWeight ?? 8,
     drawdown: options.drawdownWeight ?? 0.6,
   };

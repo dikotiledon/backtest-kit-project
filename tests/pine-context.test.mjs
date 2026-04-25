@@ -23,3 +23,21 @@ test('pine script exports AVWAP and channel features via data window', async () 
   assert.match(source, /plot\(featureContextLongQualify, "Feature_ContextLongQualify", display=display\.data_window\)/);
   assert.match(source, /plot\(featureLongContextCaution, "Feature_LongContextCaution", display=display\.data_window\)/);
 });
+
+test('pine script gates final entries through asymmetric context policy', async () => {
+  const source = await fs.readFile(sourcePath, 'utf8');
+
+  assert.match(source, /startLongTrade\s*=\s*baseStartLong[\s\S]*contextLongQualify[\s\S]*not contextLongBlocked/);
+  assert.match(source, /startShortTrade\s*=\s*baseStartShort[\s\S]*contextShortQualify[\s\S]*not contextShortBlocked/);
+  assert.match(source, /contextLongBlocked\s*=\s*useContextAggregator and \(/);
+  assert.match(source, /contextShortBlocked\s*=\s*useContextAggregator and \(/);
+});
+
+test('pine script tightens exits from context caution without weakening hard risk controls', async () => {
+  const source = await fs.readFile(sourcePath, 'utf8');
+
+  assert.match(source, /contextTrailAtrMultLong\s*=\s*contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution \? trailAtrMult \* contextTrailTightenFactor : trailAtrMult/);
+  assert.match(source, /contextTrailAtrMultShort\s*=\s*contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution \? trailAtrMult \* contextTrailTightenFactor : trailAtrMult/);
+  assert.match(source, /endLongTrade\s*=\s*[\s\S]*\(contextAllowLongEarlyExit and endLongTradeDynamic\)/);
+  assert.match(source, /endShortTrade\s*=\s*[\s\S]*\(contextAllowShortEarlyExit and endShortTradeDynamic\)/);
+});

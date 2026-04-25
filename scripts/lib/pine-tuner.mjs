@@ -35,6 +35,42 @@ export function cartesianProduct(grid) {
   return combos;
 }
 
+const AVWAP_CONTEXT_KEYS = [
+  'avwapSwingPeriod',
+  'avwapReclaimFreshBars',
+  'avwapMaxDistanceAtr',
+  'avwapMaxAnchorAge',
+  'avwapRequireReclaimForEntry',
+];
+
+const CHANNEL_CONTEXT_KEYS = [
+  'channelDetectLength',
+  'channelCompressionThreshold',
+  'channelBreakoutFreshBars',
+  'channelEnableRetest',
+  'channelRetestFreshBars',
+  'channelHostileBlocksEntry',
+];
+
+const CONTEXT_AGGREGATOR_KEYS = [
+  'contextStrictRequireChannel',
+  'contextBoostAddsToStrength',
+  'contextBoostValue',
+  'contextHostileBlocksEntry',
+];
+
+const CONTEXT_EXIT_SHAPING_KEYS = [
+  'contextTightenTrailOnCaution',
+  'contextTrailTightenFactor',
+  'contextAllowEarlySignalExit',
+];
+
+function deleteKeys(target, keys) {
+  for (const key of keys) {
+    delete target[key];
+  }
+}
+
 export function filterSweepCombos(combos) {
   const seen = new Set();
   const filtered = [];
@@ -114,19 +150,19 @@ export function filterSweepCombos(combos) {
     }
 
     if (normalized.useAvwapContext !== true) {
-      delete normalized.avwapSwingPeriod;
+      deleteKeys(normalized, AVWAP_CONTEXT_KEYS);
     }
 
     if (normalized.useChannelContext !== true) {
-      delete normalized.channelDetectLength;
+      deleteKeys(normalized, CHANNEL_CONTEXT_KEYS);
     }
 
     if (normalized.useContextAggregator !== true) {
-      delete normalized.contextBoostValue;
+      deleteKeys(normalized, CONTEXT_AGGREGATOR_KEYS);
     }
 
     if (normalized.useContextExitShaping !== true) {
-      delete normalized.contextTrailTightenFactor;
+      deleteKeys(normalized, CONTEXT_EXIT_SHAPING_KEYS);
     }
 
     const key = JSON.stringify(normalized);
@@ -399,7 +435,7 @@ const PATCHERS = {
   }),
   useAvwapContext: boolInputPatcher('useAvwapContext', 'Use AVWAP Context'),
   avwapSwingPeriod: intInputPatcher('avwapSwingPeriod', 'AVWAP Swing Period'),
-  useChannelContext: boolInputPatcher('useChannelContext', 'Use Channel Context'),
+  useChannelContext: boolInputPatcher('useChannelContext', 'Use Breakout Context'),
   channelDetectLength: intInputPatcher('channelDetectLength', 'Channel Detect Length'),
   useContextAggregator: boolInputPatcher('useContextAggregator', 'Use Context Aggregator'),
   contextBoostValue: floatInputPatcher('contextBoostValue', 'Context Boost Value'),

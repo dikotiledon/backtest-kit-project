@@ -678,8 +678,41 @@ test('getCandidateGrid returns expanded phase3-core grid with broader strategy k
   assert.deepEqual(grid.trailAtrLen, [7, 14, 21]);
   assert.deepEqual(grid.trailAtrMult, [1.0, 1.5, 2.0]);
   assert.deepEqual(grid.trailActivateR, [0.5, 1.0, 1.5]);
+  assert.deepEqual(grid.useAvwapContext, [false, true]);
+  assert.deepEqual(grid.avwapSwingPeriod, [21, 34, 50]);
+  assert.deepEqual(grid.avwapReclaimFreshBars, [4, 6, 10]);
+  assert.deepEqual(grid.avwapMaxDistanceAtr, [0.75, 1.0, 1.5]);
+  assert.deepEqual(grid.avwapMaxAnchorAge, [50, 100, 200]);
+  assert.deepEqual(grid.avwapRequireReclaimForEntry, [false, true]);
+  assert.deepEqual(grid.useChannelContext, [false, true]);
+  assert.deepEqual(grid.channelDetectLength, [14, 18, 24]);
+  assert.deepEqual(grid.channelCompressionThreshold, [0.25, 0.35, 0.5]);
+  assert.deepEqual(grid.channelBreakoutFreshBars, [2, 4, 6]);
+  assert.deepEqual(grid.channelEnableRetest, [false, true]);
+  assert.deepEqual(grid.channelRetestFreshBars, [4, 6]);
+  assert.deepEqual(grid.channelHostileBlocksEntry, [false, true]);
+  assert.deepEqual(grid.useContextAggregator, [false, true]);
+  assert.deepEqual(grid.contextStrictRequireChannel, [false, true]);
+  assert.deepEqual(grid.contextBoostAddsToStrength, [false, true]);
+  assert.deepEqual(grid.contextBoostValue, [0.25, 0.5]);
+  assert.deepEqual(grid.contextHostileBlocksEntry, [false, true]);
+  assert.deepEqual(grid.useContextExitShaping, [false, true]);
+  assert.deepEqual(grid.contextTightenTrailOnCaution, [false, true]);
+  assert.deepEqual(grid.contextTrailTightenFactor, [0.5, 0.75]);
+  assert.deepEqual(grid.contextAllowEarlySignalExit, [false, true]);
   assert.ok(Array.isArray(grid.__variants));
   assert.ok(grid.__variants.every((variant) => variant.useStopsTP === true));
+  assert.ok(grid.__variants.some((variant) => variant.useAvwapContext === true && variant.useChannelContext !== true));
+  assert.ok(grid.__variants.some((variant) => variant.useAvwapContext === true && variant.useChannelContext === true));
+});
+
+test('selectSweepCombos preserves explicit phase3-core context variants', () => {
+  const grid = getCandidateGrid('phase3-core');
+  const batch = selectSweepCombos(grid, { maxConfigs: 6, offset: 0 });
+
+  assert.equal(batch.length, 6);
+  assert.ok(batch.some((variant) => variant.useAvwapContext === true && variant.useChannelContext !== true));
+  assert.ok(batch.some((variant) => variant.useAvwapContext === true && variant.useChannelContext === true));
 });
 
 test('selectSweepCombos rotates candidate batches with wrap-around', () => {

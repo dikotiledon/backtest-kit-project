@@ -684,12 +684,56 @@ function phase3CoreBaseConfig() {
     trailAtrLen: 14,
     trailAtrMult: 1.0,
     trailActivateR: 0.5,
+    useAvwapContext: false,
+    avwapSwingPeriod: 34,
+    avwapReclaimFreshBars: 6,
+    avwapMaxDistanceAtr: 1.0,
+    avwapMaxAnchorAge: 100,
+    avwapRequireReclaimForEntry: false,
+    useChannelContext: false,
+    channelDetectLength: 18,
+    channelCompressionThreshold: 0.35,
+    channelBreakoutFreshBars: 4,
+    channelEnableRetest: false,
+    channelRetestFreshBars: 6,
+    channelHostileBlocksEntry: true,
+    useContextAggregator: false,
+    contextStrictRequireChannel: false,
+    contextBoostAddsToStrength: false,
+    contextBoostValue: 0.25,
+    contextHostileBlocksEntry: true,
+    useContextExitShaping: false,
+    contextTightenTrailOnCaution: false,
+    contextTrailTightenFactor: 0.75,
+    contextAllowEarlySignalExit: false,
   };
 }
 
 function buildPhase3CoreVariants() {
   const base = phase3CoreBaseConfig();
-  const patches = [
+  const contextPatches = [
+    { useAvwapContext: true, avwapSwingPeriod: 34, avwapReclaimFreshBars: 6 },
+    { useAvwapContext: true, avwapSwingPeriod: 50, avwapMaxDistanceAtr: 1.0 },
+    { useChannelContext: true, channelDetectLength: 18, channelCompressionThreshold: 0.35 },
+    { useChannelContext: true, channelDetectLength: 24, channelEnableRetest: true, channelRetestFreshBars: 6 },
+    {
+      useAvwapContext: true,
+      useChannelContext: true,
+      useContextAggregator: true,
+      contextBoostAddsToStrength: true,
+      contextBoostValue: 0.5,
+    },
+    {
+      useAvwapContext: true,
+      useChannelContext: true,
+      useContextAggregator: true,
+      useContextExitShaping: true,
+      contextTightenTrailOnCaution: true,
+      contextTrailTightenFactor: 0.75,
+      contextAllowEarlySignalExit: true,
+    },
+  ];
+  const corePatches = [
     { neighborsCount: 24 },
     { neighborsCount: 48 },
     { useVolatilityFilter: true },
@@ -736,7 +780,7 @@ function buildPhase3CoreVariants() {
     { riskAtrLen: 21, slAtrMult: 1.25, tpAtrMult: 3.0 },
   ];
 
-  return patches.map((patch) => ({ ...base, ...patch }));
+  return [...contextPatches, ...corePatches].map((patch) => ({ ...base, ...patch }));
 }
 
 export function phase3CoreCandidateGrid() {
@@ -776,6 +820,28 @@ export function phase3CoreCandidateGrid() {
     trailAtrLen: [7, 14, 21],
     trailAtrMult: [1.0, 1.5, 2.0],
     trailActivateR: [0.5, 1.0, 1.5],
+    useAvwapContext: [false, true],
+    avwapSwingPeriod: [21, 34, 50],
+    avwapReclaimFreshBars: [4, 6, 10],
+    avwapMaxDistanceAtr: [0.75, 1.0, 1.5],
+    avwapMaxAnchorAge: [50, 100, 200],
+    avwapRequireReclaimForEntry: [false, true],
+    useChannelContext: [false, true],
+    channelDetectLength: [14, 18, 24],
+    channelCompressionThreshold: [0.25, 0.35, 0.5],
+    channelBreakoutFreshBars: [2, 4, 6],
+    channelEnableRetest: [false, true],
+    channelRetestFreshBars: [4, 6],
+    channelHostileBlocksEntry: [false, true],
+    useContextAggregator: [false, true],
+    contextStrictRequireChannel: [false, true],
+    contextBoostAddsToStrength: [false, true],
+    contextBoostValue: [0.25, 0.5],
+    contextHostileBlocksEntry: [false, true],
+    useContextExitShaping: [false, true],
+    contextTightenTrailOnCaution: [false, true],
+    contextTrailTightenFactor: [0.5, 0.75],
+    contextAllowEarlySignalExit: [false, true],
     __variants: buildPhase3CoreVariants(),
   };
 }

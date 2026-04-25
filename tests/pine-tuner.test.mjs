@@ -486,6 +486,117 @@ test('filterSweepCombos collapses redundant fusion-v4 weight combos when related
   assert.deepEqual(filtered[0], combos[0]);
 });
 
+test('buildPatchPlan includes context input patch steps', () => {
+  const plan = buildPatchPlan({
+    useAvwapContext: true,
+    avwapSwingPeriod: 12,
+    useChannelContext: false,
+    channelDetectLength: 34,
+    useContextAggregator: true,
+    contextBoostValue: 0.75,
+    useContextExitShaping: true,
+    contextTrailTightenFactor: 0.8,
+  });
+
+  assert.deepEqual(plan.map((step) => step.key), [
+    'useAvwapContext',
+    'avwapSwingPeriod',
+    'useChannelContext',
+    'channelDetectLength',
+    'useContextAggregator',
+    'contextBoostValue',
+    'useContextExitShaping',
+    'contextTrailTightenFactor',
+  ]);
+});
+
+test('applyPatchPlan patches context inputs', () => {
+  const source = [
+    'useAvwapContext = input.bool(false, title="Use AVWAP Context", group="Context")',
+    'avwapSwingPeriod = input.int(5, title="AVWAP Swing Period", minval=1, group="Context")',
+    'useChannelContext = input.bool(true, title="Use Channel Context", group="Context")',
+    'channelDetectLength = input.int(21, title="Channel Detect Length", minval=1, group="Context")',
+    'useContextAggregator = input.bool(false, title="Use Context Aggregator", group="Context")',
+    'contextBoostValue = input.float(0.25, title="Context Boost Value", step=0.05, group="Context")',
+    'useContextExitShaping = input.bool(false, title="Use Context Exit Shaping", group="Context")',
+    'contextTrailTightenFactor = input.float(0.5, title="Context Trail Tighten Factor", step=0.05, group="Context")',
+  ].join('\n');
+
+  const plan = buildPatchPlan({
+    useAvwapContext: true,
+    avwapSwingPeriod: 12,
+    useChannelContext: false,
+    channelDetectLength: 34,
+    useContextAggregator: true,
+    contextBoostValue: 0.75,
+    useContextExitShaping: true,
+    contextTrailTightenFactor: 0.8,
+  });
+
+  const patched = applyPatchPlan(source, plan);
+
+  assert.match(patched, /useAvwapContext\s*=\s*input\.bool\(true,\s+title="Use AVWAP Context"/);
+  assert.match(patched, /avwapSwingPeriod\s*=\s*input\.int\(12,\s+title="AVWAP Swing Period"/);
+  assert.match(patched, /useChannelContext\s*=\s*input\.bool\(false,\s+title="Use Channel Context"/);
+  assert.match(patched, /channelDetectLength\s*=\s*input\.int\(34,\s+title="Channel Detect Length"/);
+  assert.match(patched, /useContextAggregator\s*=\s*input\.bool\(true,\s+title="Use Context Aggregator"/);
+  assert.match(patched, /contextBoostValue\s*=\s*input\.float\(0\.75,\s+title="Context Boost Value"/);
+  assert.match(patched, /useContextExitShaping\s*=\s*input\.bool\(true,\s+title="Use Context Exit Shaping"/);
+  assert.match(patched, /contextTrailTightenFactor\s*=\s*input\.float\(0\.8,\s+title="Context Trail Tighten Factor"/);
+});
+
+test('filterSweepCombos collapses redundant disabled-context combos', () => {
+  const combos = [
+    {
+      useAvwapContext: false,
+      avwapSwingPeriod: 5,
+      useChannelContext: false,
+      channelDetectLength: 21,
+      useContextAggregator: false,
+      contextBoostValue: 0.25,
+      useContextExitShaping: false,
+      contextTrailTightenFactor: 0.5,
+    },
+    {
+      useAvwapContext: false,
+      avwapSwingPeriod: 12,
+      useChannelContext: false,
+      channelDetectLength: 34,
+      useContextAggregator: false,
+      contextBoostValue: 0.75,
+      useContextExitShaping: false,
+      contextTrailTightenFactor: 0.8,
+    },
+    {
+      useAvwapContext: true,
+      avwapSwingPeriod: 12,
+      useChannelContext: false,
+      channelDetectLength: 21,
+      useContextAggregator: false,
+      contextBoostValue: 0.25,
+      useContextExitShaping: false,
+      contextTrailTightenFactor: 0.5,
+    },
+    {
+      useAvwapContext: true,
+      avwapSwingPeriod: 12,
+      useChannelContext: true,
+      channelDetectLength: 34,
+      useContextAggregator: true,
+      contextBoostValue: 0.75,
+      useContextExitShaping: true,
+      contextTrailTightenFactor: 0.8,
+    },
+  ];
+
+  const filtered = filterSweepCombos(combos);
+
+  assert.equal(filtered.length, 3);
+  assert.deepEqual(filtered[0], combos[0]);
+  assert.deepEqual(filtered[1], combos[2]);
+  assert.deepEqual(filtered[2], combos[3]);
+});
+
 test('getCandidateGrid returns expanded phase3-core grid with broader strategy knobs', () => {
   const grid = getCandidateGrid('phase3-core');
 

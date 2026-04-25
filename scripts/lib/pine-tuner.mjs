@@ -113,6 +113,22 @@ export function filterSweepCombos(combos) {
       delete normalized.trailActivateR;
     }
 
+    if (normalized.useAvwapContext !== true) {
+      delete normalized.avwapSwingPeriod;
+    }
+
+    if (normalized.useChannelContext !== true) {
+      delete normalized.channelDetectLength;
+    }
+
+    if (normalized.useContextAggregator !== true) {
+      delete normalized.contextBoostValue;
+    }
+
+    if (normalized.useContextExitShaping !== true) {
+      delete normalized.contextTrailTightenFactor;
+    }
+
     const key = JSON.stringify(normalized);
     if (seen.has(key)) continue;
     seen.add(key);
@@ -149,6 +165,27 @@ function toLiteral(value) {
   if (typeof value === 'boolean') return value ? 'true' : 'false';
   if (typeof value === 'number') return Number.isInteger(value) ? String(value) : String(value);
   return String(value);
+}
+
+function boolInputPatcher(key, title) {
+  return (value) => ({
+    regex: new RegExp(`(${key}\\s*=\\s*input\\.bool\\()(true|false)(,\\s+title="${title.replace(/[|()]/g, '\\$&')}".*)`),
+    replace: `$1${toLiteral(value)}$3`,
+  });
+}
+
+function intInputPatcher(key, title) {
+  return (value) => ({
+    regex: new RegExp(`(${key}\\s*=\\s*input\\.int\\()[-\\d.]+(,\\s+title="${title.replace(/[|()]/g, '\\$&')}".*)`),
+    replace: `$1${toLiteral(value)}$2`,
+  });
+}
+
+function floatInputPatcher(key, title) {
+  return (value) => ({
+    regex: new RegExp(`(${key}\\s*=\\s*input\\.float\\()[-\\d.]+(,\\s+title="${title.replace(/[|()]/g, '\\$&')}".*)`),
+    replace: `$1${toLiteral(value)}$2`,
+  });
 }
 
 const PATCHERS = {
@@ -360,6 +397,14 @@ const PATCHERS = {
     regex: /(input\.int\(title="Threshold",\s*defval=)\d+([^\n]*inline="adx"[^\n]*\))/,
     replace: `$1${toLiteral(value)}$2`,
   }),
+  useAvwapContext: boolInputPatcher('useAvwapContext', 'Use AVWAP Context'),
+  avwapSwingPeriod: intInputPatcher('avwapSwingPeriod', 'AVWAP Swing Period'),
+  useChannelContext: boolInputPatcher('useChannelContext', 'Use Channel Context'),
+  channelDetectLength: intInputPatcher('channelDetectLength', 'Channel Detect Length'),
+  useContextAggregator: boolInputPatcher('useContextAggregator', 'Use Context Aggregator'),
+  contextBoostValue: floatInputPatcher('contextBoostValue', 'Context Boost Value'),
+  useContextExitShaping: boolInputPatcher('useContextExitShaping', 'Use Context Exit Shaping'),
+  contextTrailTightenFactor: floatInputPatcher('contextTrailTightenFactor', 'Context Trail Tighten Factor'),
 };
 
 export function buildPatchPlan(config) {

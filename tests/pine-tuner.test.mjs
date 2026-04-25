@@ -511,6 +511,8 @@ test('getCandidateGrid returns expanded phase3-core grid with broader strategy k
   assert.deepEqual(grid.trailAtrLen, [7, 14, 21]);
   assert.deepEqual(grid.trailAtrMult, [1.0, 1.5, 2.0]);
   assert.deepEqual(grid.trailActivateR, [0.5, 1.0, 1.5]);
+  assert.ok(Array.isArray(grid.__variants));
+  assert.ok(grid.__variants.every((variant) => variant.useStopsTP === true));
 });
 
 test('selectSweepCombos rotates candidate batches with wrap-around', () => {

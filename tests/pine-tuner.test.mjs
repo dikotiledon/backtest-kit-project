@@ -495,18 +495,17 @@ test('getCandidateGrid returns expanded phase3-core grid with broader strategy k
   assert.deepEqual(grid.regimeThreshold, [-0.5, -0.1, 0.5]);
   assert.deepEqual(grid.adxThreshold, [15, 20, 25]);
   assert.deepEqual(grid.useEmaFilter, [false, true]);
-  assert.deepEqual(grid.emaPeriod, [100, 200]);
+  assert.deepEqual(grid.emaPeriod, [50, 100, 150, 200, 300]);
   assert.deepEqual(grid.useSmaFilter, [false, true]);
-  assert.deepEqual(grid.smaPeriod, [100, 200]);
-  assert.deepEqual(grid.h, [5, 8, 13]);
-  assert.deepEqual(grid.r, [4.0, 8.0]);
-  assert.deepEqual(grid.x, [15, 25]);
+  assert.deepEqual(grid.smaPeriod, [50, 100, 150, 200, 300]);
+  assert.deepEqual(grid.h, [4, 5, 8, 10, 13, 16, 21]);
+  assert.deepEqual(grid.r, [0.5, 1.0, 2.0, 4.0, 8.0, 16.0]);
+  assert.deepEqual(grid.x, [2, 5, 8, 12, 16, 20, 25]);
   assert.deepEqual(grid.lag, [1, 2]);
-  assert.deepEqual(grid.useStopsTP, [true]);
-  assert.deepEqual(grid.riskAtrLen, [14, 21]);
+  assert.deepEqual(grid.riskAtrLen, [7, 10, 14, 21, 28]);
   assert.deepEqual(grid.useSignalExits, [false, true]);
-  assert.deepEqual(grid.slAtrMult, [1.0, 1.25]);
-  assert.deepEqual(grid.tpAtrMult, [2.5, 3.0]);
+  assert.deepEqual(grid.slAtrMult, [0.75, 1.0, 1.25, 1.5, 2.0]);
+  assert.deepEqual(grid.tpAtrMult, [1.5, 2.0, 2.5, 3.0, 4.0, 5.0]);
   assert.deepEqual(grid.supertrendAtrLen, [7, 10, 14]);
   assert.deepEqual(grid.supertrendFactor, [1.5, 2.0, 2.5]);
   assert.deepEqual(grid.trailAtrLen, [7, 14, 21]);
@@ -601,8 +600,8 @@ test('pine test script defaults to the hardened fusion v4 profile', async () => 
   assert.match(source, /fusionV4ShortAtrWeight\s*=\s*input\.float\(-0\.5,\s+title="Fusion V4 Short ATR Weight"/);
   assert.match(source, /fusionV4ShortEngulfWeight\s*=\s*input\.float\(-0\.1,\s+title="Fusion V4 Short Engulf Weight"/);
   assert.match(source, /fusionV4ShortEmaWeight\s*=\s*input\.float\(0(?:\.0)?,\s+title="Fusion V4 Short EMA Weight"/);
-  assert.match(source, /slAtrMult\s*=\s*input\.float\(1(?:\.0)?,\s+title="SL ATR x"/);
-  assert.match(source, /tpAtrMult\s*=\s*input\.float\(2\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
+  assert.match(source, /slAtrMult\s*=\s*input\.float\(0\.75,\s+title="SL ATR x"/);
+  assert.match(source, /tpAtrMult\s*=\s*input\.float\(4\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
 });
 
 test('normalizeVariantRecords accepts metadata-backed search variants', () => {

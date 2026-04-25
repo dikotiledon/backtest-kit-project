@@ -486,6 +486,173 @@ test('filterSweepCombos collapses redundant fusion-v4 weight combos when related
   assert.deepEqual(filtered[0], combos[0]);
 });
 
+test('buildPatchPlan includes the Task 1 context patch steps', () => {
+  const plan = buildPatchPlan({
+    useAvwapContext: true,
+    avwapSwingPeriod: 12,
+    useChannelContext: false,
+    channelDetectLength: 34,
+    useContextAggregator: true,
+    contextBoostValue: 0.75,
+    useContextExitShaping: true,
+    contextTrailTightenFactor: 0.8,
+  });
+
+  assert.deepEqual(plan.map((step) => step.key), [
+    'useAvwapContext',
+    'avwapSwingPeriod',
+    'useChannelContext',
+    'channelDetectLength',
+    'useContextAggregator',
+    'contextBoostValue',
+    'useContextExitShaping',
+    'contextTrailTightenFactor',
+  ]);
+});
+
+test('applyPatchPlan patches context inputs with breakout-context naming', () => {
+  const source = [
+    'useAvwapContext = input.bool(false, title="Use AVWAP Context", group="Context")',
+    'avwapSwingPeriod = input.int(5, title="AVWAP Swing Period", minval=1, group="Context")',
+    'useChannelContext = input.bool(true, title="Use Breakout Context", group="Context")',
+    'channelDetectLength = input.int(21, title="Channel Detect Length", minval=1, group="Context")',
+    'useContextAggregator = input.bool(false, title="Use Context Aggregator", group="Context")',
+    'contextBoostValue = input.float(0.25, title="Context Boost Value", step=0.05, group="Context")',
+    'useContextExitShaping = input.bool(false, title="Use Context Exit Shaping", group="Context")',
+    'contextTrailTightenFactor = input.float(0.5, title="Context Trail Tighten Factor", step=0.05, group="Context")',
+  ].join('\n');
+
+  const plan = buildPatchPlan({
+    useAvwapContext: true,
+    avwapSwingPeriod: 12,
+    useChannelContext: false,
+    channelDetectLength: 34,
+    useContextAggregator: true,
+    contextBoostValue: 0.75,
+    useContextExitShaping: true,
+    contextTrailTightenFactor: 0.8,
+  });
+
+  const patched = applyPatchPlan(source, plan);
+
+  assert.match(patched, /useAvwapContext\s*=\s*input\.bool\(true,\s+title="Use AVWAP Context"/);
+  assert.match(patched, /avwapSwingPeriod\s*=\s*input\.int\(12,\s+title="AVWAP Swing Period"/);
+  assert.match(patched, /useChannelContext\s*=\s*input\.bool\(false,\s+title="Use Breakout Context"/);
+  assert.match(patched, /channelDetectLength\s*=\s*input\.int\(34,\s+title="Channel Detect Length"/);
+  assert.match(patched, /useContextAggregator\s*=\s*input\.bool\(true,\s+title="Use Context Aggregator"/);
+  assert.match(patched, /contextBoostValue\s*=\s*input\.float\(0\.75,\s+title="Context Boost Value"/);
+  assert.match(patched, /useContextExitShaping\s*=\s*input\.bool\(true,\s+title="Use Context Exit Shaping"/);
+  assert.match(patched, /contextTrailTightenFactor\s*=\s*input\.float\(0\.8,\s+title="Context Trail Tighten Factor"/);
+});
+
+test('filterSweepCombos collapses disabled-context combos across full dependent families', () => {
+  const combos = [
+    {
+      useAvwapContext: false,
+      avwapSwingPeriod: 5,
+      avwapReclaimFreshBars: 2,
+      avwapMaxDistanceAtr: 0.75,
+      avwapMaxAnchorAge: 120,
+      avwapRequireReclaimForEntry: false,
+      useChannelContext: false,
+      channelDetectLength: 21,
+      channelCompressionThreshold: 0.6,
+      channelBreakoutFreshBars: 3,
+      channelEnableRetest: false,
+      channelRetestFreshBars: 2,
+      channelHostileBlocksEntry: false,
+      useContextAggregator: false,
+      contextStrictRequireChannel: false,
+      contextBoostAddsToStrength: false,
+      contextBoostValue: 0.25,
+      contextHostileBlocksEntry: false,
+      useContextExitShaping: false,
+      contextTightenTrailOnCaution: false,
+      contextTrailTightenFactor: 0.5,
+      contextAllowEarlySignalExit: false,
+    },
+    {
+      useAvwapContext: false,
+      avwapSwingPeriod: 12,
+      avwapReclaimFreshBars: 6,
+      avwapMaxDistanceAtr: 1.5,
+      avwapMaxAnchorAge: 480,
+      avwapRequireReclaimForEntry: true,
+      useChannelContext: false,
+      channelDetectLength: 55,
+      channelCompressionThreshold: 0.2,
+      channelBreakoutFreshBars: 8,
+      channelEnableRetest: true,
+      channelRetestFreshBars: 6,
+      channelHostileBlocksEntry: true,
+      useContextAggregator: false,
+      contextStrictRequireChannel: true,
+      contextBoostAddsToStrength: true,
+      contextBoostValue: 0.9,
+      contextHostileBlocksEntry: true,
+      useContextExitShaping: false,
+      contextTightenTrailOnCaution: true,
+      contextTrailTightenFactor: 0.85,
+      contextAllowEarlySignalExit: true,
+    },
+    {
+      useAvwapContext: true,
+      avwapSwingPeriod: 12,
+      avwapReclaimFreshBars: 6,
+      avwapMaxDistanceAtr: 1.5,
+      avwapMaxAnchorAge: 480,
+      avwapRequireReclaimForEntry: true,
+      useChannelContext: false,
+      channelDetectLength: 21,
+      channelCompressionThreshold: 0.6,
+      channelBreakoutFreshBars: 3,
+      channelEnableRetest: false,
+      channelRetestFreshBars: 2,
+      channelHostileBlocksEntry: false,
+      useContextAggregator: false,
+      contextStrictRequireChannel: false,
+      contextBoostAddsToStrength: false,
+      contextBoostValue: 0.25,
+      contextHostileBlocksEntry: false,
+      useContextExitShaping: false,
+      contextTightenTrailOnCaution: false,
+      contextTrailTightenFactor: 0.5,
+      contextAllowEarlySignalExit: false,
+    },
+    {
+      useAvwapContext: true,
+      avwapSwingPeriod: 12,
+      avwapReclaimFreshBars: 6,
+      avwapMaxDistanceAtr: 1.5,
+      avwapMaxAnchorAge: 480,
+      avwapRequireReclaimForEntry: true,
+      useChannelContext: true,
+      channelDetectLength: 34,
+      channelCompressionThreshold: 0.4,
+      channelBreakoutFreshBars: 5,
+      channelEnableRetest: true,
+      channelRetestFreshBars: 3,
+      channelHostileBlocksEntry: true,
+      useContextAggregator: true,
+      contextStrictRequireChannel: true,
+      contextBoostAddsToStrength: true,
+      contextBoostValue: 0.75,
+      contextHostileBlocksEntry: true,
+      useContextExitShaping: true,
+      contextTightenTrailOnCaution: true,
+      contextTrailTightenFactor: 0.8,
+      contextAllowEarlySignalExit: true,
+    },
+  ];
+
+  const filtered = filterSweepCombos(combos);
+
+  assert.equal(filtered.length, 3);
+  assert.deepEqual(filtered[0], combos[0]);
+  assert.deepEqual(filtered[1], combos[2]);
+  assert.deepEqual(filtered[2], combos[3]);
+});
+
 test('getCandidateGrid returns expanded phase3-core grid with broader strategy knobs', () => {
   const grid = getCandidateGrid('phase3-core');
 
@@ -495,23 +662,57 @@ test('getCandidateGrid returns expanded phase3-core grid with broader strategy k
   assert.deepEqual(grid.regimeThreshold, [-0.5, -0.1, 0.5]);
   assert.deepEqual(grid.adxThreshold, [15, 20, 25]);
   assert.deepEqual(grid.useEmaFilter, [false, true]);
-  assert.deepEqual(grid.emaPeriod, [100, 200]);
+  assert.deepEqual(grid.emaPeriod, [50, 100, 150, 200, 300]);
   assert.deepEqual(grid.useSmaFilter, [false, true]);
-  assert.deepEqual(grid.smaPeriod, [100, 200]);
-  assert.deepEqual(grid.h, [5, 8, 13]);
-  assert.deepEqual(grid.r, [4.0, 8.0]);
-  assert.deepEqual(grid.x, [15, 25]);
+  assert.deepEqual(grid.smaPeriod, [50, 100, 150, 200, 300]);
+  assert.deepEqual(grid.h, [4, 5, 8, 10, 13, 16, 21]);
+  assert.deepEqual(grid.r, [0.5, 1.0, 2.0, 4.0, 8.0, 16.0]);
+  assert.deepEqual(grid.x, [2, 5, 8, 12, 16, 20, 25]);
   assert.deepEqual(grid.lag, [1, 2]);
-  assert.deepEqual(grid.useStopsTP, [true]);
-  assert.deepEqual(grid.riskAtrLen, [14, 21]);
+  assert.deepEqual(grid.riskAtrLen, [7, 10, 14, 21, 28]);
   assert.deepEqual(grid.useSignalExits, [false, true]);
-  assert.deepEqual(grid.slAtrMult, [1.0, 1.25]);
-  assert.deepEqual(grid.tpAtrMult, [2.5, 3.0]);
+  assert.deepEqual(grid.slAtrMult, [0.75, 1.0, 1.25, 1.5, 2.0]);
+  assert.deepEqual(grid.tpAtrMult, [1.5, 2.0, 2.5, 3.0, 4.0, 5.0]);
   assert.deepEqual(grid.supertrendAtrLen, [7, 10, 14]);
   assert.deepEqual(grid.supertrendFactor, [1.5, 2.0, 2.5]);
   assert.deepEqual(grid.trailAtrLen, [7, 14, 21]);
   assert.deepEqual(grid.trailAtrMult, [1.0, 1.5, 2.0]);
   assert.deepEqual(grid.trailActivateR, [0.5, 1.0, 1.5]);
+  assert.deepEqual(grid.useAvwapContext, [false, true]);
+  assert.deepEqual(grid.avwapSwingPeriod, [21, 34, 50]);
+  assert.deepEqual(grid.avwapReclaimFreshBars, [4, 6, 10]);
+  assert.deepEqual(grid.avwapMaxDistanceAtr, [0.75, 1.0, 1.5]);
+  assert.deepEqual(grid.avwapMaxAnchorAge, [50, 100, 200]);
+  assert.deepEqual(grid.avwapRequireReclaimForEntry, [false, true]);
+  assert.deepEqual(grid.useChannelContext, [false, true]);
+  assert.deepEqual(grid.channelDetectLength, [14, 18, 24]);
+  assert.deepEqual(grid.channelCompressionThreshold, [0.25, 0.35, 0.5]);
+  assert.deepEqual(grid.channelBreakoutFreshBars, [2, 4, 6]);
+  assert.deepEqual(grid.channelEnableRetest, [false, true]);
+  assert.deepEqual(grid.channelRetestFreshBars, [4, 6]);
+  assert.deepEqual(grid.channelHostileBlocksEntry, [false, true]);
+  assert.deepEqual(grid.useContextAggregator, [false, true]);
+  assert.deepEqual(grid.contextStrictRequireChannel, [false, true]);
+  assert.deepEqual(grid.contextBoostAddsToStrength, [false, true]);
+  assert.deepEqual(grid.contextBoostValue, [0.25, 0.5]);
+  assert.deepEqual(grid.contextHostileBlocksEntry, [false, true]);
+  assert.deepEqual(grid.useContextExitShaping, [false, true]);
+  assert.deepEqual(grid.contextTightenTrailOnCaution, [false, true]);
+  assert.deepEqual(grid.contextTrailTightenFactor, [0.5, 0.75]);
+  assert.deepEqual(grid.contextAllowEarlySignalExit, [false, true]);
+  assert.ok(Array.isArray(grid.__variants));
+  assert.ok(grid.__variants.every((variant) => variant.useStopsTP === true));
+  assert.ok(grid.__variants.some((variant) => variant.useAvwapContext === true && variant.useChannelContext !== true));
+  assert.ok(grid.__variants.some((variant) => variant.useAvwapContext === true && variant.useChannelContext === true));
+});
+
+test('selectSweepCombos preserves explicit phase3-core context variants', () => {
+  const grid = getCandidateGrid('phase3-core');
+  const batch = selectSweepCombos(grid, { maxConfigs: 6, offset: 0 });
+
+  assert.equal(batch.length, 6);
+  assert.ok(batch.some((variant) => variant.useAvwapContext === true && variant.useChannelContext !== true));
+  assert.ok(batch.some((variant) => variant.useAvwapContext === true && variant.useChannelContext === true));
 });
 
 test('selectSweepCombos rotates candidate batches with wrap-around', () => {
@@ -601,8 +802,8 @@ test('pine test script defaults to the hardened fusion v4 profile', async () => 
   assert.match(source, /fusionV4ShortAtrWeight\s*=\s*input\.float\(-0\.5,\s+title="Fusion V4 Short ATR Weight"/);
   assert.match(source, /fusionV4ShortEngulfWeight\s*=\s*input\.float\(-0\.1,\s+title="Fusion V4 Short Engulf Weight"/);
   assert.match(source, /fusionV4ShortEmaWeight\s*=\s*input\.float\(0(?:\.0)?,\s+title="Fusion V4 Short EMA Weight"/);
-  assert.match(source, /slAtrMult\s*=\s*input\.float\(1(?:\.0)?,\s+title="SL ATR x"/);
-  assert.match(source, /tpAtrMult\s*=\s*input\.float\(2\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
+  assert.match(source, /slAtrMult\s*=\s*input\.float\(0\.75,\s+title="SL ATR x"/);
+  assert.match(source, /tpAtrMult\s*=\s*input\.float\(4\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
 });
 
 test('normalizeVariantRecords accepts metadata-backed search variants', () => {

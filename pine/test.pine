@@ -386,6 +386,32 @@ useSupertrendEntryConfirm = input.bool(false, title="Require Supertrend Flip Con
 supertrendAtrLen = input.int(10, title="Supertrend ATR Length", minval=1, group="Phase 3: Supertrend")
 supertrendFactor = input.float(1.5, title="Supertrend Factor", minval=0.1, step=0.1, group="Phase 3: Supertrend")
 
+useAvwapContext = input.bool(false, title="Use AVWAP Context", group="Phase 3: AVWAP Context")
+avwapSwingPeriod = input.int(50, title="AVWAP Swing Period", minval=2, group="Phase 3: AVWAP Context")
+avwapReclaimFreshBars = input.int(6, title="AVWAP Reclaim Fresh Bars", minval=1, group="Phase 3: AVWAP Context")
+avwapMaxDistanceAtr = input.float(1.0, title="AVWAP Max Distance ATR", minval=0.1, step=0.1, group="Phase 3: AVWAP Context")
+avwapMaxAnchorAge = input.int(100, title="AVWAP Max Anchor Age", minval=1, group="Phase 3: AVWAP Context")
+avwapRequireReclaimForEntry = input.bool(false, title="Require AVWAP Reclaim For Entry", group="Phase 3: AVWAP Context")
+
+useChannelContext = input.bool(false, title="Use Breakout Context", group="Phase 3: Breakout Context")
+channelDetectLength = input.int(18, title="Channel Detect Length", minval=2, group="Phase 3: Breakout Context")
+channelCompressionThreshold = input.float(0.35, title="Channel Compression Threshold", minval=0.0, step=0.05, group="Phase 3: Breakout Context")
+channelBreakoutFreshBars = input.int(4, title="Channel Breakout Fresh Bars", minval=1, group="Phase 3: Breakout Context")
+channelEnableRetest = input.bool(false, title="Enable Channel Retest", group="Phase 3: Breakout Context")
+channelRetestFreshBars = input.int(6, title="Channel Retest Fresh Bars", minval=1, group="Phase 3: Breakout Context")
+channelHostileBlocksEntry = input.bool(true, title="Channel Hostile Blocks Entry", group="Phase 3: Breakout Context")
+
+useContextAggregator = input.bool(false, title="Use Context Aggregator", group="Phase 3: Context Aggregator")
+contextStrictRequireChannel = input.bool(false, title="Strict Require Channel", group="Phase 3: Context Aggregator")
+contextBoostAddsToStrength = input.bool(false, title="Context Boost Adds To Strength", group="Phase 3: Context Aggregator")
+contextBoostValue = input.float(0.25, title="Context Boost Value", step=0.05, group="Phase 3: Context Aggregator")
+contextHostileBlocksEntry = input.bool(true, title="Context Hostile Blocks Entry", group="Phase 3: Context Aggregator")
+
+useContextExitShaping = input.bool(false, title="Use Context Exit Shaping", group="Phase 3: Context Exit Shaping")
+contextTightenTrailOnCaution = input.bool(false, title="Tighten Trail On Caution", group="Phase 3: Context Exit Shaping")
+contextTrailTightenFactor = input.float(0.75, title="Context Trail Tighten Factor", minval=0.1, maxval=1.0, step=0.05, group="Phase 3: Context Exit Shaping")
+contextAllowEarlySignalExit = input.bool(false, title="Allow Early Signal Exit", group="Phase 3: Context Exit Shaping")
+
 fusion3LineBull = close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
 fusion3LineBear = close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
 fusionEngulfingBull = open <= close[1] and open < open[1] and close > open[1]
@@ -429,11 +455,62 @@ supertrendLine = supertrendBull ? supertrendUp : supertrendDn
 supertrendPassLong = (not useSupertrendFilter or supertrendBull) and (not useSupertrendEntryConfirm or supertrendFlipBull)
 supertrendPassShort = (not useSupertrendFilter or supertrendBear) and (not useSupertrendEntryConfirm or supertrendFlipBear)
 
+contextAtr = ta.atr(14)
+
+avwapPivotHigh = ta.pivothigh(high, avwapSwingPeriod, avwapSwingPeriod)
+avwapPivotLow = ta.pivotlow(low, avwapSwingPeriod, avwapSwingPeriod)
+var int avwapAnchorBar = na
+var float avwapPv = na
+var float avwapVol = na
+newAvwapAnchor = not na(avwapPivotHigh) or not na(avwapPivotLow)
+if newAvwapAnchor
+    avwapAnchorBar := bar_index - avwapSwingPeriod
+    avwapPv := hlc3[avwapSwingPeriod] * volume[avwapSwingPeriod]
+    avwapVol := volume[avwapSwingPeriod]
+else
+    avwapPv := nz(avwapPv[1]) + hlc3 * volume
+    avwapVol := nz(avwapVol[1]) + volume
+
+barsSinceAvwapAnchor = na(avwapAnchorBar) ? 100000 : bar_index - avwapAnchorBar
+avwapValue = avwapVol > 0 ? avwapPv / avwapVol : na
+avwapDistanceNorm = contextAtr > 0 and not na(avwapValue) ? math.abs(close - avwapValue) / contextAtr : 0.0
+avwapBullBias = useAvwapContext and close >= avwapValue
+avwapBearBias = useAvwapContext and close <= avwapValue
+avwapReclaimBull = useAvwapContext and ta.barssince(ta.crossover(close, avwapValue)) <= avwapReclaimFreshBars
+avwapReclaimBear = useAvwapContext and ta.barssince(ta.crossunder(close, avwapValue)) <= avwapReclaimFreshBars
+avwapLongOk = not useAvwapContext or ((avwapBullBias or (avwapRequireReclaimForEntry ? avwapReclaimBull : true)) and avwapDistanceNorm <= avwapMaxDistanceAtr and barsSinceAvwapAnchor <= avwapMaxAnchorAge)
+avwapShortOk = not useAvwapContext or ((avwapBearBias or (avwapRequireReclaimForEntry ? avwapReclaimBear : true)) and avwapDistanceNorm <= avwapMaxDistanceAtr and barsSinceAvwapAnchor <= avwapMaxAnchorAge)
+
+channelUpper = ta.highest(high, channelDetectLength)
+channelLower = ta.lowest(low, channelDetectLength)
+channelWidthNorm = contextAtr > 0 ? (channelUpper - channelLower) / contextAtr : 0.0
+channelCompressionScore = channelWidthNorm > 0 ? 1 / channelWidthNorm : 0.0
+channelCompressed = useChannelContext and channelWidthNorm <= channelCompressionThreshold
+channelBullBreakFresh = useChannelContext and channelCompressed[1] and ta.barssince(close > channelUpper[1]) <= channelBreakoutFreshBars
+channelBearBreakFresh = useChannelContext and channelCompressed[1] and ta.barssince(close < channelLower[1]) <= channelBreakoutFreshBars
+channelRetestBull = useChannelContext and channelEnableRetest and ta.barssince(low <= channelUpper and close >= channelUpper) <= channelRetestFreshBars
+channelRetestBear = useChannelContext and channelEnableRetest and ta.barssince(high >= channelLower and close <= channelLower) <= channelRetestFreshBars
+channelLongBoost = channelBullBreakFresh or channelRetestBull
+channelShortBoost = channelBearBreakFresh or channelRetestBear
+channelLongHostile = useChannelContext and channelBearBreakFresh
+channelShortHostile = useChannelContext and channelBullBreakFresh
+
+contextLongBlocked = useContextAggregator and ((not avwapLongOk) or (contextStrictRequireChannel and not channelLongBoost) or ((channelHostileBlocksEntry or contextHostileBlocksEntry) and channelLongHostile))
+contextShortBlocked = useContextAggregator and ((not avwapShortOk) or (contextStrictRequireChannel and not channelShortBoost) or ((channelHostileBlocksEntry or contextHostileBlocksEntry) and channelShortHostile))
+contextLongQualify = not useContextAggregator ? true : avwapLongOk
+contextShortQualify = not useContextAggregator ? true : avwapShortOk
+contextLongBoost = not useContextAggregator ? 0.0 : (channelLongBoost and contextBoostAddsToStrength ? contextBoostValue : 0.0)
+contextShortBoost = not useContextAggregator ? 0.0 : (channelShortBoost and contextBoostAddsToStrength ? contextBoostValue : 0.0)
+contextLongCaution = useContextAggregator and (not avwapLongOk or channelLongHostile)
+contextShortCaution = useContextAggregator and (not avwapShortOk or channelShortHostile)
+effectiveLongStrength := effectiveLongStrength + contextLongBoost
+effectiveShortStrength := effectiveShortStrength + contextShortBoost
+
 var int lastEntryBar = na
 cooldownOk = na(lastEntryBar) or (bar_index - lastEntryBar >= minBarsBetween)
 
-startLongTrade = baseStartLong and (not useTrendXConf or trendx == 1) and (effectiveLongStrength >= minPredSum) and cooldownOk and longFusionPass and supertrendPassLong
-startShortTrade = baseStartShort and (not useTrendXConf or trendx == -1) and (effectiveShortStrength >= minPredSum) and cooldownOk and shortFusionPass and supertrendPassShort
+startLongTrade = baseStartLong and (not useTrendXConf or trendx == 1) and (effectiveLongStrength >= minPredSum) and cooldownOk and longFusionPass and supertrendPassLong and contextLongQualify and not contextLongBlocked
+startShortTrade = baseStartShort and (not useTrendXConf or trendx == -1) and (effectiveShortStrength >= minPredSum) and cooldownOk and shortFusionPass and supertrendPassShort and contextShortQualify and not contextShortBlocked
 
 // Dynamic Exit Conditions: Booleans for ML Model Position Exits based on Fractal Filters and Kernel Regression Filters
 lastSignalWasBullish = ta.barssince(startLongTrade) < ta.barssince(startShortTrade)
@@ -451,8 +528,10 @@ endShortTradeDynamic = (isBullishChange and isValidShortExit[1])
 endLongTradeStrict = ((isHeldFourBars and isLastSignalBuy) or (isHeldLessThanFourBars and isNewSellSignal and isLastSignalBuy)) and startLongTrade[4]
 endShortTradeStrict = ((isHeldFourBars and isLastSignalSell) or (isHeldLessThanFourBars and isNewBuySignal and isLastSignalSell)) and startShortTrade[4]
 isDynamicExitValid = not useEmaFilter and not useSmaFilter and not useKernelSmoothing
-endLongTrade = settings.useDynamicExits and isDynamicExitValid ? endLongTradeDynamic : endLongTradeStrict 
-endShortTrade = settings.useDynamicExits and isDynamicExitValid ? endShortTradeDynamic : endShortTradeStrict
+contextAllowLongEarlyExit = useContextExitShaping and contextAllowEarlySignalExit and contextLongCaution
+contextAllowShortEarlyExit = useContextExitShaping and contextAllowEarlySignalExit and contextShortCaution
+endLongTrade = (settings.useDynamicExits and isDynamicExitValid ? endLongTradeDynamic : endLongTradeStrict) or (contextAllowLongEarlyExit and endLongTradeDynamic)
+endShortTrade = (settings.useDynamicExits and isDynamicExitValid ? endShortTradeDynamic : endShortTradeStrict) or (contextAllowShortEarlyExit and endShortTradeDynamic)
 
 // ===========================
 // ==== Signal Engine      ====
@@ -504,8 +583,10 @@ if enableStrategy
 
 longTrailActive = useTrailingStop and simPos == 1 and not na(simRiskDistance) and close >= simEntryPrice + trailActivateR * simRiskDistance
 shortTrailActive = useTrailingStop and simPos == -1 and not na(simRiskDistance) and close <= simEntryPrice - trailActivateR * simRiskDistance
-longTrailCandidate = longTrailActive ? close - trailAtrMult * trailAtrNow : na
-shortTrailCandidate = shortTrailActive ? close + trailAtrMult * trailAtrNow : na
+contextTrailAtrMultLong = contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution ? trailAtrMult * contextTrailTightenFactor : trailAtrMult
+contextTrailAtrMultShort = contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution ? trailAtrMult * contextTrailTightenFactor : trailAtrMult
+longTrailCandidate = longTrailActive ? close - contextTrailAtrMultLong * trailAtrNow : na
+shortTrailCandidate = shortTrailActive ? close + contextTrailAtrMultShort * trailAtrNow : na
 
 if simPos == 1 and longTrailActive
     simTrailStop := na(simTrailStop) ? longTrailCandidate : math.max(simTrailStop, longTrailCandidate)
@@ -616,6 +697,13 @@ featureSupertrendBull = supertrendBull ? 1 : 0
 featureSupertrendBear = supertrendBear ? 1 : 0
 featureSupertrendPassLong = supertrendPassLong ? 1 : 0
 featureSupertrendPassShort = supertrendPassShort ? 1 : 0
+featureAvwapBullBias = avwapBullBias ? 1 : 0
+featureAvwapBearBias = avwapBearBias ? 1 : 0
+featureChannelCompressionScore = channelCompressionScore
+featureContextLongQualify = contextLongQualify ? 1 : 0
+featureContextShortQualify = contextShortQualify ? 1 : 0
+featureLongContextCaution = contextLongCaution ? 1 : 0
+featureShortContextCaution = contextShortCaution ? 1 : 0
 featureBlockLongTrendX = baseStartLong and not trendXLongPass ? 1 : 0
 featureBlockShortTrendX = baseStartShort and not trendXShortPass ? 1 : 0
 featureBlockLongPred = baseStartLong and trendXLongPass and not predLongStrengthPass ? 1 : 0
@@ -689,6 +777,13 @@ plot(featureSupertrendBull, "Feature_SupertrendBull", display=display.data_windo
 plot(featureSupertrendBear, "Feature_SupertrendBear", display=display.data_window)
 plot(featureSupertrendPassLong, "Feature_SupertrendPassLong", display=display.data_window)
 plot(featureSupertrendPassShort, "Feature_SupertrendPassShort", display=display.data_window)
+plot(featureAvwapBullBias, "Feature_AvwapBullBias", display=display.data_window)
+plot(featureAvwapBearBias, "Feature_AvwapBearBias", display=display.data_window)
+plot(featureChannelCompressionScore, "Feature_ChannelCompressionScore", display=display.data_window)
+plot(featureContextLongQualify, "Feature_ContextLongQualify", display=display.data_window)
+plot(featureContextShortQualify, "Feature_ContextShortQualify", display=display.data_window)
+plot(featureLongContextCaution, "Feature_LongContextCaution", display=display.data_window)
+plot(featureShortContextCaution, "Feature_ShortContextCaution", display=display.data_window)
 plot(featureBlockLongTrendX, "Feature_BlockLong_TrendX", display=display.data_window)
 plot(featureBlockShortTrendX, "Feature_BlockShort_TrendX", display=display.data_window)
 plot(featureBlockLongPred, "Feature_BlockLong_Pred", display=display.data_window)

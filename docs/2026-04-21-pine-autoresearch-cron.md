@@ -70,6 +70,12 @@ Current phase 3 optimizer scope is broader, but still curated rather than brute-
 - use a curated rotating variant list instead of naive full cartesian expansion, so hourly scouts explore new territory without blowing memory
 - keep non-strategy / display inputs out of the champion loop
 
+### Phase 3 context layer
+- AVWAP context qualifies baseline directional state.
+- Breakout context confirms or degrades that state.
+- Context modules default to transparent/disabled behavior until explicitly enabled by tuned configs.
+- Exit shaping only tightens trailing behavior or allows earlier signal exits; it never weakens hard SL/TP controls.
+
 ## Search policy
 
 The scheduler now uses an incumbent-local search policy instead of a broad static grid.

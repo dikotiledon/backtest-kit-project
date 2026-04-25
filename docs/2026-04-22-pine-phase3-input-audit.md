@@ -68,6 +68,15 @@ These Pine defaults are now part of the expanded `phase3-core` search space or p
 - `trailAtrMult`
 - `trailActivateR`
 
+## Context modules added on 2026-04-25
+
+New bounded families:
+- AVWAP context: `useAvwapContext`, `avwapSwingPeriod`, `avwapReclaimFreshBars`, `avwapMaxDistanceAtr`, `avwapMaxAnchorAge`, `avwapRequireReclaimForEntry`
+- Breakout context: `useChannelContext`, `channelDetectLength`, `channelCompressionThreshold`, `channelBreakoutFreshBars`, `channelEnableRetest`, `channelRetestFreshBars`, `channelHostileBlocksEntry`
+- Aggregator / exit shaping: `useContextAggregator`, `contextStrictRequireChannel`, `contextBoostAddsToStrength`, `contextBoostValue`, `contextHostileBlocksEntry`, `useContextExitShaping`, `contextTightenTrailOnCaution`, `contextTrailTightenFactor`, `contextAllowEarlySignalExit`
+
+Safety rule: when any context module is disabled, its dependent parameters are pruned from sweep combo identity.
+
 ## Held constant on purpose
 These are user inputs, but not expanded into the main autoresearch grid yet.
 

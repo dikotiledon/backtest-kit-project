@@ -65,6 +65,25 @@ const CONTEXT_EXIT_SHAPING_KEYS = [
   'contextAllowEarlySignalExit',
 ];
 
+const SQUEEZE_CONTEXT_KEYS = [
+  'useSqueezeContext',
+  'squeezeLength',
+  'squeezeBbMult',
+  'squeezeKcMult',
+  'squeezeReleaseFreshBars',
+  'squeezeBoostValue',
+];
+
+const DIVERGENCE_CONTEXT_KEYS = [
+  'useDivergenceContext',
+  'divRsiLen',
+  'divPivotLeft',
+  'divPivotRight',
+  'divFreshBars',
+  'divLongBoostValue',
+  'divShortBoostValue',
+];
+
 function deleteKeys(target, keys) {
   for (const key of keys) {
     delete target[key];
@@ -163,6 +182,14 @@ export function filterSweepCombos(combos) {
 
     if (normalized.useContextExitShaping !== true) {
       deleteKeys(normalized, CONTEXT_EXIT_SHAPING_KEYS);
+    }
+
+    if (normalized.useSqueezeContext !== true) {
+      deleteKeys(normalized, SQUEEZE_CONTEXT_KEYS);
+    }
+
+    if (normalized.useDivergenceContext !== true) {
+      deleteKeys(normalized, DIVERGENCE_CONTEXT_KEYS);
     }
 
     const key = JSON.stringify(normalized);
@@ -441,6 +468,19 @@ const PATCHERS = {
   contextBoostValue: floatInputPatcher('contextBoostValue', 'Context Boost Value'),
   useContextExitShaping: boolInputPatcher('useContextExitShaping', 'Use Context Exit Shaping'),
   contextTrailTightenFactor: floatInputPatcher('contextTrailTightenFactor', 'Context Trail Tighten Factor'),
+  useSqueezeContext: boolInputPatcher('useSqueezeContext', 'Use Squeeze Context'),
+  squeezeLength: intInputPatcher('squeezeLength', 'Squeeze Length'),
+  squeezeBbMult: floatInputPatcher('squeezeBbMult', 'BB Multiplier'),
+  squeezeKcMult: floatInputPatcher('squeezeKcMult', 'KC Multiplier'),
+  squeezeReleaseFreshBars: intInputPatcher('squeezeReleaseFreshBars', 'Squeeze Release Fresh Bars'),
+  squeezeBoostValue: floatInputPatcher('squeezeBoostValue', 'Squeeze Boost Value'),
+  useDivergenceContext: boolInputPatcher('useDivergenceContext', 'Use Divergence Context'),
+  divRsiLen: intInputPatcher('divRsiLen', 'Divergence RSI Length'),
+  divPivotLeft: intInputPatcher('divPivotLeft', 'Divergence Pivot Left'),
+  divPivotRight: intInputPatcher('divPivotRight', 'Divergence Pivot Right'),
+  divFreshBars: intInputPatcher('divFreshBars', 'Divergence Fresh Bars'),
+  divLongBoostValue: floatInputPatcher('divLongBoostValue', 'Divergence Long Boost'),
+  divShortBoostValue: floatInputPatcher('divShortBoostValue', 'Divergence Short Boost'),
 };
 
 export function buildPatchPlan(config) {
@@ -632,6 +672,29 @@ export function fusionV4CandidateGrid() {
     fusionV4ShortAtrWeight: [-0.5],
     fusionV4ShortEngulfWeight: [-0.1, 0.0],
     fusionV4ShortEmaWeight: [0.0, 0.25],
+  };
+}
+
+export function squeezeContextCandidateGrid() {
+  return {
+    useSqueezeContext: [true],
+    squeezeLength: [20, 34],
+    squeezeBbMult: [2.0, 2.5],
+    squeezeKcMult: [1.5, 2.0],
+    squeezeReleaseFreshBars: [4, 8],
+    squeezeBoostValue: [0.25, 0.5],
+  };
+}
+
+export function divergenceContextCandidateGrid() {
+  return {
+    useDivergenceContext: [true],
+    divRsiLen: [14, 21],
+    divPivotLeft: [3, 5],
+    divPivotRight: [3, 5],
+    divFreshBars: [6, 8],
+    divLongBoostValue: [0.25, 0.5],
+    divShortBoostValue: [0.25, 0.5],
   };
 }
 
@@ -855,6 +918,8 @@ export function getCandidateGrid(name = 'default') {
   if (name === 'fusion-v2') return fusionV2CandidateGrid();
   if (name === 'fusion-v3') return fusionV3CandidateGrid();
   if (name === 'fusion-v4') return fusionV4CandidateGrid();
+  if (name === 'squeeze-context') return squeezeContextCandidateGrid();
+  if (name === 'divergence-context') return divergenceContextCandidateGrid();
   if (name === 'phase3-core') return phase3CoreCandidateGrid();
   return defaultCandidateGrid();
 }

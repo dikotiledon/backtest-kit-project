@@ -653,6 +653,100 @@ test('filterSweepCombos collapses disabled-context combos across full dependent 
   assert.deepEqual(filtered[2], combos[3]);
 });
 
+test('getCandidateGrid returns squeeze-context and divergence-context grids', () => {
+  assert.deepEqual(getCandidateGrid('squeeze-context'), {
+    useSqueezeContext: [true],
+    squeezeLength: [20, 34],
+    squeezeBbMult: [2.0, 2.5],
+    squeezeKcMult: [1.5, 2.0],
+    squeezeReleaseFreshBars: [4, 8],
+    squeezeBoostValue: [0.25, 0.5],
+  });
+
+  assert.deepEqual(getCandidateGrid('divergence-context'), {
+    useDivergenceContext: [true],
+    divRsiLen: [14, 21],
+    divPivotLeft: [3, 5],
+    divPivotRight: [3, 5],
+    divFreshBars: [6, 8],
+    divLongBoostValue: [0.25, 0.5],
+    divShortBoostValue: [0.25, 0.5],
+  });
+});
+
+test('filterSweepCombos drops squeeze and divergence knobs when modules are disabled', () => {
+  const combos = [
+    {
+      useSqueezeContext: false,
+      squeezeLength: 20,
+      squeezeBbMult: 2.0,
+      squeezeKcMult: 1.5,
+      squeezeReleaseFreshBars: 4,
+      squeezeBoostValue: 0.25,
+      useDivergenceContext: false,
+      divRsiLen: 14,
+      divPivotLeft: 5,
+      divPivotRight: 5,
+      divFreshBars: 6,
+      divLongBoostValue: 0.25,
+      divShortBoostValue: 0.25,
+      useSignalFusion: true,
+    },
+    {
+      useSqueezeContext: false,
+      squeezeLength: 34,
+      squeezeBbMult: 2.5,
+      squeezeKcMult: 2.0,
+      squeezeReleaseFreshBars: 8,
+      squeezeBoostValue: 0.5,
+      useDivergenceContext: false,
+      divRsiLen: 21,
+      divPivotLeft: 3,
+      divPivotRight: 3,
+      divFreshBars: 8,
+      divLongBoostValue: 0.5,
+      divShortBoostValue: 0.5,
+      useSignalFusion: true,
+    },
+  ];
+
+  assert.equal(filterSweepCombos(combos).length, 1);
+});
+
+test('buildPatchPlan includes squeeze and divergence keys in runtime order', () => {
+  const plan = buildPatchPlan({
+    useSqueezeContext: true,
+    squeezeLength: 34,
+    squeezeBbMult: 2.5,
+    squeezeKcMult: 2.0,
+    squeezeReleaseFreshBars: 8,
+    squeezeBoostValue: 0.5,
+    useDivergenceContext: true,
+    divRsiLen: 21,
+    divPivotLeft: 3,
+    divPivotRight: 3,
+    divFreshBars: 8,
+    divLongBoostValue: 0.5,
+    divShortBoostValue: 0.5,
+  });
+
+  assert.deepEqual(plan.map((step) => step.key), [
+    'useSqueezeContext',
+    'squeezeLength',
+    'squeezeBbMult',
+    'squeezeKcMult',
+    'squeezeReleaseFreshBars',
+    'squeezeBoostValue',
+    'useDivergenceContext',
+    'divRsiLen',
+    'divPivotLeft',
+    'divPivotRight',
+    'divFreshBars',
+    'divLongBoostValue',
+    'divShortBoostValue',
+  ]);
+});
+
 test('getCandidateGrid returns expanded phase3-core grid with broader strategy knobs', () => {
   const grid = getCandidateGrid('phase3-core');
 
@@ -803,7 +897,7 @@ test('pine test script defaults to the hardened fusion v4 profile', async () => 
   assert.match(source, /fusionV4ShortEngulfWeight\s*=\s*input\.float\(-0\.1,\s+title="Fusion V4 Short Engulf Weight"/);
   assert.match(source, /fusionV4ShortEmaWeight\s*=\s*input\.float\(0(?:\.0)?,\s+title="Fusion V4 Short EMA Weight"/);
   assert.match(source, /slAtrMult\s*=\s*input\.float\(0\.75,\s+title="SL ATR x"/);
-  assert.match(source, /tpAtrMult\s*=\s*input\.float\(4\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
+  assert.match(source, /tpAtrMult\s*=\s*input\.float\(5\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
 });
 
 test('normalizeVariantRecords accepts metadata-backed search variants', () => {

@@ -519,6 +519,50 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
   assert.equal(result.manifest.pinnedData.enabled, true);
 });
 
+
+
+test('buildScoutOrchestrationState records active track and novelty metadata', () => {
+  const config = {
+    matrixId: 'pine-autoresearch',
+    selectedProfile: 'full',
+    researchRoot: '/tmp/research',
+    searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+    primaryLab: { labId: 'primary' },
+    shadowLabs: [{ labId: 'shadow-1' }],
+    pinnedData: { enabled: true, datasetsRoot: '/data', cacheRoot: '/cache', exchangeName: 'binance' },
+    researchTracks: [
+      { trackId: 'squeeze-context', gridName: 'phase3-core', windowSet: 'primary', enabled: true },
+      { trackId: 'divergence-context', gridName: 'phase3-core', windowSet: 'rotating', enabled: true },
+    ],
+  };
+
+  const result = buildScoutOrchestrationState({
+    config,
+    runId: 'pine-autoresearch-124',
+    championState: { configId: 'champion', score: 70, config: { minPredSum: 2 } },
+    historyEventsBefore: [],
+    searchBatch: [{ variantId: 'v1', lane: 'exploit', family: 'signal', config: { minPredSum: 1.5 } }],
+    primarySweep: { topConfigs: [{ configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230 }] },
+    matrixCandidates: [{ challenger: { configId: 'c1', config: { minPredSum: 1.5 } }, matrixDecision: { recommendation: 'hold', gates: { candidateChanged: true } }, robustness: {} }],
+    trackState: {
+      activeTrackId: 'squeeze-context',
+      windowSetId: 'primary',
+      noveltySignature: 'squeeze-context|phase3-core|cand-1|primary|primary-shadow',
+      rotationReason: 'cycleIndex',
+      candidateFingerprint: 'cand-1',
+      championFingerprint: 'champion',
+      labSetId: 'primary,shadow-1',
+      gridName: 'phase3-core',
+    },
+  });
+
+  assert.equal(result.manifest.activeTrackId, 'squeeze-context');
+  assert.equal(result.manifest.windowSetId, 'primary');
+  assert.equal(result.manifest.noveltySignature, 'squeeze-context|phase3-core|cand-1|primary|primary-shadow');
+  assert.equal(result.manifest.rotationReason, 'cycleIndex');
+});
+
 test('renderDigestMarkdown includes search-plan and shortlist summary', () => {
   const markdown = renderDigestMarkdown({
     config: { matrixId: 'pine-fusion-v4-core-15m-locked-window', primaryLab: { labId: 'xrpusdt-15m-primary' }, shadowLabs: [{}, {}] },

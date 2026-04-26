@@ -30,6 +30,15 @@ import {
   writeText,
 } from './lib/pine-autoresearch.mjs';
 import { stagePinnedDatasetForLab } from './lib/pine-dataset.mjs';
+import {
+  buildNoveltySignature,
+  nextTrackState,
+  normalizeResearchTracks,
+  readSchedulerState,
+  resolveSchedulerStatePath,
+  selectActiveTrack,
+  writeSchedulerState,
+} from './lib/pine-autoresearch-tracks.mjs';
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -64,7 +73,7 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates }) {
+export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {} }) {
   const paretoShortlist = buildParetoShortlist({
     champion: summarizeResult(championState),
     rankedResults: primarySweep.topConfigs,
@@ -127,6 +136,14 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
         steadyState,
         noChangeStreak,
       },
+      activeTrackId: trackState.activeTrackId ?? null,
+      windowSetId: trackState.windowSetId ?? null,
+      noveltySignature: trackState.noveltySignature ?? null,
+      rotationReason: trackState.rotationReason ?? null,
+      candidateFingerprint: trackState.candidateFingerprint ?? null,
+      championFingerprint: trackState.championFingerprint ?? null,
+      labSetId: trackState.labSetId ?? null,
+      gridName: trackState.gridName ?? config.grid ?? null,
     },
   };
 }
@@ -658,30 +675,54 @@ async function runScout(config) {
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
   const historyEventsBefore = await loadHistoryEvents(config);
+  const schedulerStatePath = resolveSchedulerStatePath({ researchRoot: config.researchRoot, matrixId: config.matrixId });
+  const schedulerState = await readSchedulerState(schedulerStatePath);
+  const researchTracks = normalizeResearchTracks(
+    Array.isArray(config.researchTracks) && config.researchTracks.length > 0
+      ? config.researchTracks
+      : [{
+          trackId: config.grid || 'default-track',
+          name: config.grid || 'default-track',
+          gridName: config.grid || 'default-track',
+          windowSet: config.windowPolicy?.primary || 'primary',
+          enabled: true,
+        }],
+  );
+  const activeTrack = selectActiveTrack({
+    tracks: researchTracks,
+    state: schedulerState,
+    cycleIndex: schedulerState.cycleIndex,
+  }) || researchTracks[0] || null;
+  const activeTrackId = activeTrack?.trackId || null;
+  const gridName = activeTrack?.gridName || config.grid;
+  const windowSetId = activeTrack?.windowSet || config.windowPolicy?.primary || 'primary';
+  const labSetId = [config.primaryLab?.labId, ...(config.shadowLabs || []).map((lab) => lab.labId)].filter(Boolean).join(',');
+  const trackedConfig = { ...config, grid: gridName };
+
   const searchBatch = buildIncumbentSearchBatch({
     incumbent: championState.config,
-    maxConfigs: config.maxConfigs,
+    maxConfigs: trackedConfig.maxConfigs,
     historyEvents: historyEventsBefore,
-    policy: config.searchPolicy,
+    policy: trackedConfig.searchPolicy,
   });
   const totalCombos = searchBatch.length;
   const sweepOffset = computeSweepOffset({
     historyEvents: historyEventsBefore,
-    maxConfigs: config.maxConfigs,
+    maxConfigs: trackedConfig.maxConfigs,
     totalCombos,
   });
-  const variantFilePath = path.join(config.researchRoot, `${runId}-variants.json`);
+  const variantFilePath = path.join(trackedConfig.researchRoot, `${runId}-variants.json`);
   await writeJson(variantFilePath, searchBatch);
-  const primarySweep = await runPrimarySweep(config, runId, { sweepOffset, totalCombos, variantFilePath });
+  const primarySweep = await runPrimarySweep(trackedConfig, runId, { sweepOffset, totalCombos, variantFilePath });
   const paretoShortlist = buildParetoShortlist({
     champion: summarizeResult(championState),
     rankedResults: primarySweep.topConfigs,
-    limit: config.searchPolicy.paretoShortlistSize,
+    limit: trackedConfig.searchPolicy.paretoShortlistSize,
   });
 
   const matrixCandidates = [];
-  for (const candidate of paretoShortlist.slice(0, config.searchPolicy.matrixCandidateLimit)) {
-    const { labResults, matrixDecision } = await evaluateMatrix(config, runId, championState, candidate);
+  for (const candidate of paretoShortlist.slice(0, trackedConfig.searchPolicy.matrixCandidateLimit)) {
+    const { labResults, matrixDecision } = await evaluateMatrix(trackedConfig, runId, championState, candidate);
     const robustness = {
       aggregateScoreDelta: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.scoreDelta || 0), 0),
       aggregateRoiDeltaPct: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.roiDeltaPct || 0), 0),
@@ -691,25 +732,50 @@ async function runScout(config) {
     matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, robustness });
   }
 
+  const selectedCandidate = selectRobustMatrixCandidate({ candidates: matrixCandidates });
+  const challengerSummary = selectedCandidate?.challenger || summarizeResult(championState);
+  const candidateFingerprint = configFingerprint(challengerSummary.config);
+  const noveltySignature = buildNoveltySignature({
+    trackId: activeTrackId,
+    gridName,
+    candidateFingerprint,
+    windowSetId,
+    labSetId,
+  });
+  const rotationReason = schedulerState.activeTrackId && schedulerState.activeTrackId === activeTrackId
+    ? 'persisted-state'
+    : schedulerState.activeTrackId
+      ? 'cycleIndex'
+      : 'initial';
+
   const orchestration = buildScoutOrchestrationState({
-    config,
+    config: trackedConfig,
     runId,
     championState,
     historyEventsBefore,
     searchBatch,
     primarySweep,
     matrixCandidates,
+    trackState: {
+      activeTrackId,
+      windowSetId,
+      noveltySignature,
+      rotationReason,
+      candidateFingerprint,
+      championFingerprint: configFingerprint(championState.config),
+      labSetId,
+      gridName,
+    },
   });
-  const { challengerSummary, labResults, matrixDecision, steadyState, noChangeStreak, manifest } = orchestration;
+  const { steadyState, noChangeStreak, manifest } = orchestration;
 
   const manifestName = `${runId}.json`;
-  const manifestPath = path.join(manifestsDir(config), manifestName);
-  const scoutPath = path.join(config.digestRoot, `${runId}.md`);
+  const manifestPath = path.join(manifestsDir(trackedConfig), manifestName);
+  const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
 
   await writeJson(manifestPath, manifest);
-  await writeJson(latestManifestPath(config), { ...manifest, manifestPath });
-  await writeText(scoutPath, renderScoutMarkdown({ config, manifest }));
-  await appendJsonl(historyPath(config), {
+  await writeJson(latestManifestPath(trackedConfig), { ...manifest, manifestPath });
+  await appendJsonl(historyPath(trackedConfig), {
     timestamp: manifest.generatedAt,
     type: 'cycle',
     runId,
@@ -719,11 +785,32 @@ async function runScout(config) {
     summary: manifest.matrixDecision.summary,
     steadyState,
     noChangeStreak,
+    activeTrackId: manifest.activeTrackId,
+    windowSetId: manifest.windowSetId,
+    noveltySignature: manifest.noveltySignature,
+    rotationReason: manifest.rotationReason,
   });
-  const updatedHistoryEvents = await rebuildHistoryArtifacts(config, championState);
-  const previousManifest = await readPreviousManifest(config, manifestName);
-  const liveDigestPath = await writeCurrentDigest(config, { ...manifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);
-  const pruneResult = await pruneRunArtifacts(config);
+
+  const updatedSchedulerState = nextTrackState({
+    state: schedulerState,
+    manifest: {
+      activeTrackId: manifest.activeTrackId,
+      candidateFingerprint: manifest.candidateFingerprint,
+      championFingerprint: manifest.championFingerprint,
+      noveltySignature: manifest.noveltySignature,
+      rotationReason: manifest.rotationReason,
+      windowSetId: manifest.windowSetId,
+      labSetId: manifest.labSetId,
+      gridName: manifest.gridName,
+    },
+  });
+  await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
+
+  await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest }));
+  const updatedHistoryEvents = await rebuildHistoryArtifacts(trackedConfig, championState);
+  const previousManifest = await readPreviousManifest(trackedConfig, manifestName);
+  const liveDigestPath = await writeCurrentDigest(trackedConfig, { ...manifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);
+  const pruneResult = await pruneRunArtifacts(trackedConfig);
 
   return { manifest, manifestPath, scoutPath, liveDigestPath, pruneResult };
 }

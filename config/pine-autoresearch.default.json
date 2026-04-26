@@ -12,6 +12,73 @@
     "matrixCandidateLimit": 3
   },
   "defaultProfile": "full",
+  "researchTracks": [
+    {
+      "trackId": "squeeze-context",
+      "name": "Squeeze context",
+      "sourceFamily": "squeeze",
+      "gridName": "phase3-core",
+      "variantMode": "grid",
+      "windowSet": "primary",
+      "enabled": true,
+      "promotionPolicy": {
+        "requireCandidateChange": true
+      },
+      "stopPolicy": {
+        "maxNoChangeStreak": 3
+      }
+    },
+    {
+      "trackId": "divergence-context",
+      "name": "Divergence context",
+      "sourceFamily": "divergence",
+      "gridName": "phase3-core",
+      "variantMode": "grid",
+      "windowSet": "rotating",
+      "enabled": true,
+      "promotionPolicy": {
+        "requireCandidateChange": true
+      },
+      "stopPolicy": {
+        "maxNoChangeStreak": 4
+      }
+    }
+  ],
+  "rotationPolicy": {
+    "noChangeStreakRotateAfter": 3,
+    "noNoveltyRotateAfter": 2,
+    "maxCyclesPerTrack": 6,
+    "preferCurrentChampionUntil": 2,
+    "cooldownCyclesAfterPromote": 1
+  },
+  "noveltyPolicy": {
+    "signatureFields": [
+      "trackId",
+      "gridName",
+      "candidateFingerprint",
+      "windowSetId",
+      "labSetId"
+    ]
+  },
+  "windowPolicy": {
+    "primary": "primary",
+    "shadow": "shadow",
+    "rotating": ["primary", "shadow", "rotating"],
+    "minCoverage": 2,
+    "maxAge": 12
+  },
+  "gatePolicy": {
+    "requireCandidateChange": true,
+    "requirePrimaryPromote": true,
+    "minShadowPassCount": 3,
+    "minShadowPassRatio": 0.6,
+    "minScoreDelta": 0,
+    "minRoiDeltaPct": 0,
+    "minProfitFactorDelta": 0,
+    "maxDrawdownDeltaPct": 0,
+    "minTradeCount": 0,
+    "minTradeRatioVsIncumbent": 0
+  },
   "scoutProfiles": {
     "full": {
       "maxConfigs": 8,

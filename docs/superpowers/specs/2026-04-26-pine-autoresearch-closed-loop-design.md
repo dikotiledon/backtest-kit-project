@@ -32,6 +32,7 @@ Current weakness:
 - the loop can remain honest but saturated
 - repeated cycles can rediscover the same champion on the same window set
 - micro/full tasks are mostly fixed semantics instead of track-aware research phases
+- the Pine squeeze/divergence logic is already integrated inline in `pine/test.pine`; the standalone files under `pine/to-be-implement` are mirrors/reference copies, not the runtime source of truth
 
 ## Design Summary
 The scheduler becomes a four-stage pipeline:

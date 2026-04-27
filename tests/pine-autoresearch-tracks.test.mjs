@@ -6,12 +6,14 @@ import test from 'node:test';
 
 import {
   buildNoveltySignature,
+  computeConfigSimilarity,
   defaultSchedulerState,
   nextTrackState,
   normalizeResearchTracks,
   readSchedulerState,
   resolveSchedulerStatePath,
   selectActiveTrack,
+  summarizeTopCandidateSimilarity,
   writeSchedulerState,
 } from '../scripts/lib/pine-autoresearch-tracks.mjs';
 
@@ -106,10 +108,12 @@ test('readSchedulerState and writeSchedulerState round-trip the explicit schedul
     activeTrackId: 'track-c',
     cycleIndex: 3,
     noChangeStreak: 2,
+    sameTrackCycleStreak: 5,
     lastNoveltySignature: 'sig-1',
     lastChampionFingerprint: 'champ-1',
     lastCandidateFingerprint: 'cand-1',
     lastRotationTrigger: 'steady-state',
+    lastPromotionEligibleAt: '2026-04-27T00:00:00.000Z',
   };
 
   try {
@@ -159,6 +163,41 @@ test('nextTrackState treats repeated novelty plus unchanged champion as steady s
   assert.equal(changedCandidate.lastRotationTrigger, 'candidate-changed');
 });
 
+test('computeConfigSimilarity scores key-wise equality across comparable config keys', () => {
+  assert.equal(
+    computeConfigSimilarity({
+      left: { a: 1, nested: { b: true, c: 'x' } },
+      right: { a: 1, nested: { b: false, c: 'x' }, extra: 9 },
+    }),
+    0.75,
+  );
+});
+
+test('summarizeTopCandidateSimilarity reports the closest candidate to the champion', () => {
+  const summary = summarizeTopCandidateSimilarity({
+    championConfig: { a: 1, nested: { b: true, c: 'x' }, extra: 9 },
+    candidates: [
+      { configId: 'far', config: { a: 0, nested: { b: false, c: 'y' } } },
+      { configId: 'near', config: { a: 1, nested: { b: false, c: 'x' } } },
+      { configId: 'mid', config: { a: 1, nested: { b: true, c: 'y' } } },
+    ],
+  });
+
+  assert.equal(summary.topCandidateConfigId, 'near');
+  assert.equal(summary.topCandidateSimilarity, 0.75);
+});
+
+test('nextTrackState clears sticky activeTrackId when rotation trigger fires', () => {
+  const next = nextTrackState({
+    state: { activeTrackId: 'squeeze-context', cycleIndex: 8, noChangeStreak: 3, sameTrackCycleStreak: 9 },
+    policy: { noChangeStreakRotateAfter: 3, maxCyclesPerTrack: 8, similarityRotateAbove: 0.85 },
+    manifest: { rotationTrigger: 'noChangeStreak', topCandidateSimilarity: 0.91 },
+  });
+
+  assert.equal(next.activeTrackId, null);
+  assert.equal(next.lastRotationTrigger, 'noChangeStreak');
+});
+
 test('nextTrackState resets the streak when rotation changes the active track', () => {
   const rotated = nextTrackState({
     state: {
@@ -166,6 +205,7 @@ test('nextTrackState resets the streak when rotation changes the active track', 
       activeTrackId: 'track-a',
       cycleIndex: 5,
       noChangeStreak: 4,
+      sameTrackCycleStreak: 8,
       lastNoveltySignature: 'track-a|grid-a|cand-1|window-1|lab-1',
       lastChampionFingerprint: 'champ-1',
       lastCandidateFingerprint: 'cand-1',

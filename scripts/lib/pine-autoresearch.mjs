@@ -424,6 +424,16 @@ function renderLabRowTable(labResults) {
   return `${lines.join('\n')}\n`;
 }
 
+function appendTrackDiagnostics(lines, manifest) {
+  lines.push('', '## Track rotation', '');
+  lines.push(`- topCandidateSimilarity: ${manifest?.topCandidateSimilarity ?? 'n/a'}`);
+  lines.push(`- rotationTrigger: ${manifest?.rotationTrigger ?? 'n/a'}`);
+  lines.push(`- sameTrackCycleStreak: ${manifest?.sameTrackCycleStreak ?? 0}`);
+  lines.push(`- promotionEligible: ${manifest?.promotionEligible ?? false}`);
+  lines.push(`- promotionEligibleReason: ${manifest?.promotionEligibleReason ?? 'n/a'}`);
+  lines.push(`- rotationReason: ${manifest?.rotationReason ?? 'n/a'}`);
+}
+
 export function renderScoutMarkdown({ config, manifest }) {
   const champion = manifest.champion || manifest.incumbent;
   const challenger = manifest.challenger;
@@ -473,6 +483,10 @@ export function renderScoutMarkdown({ config, manifest }) {
   if (decision?.counts) {
     lines.push(`- Labs promoting: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
     lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
+  }
+
+  if (manifest) {
+    appendTrackDiagnostics(lines, manifest);
   }
 
   if (manifest.searchPlan) {
@@ -556,6 +570,10 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
   if (decision?.counts) {
     lines.push(`- Promote labs: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
     lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
+  }
+
+  if (latestManifest) {
+    appendTrackDiagnostics(lines, latestManifest);
   }
 
   if (latestManifest?.searchPlan) {

@@ -38,6 +38,7 @@ import {
   readSchedulerState,
   resolveSchedulerStatePath,
   selectActiveTrack,
+  summarizeTopCandidateSimilarity,
   writeSchedulerState,
 } from './lib/pine-autoresearch-tracks.mjs';
 
@@ -75,14 +76,15 @@ function clone(value) {
 }
 
 export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {} }) {
+  const championSummary = summarizeResult(championState);
   const paretoShortlist = buildParetoShortlist({
-    champion: summarizeResult(championState),
+    champion: championSummary,
     rankedResults: primarySweep.topConfigs,
     limit: config.searchPolicy.paretoShortlistSize,
   });
 
   const selectedCandidate = selectRobustMatrixCandidate({ candidates: matrixCandidates });
-  const challengerSummary = selectedCandidate?.challenger || summarizeResult(championState);
+  const challengerSummary = selectedCandidate?.challenger || championSummary;
   const labResults = selectedCandidate?.labResults || [];
   const matrixDecision = selectedCandidate?.matrixDecision || decideMatrixPromotion({
     labResults,
@@ -92,6 +94,21 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
   });
   const steadyState = matrixDecision?.gates?.candidateChanged === false;
   const noChangeStreak = steadyState ? (countTrailingSteadyStateCycles(historyEventsBefore) + 1) : 0;
+  const topCandidateSimilaritySummary = summarizeTopCandidateSimilarity({
+    championConfig: championState?.config,
+    candidates: (primarySweep.topConfigs || [])
+      .filter((candidate) => !sameConfig(candidate?.config, championState?.config))
+      .slice(0, 3),
+  });
+  const promotionEligible = trackState.promotionEligible ?? Boolean(selectedCandidate?.matrixDecision?.recommendation === 'promote');
+  const promotionEligibleReason = trackState.promotionEligibleReason ?? (
+    promotionEligible
+      ? selectedCandidate?.matrixDecision?.summary || 'Promotion eligible'
+      : selectedCandidate?.matrixDecision?.summary || 'No promotion-eligible challenger'
+  );
+  const rotationTrigger = trackState.rotationTrigger ?? trackState.lastRotationTrigger ?? null;
+  const rotationReason = trackState.rotationReason ?? rotationTrigger ?? null;
+  const sameTrackCycleStreak = Number.isFinite(trackState.sameTrackCycleStreak) ? trackState.sameTrackCycleStreak : 0;
 
   return {
     variantFilePath: path.join(config.researchRoot, `${runId}-variants.json`),
@@ -115,8 +132,8 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
         cacheRoot: config.pinnedData.cacheRoot,
         exchangeName: config.pinnedData.exchangeName,
       } : { enabled: false },
-      incumbent: summarizeResult(championState),
-      champion: summarizeResult(championState),
+      incumbent: championSummary,
+      champion: championSummary,
       challenger: challengerSummary,
       primarySweep,
       searchPlan: {
@@ -140,7 +157,12 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       activeTrackId: trackState.activeTrackId ?? null,
       windowSetId: trackState.windowSetId ?? null,
       noveltySignature: trackState.noveltySignature ?? null,
-      rotationReason: trackState.rotationReason ?? null,
+      rotationTrigger,
+      rotationReason,
+      sameTrackCycleStreak,
+      topCandidateSimilarity: topCandidateSimilaritySummary.topCandidateSimilarity,
+      promotionEligible,
+      promotionEligibleReason,
       candidateFingerprint: trackState.candidateFingerprint ?? null,
       championFingerprint: trackState.championFingerprint ?? null,
       labSetId: trackState.labSetId ?? null,
@@ -689,10 +711,17 @@ async function runScout(config) {
           enabled: true,
         }],
   );
+  const rotationPolicy = config.rotationPolicy || {};
+  const hardRotationTrigger = schedulerState.lastRotationTrigger
+    ?? (schedulerState.noChangeStreak >= (rotationPolicy.noChangeStreakRotateAfter ?? 3) ? 'noChangeStreak' : null)
+    ?? (schedulerState.sameTrackCycleStreak > (rotationPolicy.maxCyclesPerTrack ?? 8) ? 'maxCyclesPerTrack' : null);
+  const activeTrackSelectionState = ['noChangeStreak', 'noveltySimilarity', 'maxCyclesPerTrack'].includes(hardRotationTrigger)
+    ? { ...schedulerState, activeTrackId: null }
+    : schedulerState;
   const activeTrack = selectActiveTrack({
     tracks: researchTracks,
-    state: schedulerState,
-    cycleIndex: schedulerState.cycleIndex,
+    state: activeTrackSelectionState,
+    cycleIndex: activeTrackSelectionState.cycleIndex,
   }) || researchTracks[0] || null;
   const activeTrackId = activeTrack?.trackId || null;
   const gridName = activeTrack?.gridName || config.grid;
@@ -760,11 +789,17 @@ async function runScout(config) {
     windowSetId,
     labSetId,
   });
-  const rotationReason = schedulerState.activeTrackId && schedulerState.activeTrackId === activeTrackId
-    ? 'persisted-state'
-    : schedulerState.activeTrackId
-      ? 'cycleIndex'
-      : 'initial';
+  const rotationReason = hardRotationTrigger
+    ?? (schedulerState.activeTrackId && schedulerState.activeTrackId === activeTrackId
+      ? 'persisted-state'
+      : schedulerState.activeTrackId
+        ? 'cycleIndex'
+        : 'initial');
+  const sameTrackCycleStreak = activeTrackId && activeTrackId === schedulerState.activeTrackId
+    ? (schedulerState.sameTrackCycleStreak || 0) + 1
+    : activeTrackId
+      ? 1
+      : 0;
 
   const orchestration = buildScoutOrchestrationState({
     config: trackedConfig,
@@ -778,7 +813,9 @@ async function runScout(config) {
       activeTrackId,
       windowSetId,
       noveltySignature,
+      rotationTrigger: hardRotationTrigger,
       rotationReason,
+      sameTrackCycleStreak,
       candidateFingerprint,
       championFingerprint: configFingerprint(championState.config),
       labSetId,
@@ -806,17 +843,28 @@ async function runScout(config) {
     activeTrackId: manifest.activeTrackId,
     windowSetId: manifest.windowSetId,
     noveltySignature: manifest.noveltySignature,
+    rotationTrigger: manifest.rotationTrigger,
     rotationReason: manifest.rotationReason,
+    sameTrackCycleStreak: manifest.sameTrackCycleStreak,
+    topCandidateSimilarity: manifest.topCandidateSimilarity,
+    promotionEligible: manifest.promotionEligible,
+    promotionEligibleReason: manifest.promotionEligibleReason,
   });
 
   const updatedSchedulerState = nextTrackState({
     state: schedulerState,
+    policy: rotationPolicy,
     manifest: {
       activeTrackId: manifest.activeTrackId,
       candidateFingerprint: manifest.candidateFingerprint,
       championFingerprint: manifest.championFingerprint,
       noveltySignature: manifest.noveltySignature,
+      rotationTrigger: manifest.rotationTrigger,
       rotationReason: manifest.rotationReason,
+      sameTrackCycleStreak: manifest.sameTrackCycleStreak,
+      promotionEligible: manifest.promotionEligible,
+      promotionEligibleReason: manifest.promotionEligibleReason,
+      generatedAt: manifest.generatedAt,
       windowSetId: manifest.windowSetId,
       labSetId: manifest.labSetId,
       gridName: manifest.gridName,

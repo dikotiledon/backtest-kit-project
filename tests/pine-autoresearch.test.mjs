@@ -540,30 +540,47 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
   const result = buildScoutOrchestrationState({
     config,
     runId: 'pine-autoresearch-124',
-    championState: { configId: 'champion', score: 70, config: { minPredSum: 2 } },
+    championState: { configId: 'champion', score: 70, config: { a: 1, nested: { b: true, c: 'x' }, extra: 9 } },
     historyEventsBefore: [],
-    searchBatch: [{ variantId: 'v1', lane: 'exploit', family: 'signal', config: { minPredSum: 1.5 } }],
-    primarySweep: { topConfigs: [{ configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230 }] },
-    matrixCandidates: [{ challenger: { configId: 'c1', config: { minPredSum: 1.5 } }, matrixDecision: { recommendation: 'hold', gates: { candidateChanged: true } }, robustness: {} }],
+    searchBatch: [{ variantId: 'v1', lane: 'exploit', family: 'signal', config: { a: 1, nested: { b: false, c: 'x' } } }],
+    primarySweep: {
+      topConfigs: [
+        { configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230, config: { a: 1, nested: { b: false, c: 'x' } } },
+        { configId: 'c2', score: 71, roiPct: 47, profitFactor: 1.8, maxDrawdownPct: 4.3, tradeCount: 225, config: { a: 1, nested: { b: true, c: 'y' } } },
+        { configId: 'c3', score: 69, roiPct: 46, profitFactor: 1.7, maxDrawdownPct: 4.6, tradeCount: 220, config: { a: 0, nested: { b: true, c: 'x' } } },
+      ],
+    },
+    matrixCandidates: [{ challenger: { configId: 'c1', config: { a: 1, nested: { b: false, c: 'x' } } }, matrixDecision: { recommendation: 'promote', summary: 'Promote c1' }, robustness: {} }],
     trackState: {
       activeTrackId: 'squeeze-context',
       windowSetId: 'primary',
       noveltySignature: 'squeeze-context|phase3-core|cand-1|primary|primary-shadow',
+      rotationTrigger: 'noChangeStreak',
       rotationReason: 'cycleIndex',
       candidateFingerprint: 'cand-1',
       championFingerprint: 'champion',
       labSetId: 'primary,shadow-1',
       gridName: 'phase3-core',
+      sameTrackCycleStreak: 4,
+      promotionEligible: true,
+      promotionEligibleReason: 'Promote c1',
+      topCandidateSimilarity: 0.75,
     },
   });
 
   assert.equal(result.manifest.activeTrackId, 'squeeze-context');
   assert.equal(result.manifest.windowSetId, 'primary');
   assert.equal(result.manifest.noveltySignature, 'squeeze-context|phase3-core|cand-1|primary|primary-shadow');
+  assert.equal(result.manifest.rotationTrigger, 'noChangeStreak');
   assert.equal(result.manifest.rotationReason, 'cycleIndex');
+  assert.equal(result.manifest.sameTrackCycleStreak, 4);
+  assert.equal(result.manifest.promotionEligible, true);
+  assert.equal(result.manifest.promotionEligibleReason, 'Promote c1');
+  assert.equal(result.manifest.topCandidateSimilarity, 0.75);
 });
 
-test('renderDigestMarkdown includes search-plan and shortlist summary', () => {
+
+test('renderDigestMarkdown includes search-plan, shortlist summary, and rotation diagnostics', () => {
   const markdown = renderDigestMarkdown({
     config: { matrixId: 'pine-fusion-v4-core-15m-locked-window', primaryLab: { labId: 'xrpusdt-15m-primary' }, shadowLabs: [{}, {}] },
     championState: { configId: 'champion', score: 70.78, roiPct: 47.19 },
@@ -574,6 +591,12 @@ test('renderDigestMarkdown includes search-plan and shortlist summary', () => {
       searchPlan: { variantCount: 8, exploitRatio: 0.8 },
       paretoShortlist: [{ configId: 'champion' }, { configId: 'robust-winner' }],
       matrixDecision: { recommendation: 'promote', counts: { allPassCount: 5, totalLabs: 6, shadowPassRatio: 0.8 }, summary: 'Promote robust-winner' },
+      topCandidateSimilarity: 0.91,
+      rotationTrigger: 'noChangeStreak',
+      sameTrackCycleStreak: 9,
+      promotionEligible: true,
+      promotionEligibleReason: 'Promote robust-winner',
+      rotationReason: 'noChangeStreak',
     },
     previousManifest: null,
     historyEvents: [],
@@ -583,6 +606,11 @@ test('renderDigestMarkdown includes search-plan and shortlist summary', () => {
   assert.match(markdown, /variantCount: 8/);
   assert.match(markdown, /Pareto shortlist/);
   assert.match(markdown, /robust-winner/);
+  assert.match(markdown, /topCandidateSimilarity: 0\.91/);
+  assert.match(markdown, /rotationTrigger: noChangeStreak/);
+  assert.match(markdown, /sameTrackCycleStreak: 9/);
+  assert.match(markdown, /promotionEligible: true/);
+  assert.match(markdown, /promotionEligibleReason: Promote robust-winner/);
 });
 
 test('default autoresearch config enables incumbent-local shortlist policy', async () => {

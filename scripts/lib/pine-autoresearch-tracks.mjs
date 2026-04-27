@@ -9,6 +9,44 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function stableValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => stableValue(item));
+  }
+
+  if (isPlainObject(value)) {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = stableValue(value[key]);
+        return acc;
+      }, {});
+  }
+
+  return value;
+}
+
+function similarityRatio(left, right) {
+  if (isPlainObject(left) && isPlainObject(right)) {
+    const comparableKeys = Object.keys(left).filter((key) => Object.prototype.hasOwnProperty.call(right, key)).sort();
+    if (comparableKeys.length === 0) return 1;
+    const score = comparableKeys.reduce((sum, key) => sum + similarityRatio(left[key], right[key]), 0);
+    return Number((score / comparableKeys.length).toFixed(3));
+  }
+
+  if (Array.isArray(left) && Array.isArray(right)) {
+    const limit = Math.min(left.length, right.length);
+    if (limit === 0) return left.length === right.length ? 1 : 0;
+    let score = 0;
+    for (let i = 0; i < limit; i++) {
+      score += similarityRatio(left[i], right[i]);
+    }
+    return Number((score / limit).toFixed(3));
+  }
+
+  return Number((stableValue(left) === stableValue(right) ? 1 : 0).toFixed(3));
+}
+
 export function normalizeResearchTracks(rawTracks = []) {
   return rawTracks
     .filter(Boolean)
@@ -40,6 +78,30 @@ export function buildNoveltySignature({
     .join('|');
 }
 
+export function computeConfigSimilarity({ left, right }) {
+  return similarityRatio(left, right);
+}
+
+export function summarizeTopCandidateSimilarity({ championConfig, candidates = [] }) {
+  const ranked = candidates
+    .map((candidate) => ({
+      candidate,
+      similarity: computeConfigSimilarity({ left: championConfig, right: candidate?.config }),
+    }))
+    .sort((left, right) => right.similarity - left.similarity);
+
+  const top = ranked[0] || null;
+  return {
+    topCandidateSimilarity: top?.similarity ?? 0,
+    topCandidateConfigId: top?.candidate?.configId ?? null,
+    topCandidateFingerprint: top?.candidate?.config ? JSON.stringify(stableValue(top.candidate.config)) : null,
+    candidates: ranked.map(({ candidate, similarity }) => ({
+      configId: candidate?.configId ?? null,
+      similarity,
+    })),
+  };
+}
+
 export function resolveSchedulerStatePath({ researchRoot, matrixId }) {
   return join(String(researchRoot), 'state', 'scheduler', `${String(matrixId)}.json`);
 }
@@ -66,10 +128,12 @@ export function defaultSchedulerState() {
     activeTrackId: null,
     cycleIndex: 0,
     noChangeStreak: 0,
+    sameTrackCycleStreak: 0,
     lastNoveltySignature: null,
     lastChampionFingerprint: null,
     lastCandidateFingerprint: null,
     lastRotationTrigger: null,
+    lastPromotionEligibleAt: null,
   };
 }
 
@@ -98,14 +162,53 @@ export function selectActiveTrack({ tracks = [], state = defaultSchedulerState()
   return enabledTracks[rotationIndex];
 }
 
-export function nextTrackState({ state = defaultSchedulerState(), manifest = {} } = {}) {
+function resolveRotationTrigger({ state = defaultSchedulerState(), policy = {}, manifest = {} } = {}) {
+  if (manifest.rotationTrigger) {
+    return manifest.rotationTrigger;
+  }
+
+  const hasPolicyTrigger = Number.isFinite(policy.noChangeStreakRotateAfter)
+    || Number.isFinite(policy.similarityRotateAbove)
+    || Number.isFinite(policy.maxCyclesPerTrack);
+  if (!hasPolicyTrigger) {
+    return null;
+  }
+
+  const noChangeStreakRotateAfter = Number.isFinite(policy.noChangeStreakRotateAfter)
+    ? policy.noChangeStreakRotateAfter
+    : 3;
+  const similarityRotateAbove = Number.isFinite(policy.similarityRotateAbove)
+    ? policy.similarityRotateAbove
+    : 0.85;
+  const maxCyclesPerTrack = Number.isFinite(policy.maxCyclesPerTrack)
+    ? policy.maxCyclesPerTrack
+    : 8;
+
+  if ((state?.noChangeStreak ?? 0) >= noChangeStreakRotateAfter) {
+    return 'noChangeStreak';
+  }
+
+  if (Number.isFinite(manifest.topCandidateSimilarity) && manifest.topCandidateSimilarity > similarityRotateAbove) {
+    return 'noveltySimilarity';
+  }
+
+  if ((state?.sameTrackCycleStreak ?? 0) > maxCyclesPerTrack && manifest.promotionEligible === false) {
+    return 'maxCyclesPerTrack';
+  }
+
+  return null;
+}
+
+export function nextTrackState({ state = defaultSchedulerState(), policy = {}, manifest = {} } = {}) {
   const previous = normalizeSchedulerState(state);
-  const nextActiveTrackId = manifest.activeTrackId ?? previous.activeTrackId ?? null;
-  const rotationHappened = Boolean(
-    previous.activeTrackId
-    && manifest.activeTrackId != null
-    && manifest.activeTrackId !== previous.activeTrackId,
-  );
+  const resolvedRotationTrigger = resolveRotationTrigger({ state: previous, policy, manifest });
+  const nextActiveTrackId = resolvedRotationTrigger && ['noChangeStreak', 'noveltySimilarity', 'maxCyclesPerTrack'].includes(resolvedRotationTrigger)
+    ? null
+    : manifest.activeTrackId ?? previous.activeTrackId ?? null;
+  const activeTrackChanged = nextActiveTrackId != null
+    && previous.activeTrackId != null
+    && nextActiveTrackId !== previous.activeTrackId;
+  const rotationHappened = Boolean(resolvedRotationTrigger) || activeTrackChanged;
   const candidateFingerprint = manifest.candidateFingerprint ?? null;
   const championFingerprint = manifest.championFingerprint ?? null;
   const noveltySignature = manifest.noveltySignature ?? buildNoveltySignature({
@@ -124,22 +227,32 @@ export function nextTrackState({ state = defaultSchedulerState(), manifest = {} 
     : candidateChanged
       ? 0
       : previous.noChangeStreak + 1;
+  const sameTrackCycleStreak = rotationHappened
+    ? (resolvedRotationTrigger && ['noChangeStreak', 'noveltySimilarity', 'maxCyclesPerTrack'].includes(resolvedRotationTrigger)
+      ? 0
+      : activeTrackChanged
+        ? (previous.activeTrackId ? 1 : 0)
+        : previous.sameTrackCycleStreak)
+    : nextActiveTrackId && nextActiveTrackId === previous.activeTrackId
+      ? previous.sameTrackCycleStreak + 1
+      : nextActiveTrackId
+        ? 1
+        : 0;
 
   return {
     ...previous,
     activeTrackId: nextActiveTrackId,
     cycleIndex: Number.isFinite(manifest.cycleIndex) ? manifest.cycleIndex : previous.cycleIndex + 1,
     noChangeStreak,
+    sameTrackCycleStreak,
     lastNoveltySignature: noveltySignature,
     lastChampionFingerprint: championFingerprint ?? previous.lastChampionFingerprint,
     lastCandidateFingerprint: candidateFingerprint ?? previous.lastCandidateFingerprint,
-    lastRotationTrigger: rotationHappened
-      ? 'rotation'
-      : candidateChanged
-        ? 'candidate-changed'
-        : repeatedNovelty
-          ? 'steady-state'
-          : previous.lastRotationTrigger,
+    lastRotationTrigger: resolvedRotationTrigger
+      ?? (activeTrackChanged ? 'rotation' : candidateChanged ? 'candidate-changed' : repeatedNovelty ? 'steady-state' : previous.lastRotationTrigger),
+    lastPromotionEligibleAt: manifest.promotionEligible === true
+      ? (manifest.promotionEligibleAt ?? manifest.generatedAt ?? previous.lastPromotionEligibleAt)
+      : previous.lastPromotionEligibleAt,
   };
 }
 
@@ -151,9 +264,11 @@ function normalizeSchedulerState(state = {}) {
     activeTrackId: state.activeTrackId ?? base.activeTrackId,
     cycleIndex: Number.isFinite(state.cycleIndex) ? state.cycleIndex : base.cycleIndex,
     noChangeStreak: Number.isFinite(state.noChangeStreak) ? state.noChangeStreak : base.noChangeStreak,
+    sameTrackCycleStreak: Number.isFinite(state.sameTrackCycleStreak) ? state.sameTrackCycleStreak : base.sameTrackCycleStreak,
     lastNoveltySignature: state.lastNoveltySignature ?? base.lastNoveltySignature,
     lastChampionFingerprint: state.lastChampionFingerprint ?? base.lastChampionFingerprint,
     lastCandidateFingerprint: state.lastCandidateFingerprint ?? base.lastCandidateFingerprint,
     lastRotationTrigger: state.lastRotationTrigger ?? base.lastRotationTrigger,
+    lastPromotionEligibleAt: state.lastPromotionEligibleAt ?? base.lastPromotionEligibleAt,
   };
 }

@@ -82,6 +82,7 @@ const DIVERGENCE_CONTEXT_KEYS = [
   'divFreshBars',
   'divLongBoostValue',
   'divShortBoostValue',
+  'divCautionPenaltyValue',
 ];
 
 function deleteKeys(target, keys) {
@@ -481,6 +482,7 @@ const PATCHERS = {
   divFreshBars: intInputPatcher('divFreshBars', 'Divergence Fresh Bars'),
   divLongBoostValue: floatInputPatcher('divLongBoostValue', 'Divergence Long Boost'),
   divShortBoostValue: floatInputPatcher('divShortBoostValue', 'Divergence Short Boost'),
+  divCautionPenaltyValue: floatInputPatcher('divCautionPenaltyValue', 'Divergence Caution Penalty'),
 };
 
 export function buildPatchPlan(config) {
@@ -695,6 +697,7 @@ export function divergenceContextCandidateGrid() {
     divFreshBars: [6, 8],
     divLongBoostValue: [0.25, 0.5],
     divShortBoostValue: [0.25, 0.5],
+    divCautionPenaltyValue: [0.0, 0.25],
   };
 }
 
@@ -769,6 +772,20 @@ function phase3CoreBaseConfig() {
     contextTightenTrailOnCaution: false,
     contextTrailTightenFactor: 0.75,
     contextAllowEarlySignalExit: false,
+    useSqueezeContext: true,
+    squeezeLength: 20,
+    squeezeBbMult: 2.0,
+    squeezeKcMult: 1.5,
+    squeezeReleaseFreshBars: 4,
+    squeezeBoostValue: 0.25,
+    useDivergenceContext: true,
+    divRsiLen: 14,
+    divPivotLeft: 5,
+    divPivotRight: 5,
+    divFreshBars: 6,
+    divLongBoostValue: 0.25,
+    divShortBoostValue: 0.25,
+    divCautionPenaltyValue: 0.0,
   };
 }
 
@@ -818,6 +835,16 @@ function buildPhase3CoreVariants() {
     { minBarsBetween: 1 },
     { minBarsBetween: 4 },
     { minFusionScore: 2 },
+    { squeezeLength: 34 },
+    { squeezeBbMult: 2.5 },
+    { squeezeKcMult: 2.0 },
+    { squeezeReleaseFreshBars: 8 },
+    { squeezeBoostValue: 0.5 },
+    { divRsiLen: 21 },
+    { divPivotLeft: 3, divPivotRight: 3 },
+    { divFreshBars: 8 },
+    { divLongBoostValue: 0.5, divShortBoostValue: 0.5 },
+    { divCautionPenaltyValue: 0.25 },
     { useSupertrendEntryConfirm: true },
     { supertrendAtrLen: 7 },
     { supertrendAtrLen: 14 },
@@ -883,6 +910,20 @@ export function phase3CoreCandidateGrid() {
     trailAtrLen: [7, 14, 21],
     trailAtrMult: [1.0, 1.5, 2.0],
     trailActivateR: [0.5, 1.0, 1.5],
+    useSqueezeContext: [true],
+    squeezeLength: [20, 34],
+    squeezeBbMult: [2.0, 2.5],
+    squeezeKcMult: [1.5, 2.0],
+    squeezeReleaseFreshBars: [4, 8],
+    squeezeBoostValue: [0.25, 0.5],
+    useDivergenceContext: [true],
+    divRsiLen: [14, 21],
+    divPivotLeft: [3, 5],
+    divPivotRight: [3, 5],
+    divFreshBars: [6, 8],
+    divLongBoostValue: [0.25, 0.5],
+    divShortBoostValue: [0.25, 0.5],
+    divCautionPenaltyValue: [0.0, 0.25],
     useAvwapContext: [false, true],
     avwapSwingPeriod: [21, 34, 50],
     avwapReclaimFreshBars: [4, 6, 10],

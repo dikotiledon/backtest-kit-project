@@ -360,7 +360,7 @@ baseStartShort = isNewSellSignal and isBearish and isEmaDowntrend and isSmaDownt
 // Default profile: Fusion V4 hardened preset from locked 10k-bar XRPUSDT 15m benchmark (2026-04-21)
 useTrendXConf = input.bool(true,  title="Require Confirmation Trend (x)", group="Edge Controls")
 minPredSum    = input.float(2,  title="Min Prediction Sum (strength)", minval=0.0, step=0.5, group="Edge Controls")
-minBarsBetween = input.int(1, title="Cooldown Bars Between Entries", minval=0, group="Edge Controls")
+minBarsBetween = input.int(2, title="Cooldown Bars Between Entries", minval=0, group="Edge Controls")
 useSignalFusion = input.bool(true, title="Use Signal Fusion", group="Edge Controls")
 minFusionScore = input.int(1, title="Min Fusion Score", minval=0, maxval=4, group="Edge Controls")
 useAtrFlipConfirm = input.bool(true, title="Use ATR Flip Confirm", group="Signal Fusion")
@@ -411,6 +411,22 @@ useContextExitShaping = input.bool(false, title="Use Context Exit Shaping", grou
 contextTightenTrailOnCaution = input.bool(false, title="Tighten Trail On Caution", group="Phase 3: Context Exit Shaping")
 contextTrailTightenFactor = input.float(0.75, title="Context Trail Tighten Factor", minval=0.1, maxval=1.0, step=0.05, group="Phase 3: Context Exit Shaping")
 contextAllowEarlySignalExit = input.bool(false, title="Allow Early Signal Exit", group="Phase 3: Context Exit Shaping")
+
+useSqueezeContext = input.bool(true, title="Use Squeeze Context", group="Phase 3: Squeeze Context")
+squeezeLength = input.int(20, title="Squeeze Length", minval=2, group="Phase 3: Squeeze Context")
+squeezeBbMult = input.float(2.0, title="BB Multiplier", minval=0.1, step=0.1, group="Phase 3: Squeeze Context")
+squeezeKcMult = input.float(1.5, title="KC Multiplier", minval=0.1, step=0.1, group="Phase 3: Squeeze Context")
+squeezeReleaseFreshBars = input.int(4, title="Squeeze Release Fresh Bars", minval=1, group="Phase 3: Squeeze Context")
+squeezeBoostValue = input.float(0.25, title="Squeeze Boost Value", minval=0.0, step=0.05, group="Phase 3: Squeeze Context")
+
+useDivergenceContext = input.bool(true, title="Use Divergence Context", group="Phase 3: Divergence Context")
+divRsiLen = input.int(14, title="Divergence RSI Length", minval=1, group="Phase 3: Divergence Context")
+divPivotLeft = input.int(5, title="Divergence Pivot Left", minval=1, group="Phase 3: Divergence Context")
+divPivotRight = input.int(5, title="Divergence Pivot Right", minval=1, group="Phase 3: Divergence Context")
+divFreshBars = input.int(6, title="Divergence Fresh Bars", minval=1, group="Phase 3: Divergence Context")
+divLongBoostValue = input.float(0.25, title="Divergence Long Boost", minval=0.0, step=0.05, group="Phase 3: Divergence Context")
+divShortBoostValue = input.float(0.25, title="Divergence Short Boost", minval=0.0, step=0.05, group="Phase 3: Divergence Context")
+divCautionPenaltyValue = input.float(0.0, title="Divergence Caution Penalty", minval=0.0, step=0.05, group="Phase 3: Divergence Context")
 
 fusion3LineBull = close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
 fusion3LineBear = close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
@@ -503,14 +519,72 @@ contextLongBoost = not useContextAggregator ? 0.0 : (channelLongBoost and contex
 contextShortBoost = not useContextAggregator ? 0.0 : (channelShortBoost and contextBoostAddsToStrength ? contextBoostValue : 0.0)
 contextLongCaution = useContextAggregator and (not avwapLongOk or channelLongHostile)
 contextShortCaution = useContextAggregator and (not avwapShortOk or channelShortHostile)
-effectiveLongStrength := effectiveLongStrength + contextLongBoost
-effectiveShortStrength := effectiveShortStrength + contextShortBoost
+
+// Standalone mirrors:
+// pine/to-be-implement/Squeeze Momentum Indicator.pine
+// pine/to-be-implement/Divergence For Many Indicators.pine
+squeezeBasis = ta.sma(close, squeezeLength)
+squeezeDeviation = ta.stdev(close, squeezeLength)
+squeezeBbUpper = squeezeBasis + squeezeBbMult * squeezeDeviation
+squeezeBbLower = squeezeBasis - squeezeBbMult * squeezeDeviation
+squeezeKcBasis = ta.ema(close, squeezeLength)
+squeezeKcRange = ta.atr(squeezeLength)
+squeezeKcUpper = squeezeKcBasis + squeezeKcMult * squeezeKcRange
+squeezeKcLower = squeezeKcBasis - squeezeKcMult * squeezeKcRange
+squeezeOn = useSqueezeContext and squeezeBbUpper < squeezeKcUpper and squeezeBbLower > squeezeKcLower
+squeezeReleaseBull = useSqueezeContext and not squeezeOn and squeezeOn[1] and close > close[1]
+squeezeReleaseBear = useSqueezeContext and not squeezeOn and squeezeOn[1] and close < close[1]
+squeezeBullFresh = useSqueezeContext and not na(ta.barssince(squeezeReleaseBull)) and ta.barssince(squeezeReleaseBull) <= squeezeReleaseFreshBars
+squeezeBearFresh = useSqueezeContext and not na(ta.barssince(squeezeReleaseBear)) and ta.barssince(squeezeReleaseBear) <= squeezeReleaseFreshBars
+squeezeLongBoost = (squeezeReleaseBull or squeezeBullFresh) ? squeezeBoostValue : 0.0
+squeezeShortBoost = (squeezeReleaseBear or squeezeBearFresh) ? squeezeBoostValue : 0.0
+squeezeLongCaution = useSqueezeContext and squeezeOn and not squeezeReleaseBull
+squeezeShortCaution = useSqueezeContext and squeezeOn and not squeezeReleaseBear
+
+divRsi = ta.rsi(close, divRsiLen)
+divPivotLow = ta.pivotlow(low, divPivotLeft, divPivotRight)
+divPivotHigh = ta.pivothigh(high, divPivotLeft, divPivotRight)
+var float divPrevPriceLow = na
+var float divPrevRsiLow = na
+var float divPrevPriceHigh = na
+var float divPrevRsiHigh = na
+divBullConfirmed = false
+divBearConfirmed = false
+if not na(divPivotLow)
+    divCurrPriceLow = divPivotLow
+    divCurrRsiLow = divRsi[divPivotRight]
+    divBullConfirmed := not na(divPrevPriceLow) and divCurrPriceLow < divPrevPriceLow and divCurrRsiLow > divPrevRsiLow
+    divPrevPriceLow := divCurrPriceLow
+    divPrevRsiLow := divCurrRsiLow
+if not na(divPivotHigh)
+    divCurrPriceHigh = divPivotHigh
+    divCurrRsiHigh = divRsi[divPivotRight]
+    divBearConfirmed := not na(divPrevPriceHigh) and divCurrPriceHigh > divPrevPriceHigh and divCurrRsiHigh < divPrevRsiHigh
+    divPrevPriceHigh := divCurrPriceHigh
+    divPrevRsiHigh := divCurrRsiHigh
+divBullFresh = useDivergenceContext and (divBullConfirmed or (not na(ta.barssince(divBullConfirmed)) and ta.barssince(divBullConfirmed) <= divFreshBars))
+divBearFresh = useDivergenceContext and (divBearConfirmed or (not na(ta.barssince(divBearConfirmed)) and ta.barssince(divBearConfirmed) <= divFreshBars))
+divLongBoost = useDivergenceContext and divBullConfirmed ? divLongBoostValue : 0.0
+divShortBoost = useDivergenceContext and divBearConfirmed ? divShortBoostValue : 0.0
+divLongCaution = useDivergenceContext and (divBearConfirmed or divBearFresh)
+divShortCaution = useDivergenceContext and (divBullConfirmed or divBullFresh)
+divLongPenalty = divLongCaution ? divCautionPenaltyValue : 0.0
+divShortPenalty = divShortCaution ? divCautionPenaltyValue : 0.0
+
+contextLongCaution := contextLongCaution or squeezeLongCaution or divLongCaution
+contextShortCaution := contextShortCaution or squeezeShortCaution or divShortCaution
+effectiveLongStrength := effectiveLongStrength + contextLongBoost + squeezeLongBoost + divLongBoost
+effectiveShortStrength := effectiveShortStrength + contextShortBoost + squeezeShortBoost + divShortBoost
+requiredLongStrength = math.max(0.0, minPredSum + divLongPenalty)
+requiredShortStrength = math.max(0.0, minPredSum + divShortPenalty)
+predLongStrengthPass = effectiveLongStrength >= requiredLongStrength
+predShortStrengthPass = effectiveShortStrength >= requiredShortStrength
 
 var int lastEntryBar = na
 cooldownOk = na(lastEntryBar) or (bar_index - lastEntryBar >= minBarsBetween)
 
-startLongTrade = baseStartLong and (not useTrendXConf or trendx == 1) and (effectiveLongStrength >= minPredSum) and cooldownOk and longFusionPass and supertrendPassLong and contextLongQualify and not contextLongBlocked
-startShortTrade = baseStartShort and (not useTrendXConf or trendx == -1) and (effectiveShortStrength >= minPredSum) and cooldownOk and shortFusionPass and supertrendPassShort and contextShortQualify and not contextShortBlocked
+startLongTrade = baseStartLong and (not useTrendXConf or trendx == 1) and predLongStrengthPass and cooldownOk and longFusionPass and supertrendPassLong and contextLongQualify and not contextLongBlocked
+startShortTrade = baseStartShort and (not useTrendXConf or trendx == -1) and predShortStrengthPass and cooldownOk and shortFusionPass and supertrendPassShort and contextShortQualify and not contextShortBlocked
 
 // Dynamic Exit Conditions: Booleans for ML Model Position Exits based on Fractal Filters and Kernel Regression Filters
 lastSignalWasBullish = ta.barssince(startLongTrade) < ta.barssince(startShortTrade)
@@ -647,8 +721,6 @@ pineEstimatedTime = 240
 // Optimizer-ready numeric exports
 trendXLongPass = not useTrendXConf or trendx == 1
 trendXShortPass = not useTrendXConf or trendx == -1
-predLongStrengthPass = effectiveLongStrength >= minPredSum
-predShortStrengthPass = effectiveShortStrength >= minPredSum
 
 featurePrediction = prediction
 featureTrendX = trendx
@@ -691,6 +763,8 @@ featureShortFusionV4Residual = shortFusionV4Residual
 featureFusionV4Active = fusionV4RangeActive ? 1 : 0
 featureEffectiveLongStrength = effectiveLongStrength
 featureEffectiveShortStrength = effectiveShortStrength
+featureRequiredLongStrength = requiredLongStrength
+featureRequiredShortStrength = requiredShortStrength
 featureLongFusionPass = longFusionPass ? 1 : 0
 featureShortFusionPass = shortFusionPass ? 1 : 0
 featureSupertrendBull = supertrendBull ? 1 : 0
@@ -704,6 +778,27 @@ featureContextLongQualify = contextLongQualify ? 1 : 0
 featureContextShortQualify = contextShortQualify ? 1 : 0
 featureLongContextCaution = contextLongCaution ? 1 : 0
 featureShortContextCaution = contextShortCaution ? 1 : 0
+featureSqueezeState = squeezeOn ? 1 : 0
+featureSqueezeReleaseBull = squeezeReleaseBull ? 1 : 0
+featureSqueezeReleaseBear = squeezeReleaseBear ? 1 : 0
+featureSqueezeLongBoost = squeezeLongBoost
+featureSqueezeShortBoost = squeezeShortBoost
+featureSqueezeLongCaution = squeezeLongCaution ? 1 : 0
+featureSqueezeShortCaution = squeezeShortCaution ? 1 : 0
+featureDivBullConfirmed = divBullConfirmed ? 1 : 0
+featureDivBearConfirmed = divBearConfirmed ? 1 : 0
+featureDivBullFresh = divBullFresh ? 1 : 0
+featureDivBearFresh = divBearFresh ? 1 : 0
+featureDivLongBoost = divLongBoost
+featureDivShortBoost = divShortBoost
+featureDivLongPenalty = divLongPenalty
+featureDivShortPenalty = divShortPenalty
+featureDivLongCaution = divLongCaution ? 1 : 0
+featureDivShortCaution = divShortCaution ? 1 : 0
+featureLongEarlyExitAllowed = contextAllowLongEarlyExit ? 1 : 0
+featureShortEarlyExitAllowed = contextAllowShortEarlyExit ? 1 : 0
+featureLongTrailTightened = contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution ? 1 : 0
+featureShortTrailTightened = contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution ? 1 : 0
 featureBlockLongTrendX = baseStartLong and not trendXLongPass ? 1 : 0
 featureBlockShortTrendX = baseStartShort and not trendXShortPass ? 1 : 0
 featureBlockLongPred = baseStartLong and trendXLongPass and not predLongStrengthPass ? 1 : 0
@@ -771,6 +866,8 @@ plot(featureShortFusionV4Residual, "Feature_ShortFusionV4Residual", display=disp
 plot(featureFusionV4Active, "Feature_FusionV4Active", display=display.data_window)
 plot(featureEffectiveLongStrength, "Feature_EffectiveLongStrength", display=display.data_window)
 plot(featureEffectiveShortStrength, "Feature_EffectiveShortStrength", display=display.data_window)
+plot(featureRequiredLongStrength, "Feature_RequiredLongStrength", display=display.data_window)
+plot(featureRequiredShortStrength, "Feature_RequiredShortStrength", display=display.data_window)
 plot(featureLongFusionPass, "Feature_LongFusionPass", display=display.data_window)
 plot(featureShortFusionPass, "Feature_ShortFusionPass", display=display.data_window)
 plot(featureSupertrendBull, "Feature_SupertrendBull", display=display.data_window)
@@ -784,6 +881,27 @@ plot(featureContextLongQualify, "Feature_ContextLongQualify", display=display.da
 plot(featureContextShortQualify, "Feature_ContextShortQualify", display=display.data_window)
 plot(featureLongContextCaution, "Feature_LongContextCaution", display=display.data_window)
 plot(featureShortContextCaution, "Feature_ShortContextCaution", display=display.data_window)
+plot(featureSqueezeState, "Feature_SqueezeState", display=display.data_window)
+plot(featureSqueezeReleaseBull, "Feature_SqueezeReleaseBull", display=display.data_window)
+plot(featureSqueezeReleaseBear, "Feature_SqueezeReleaseBear", display=display.data_window)
+plot(featureSqueezeLongBoost, "Feature_SqueezeLongBoost", display=display.data_window)
+plot(featureSqueezeShortBoost, "Feature_SqueezeShortBoost", display=display.data_window)
+plot(featureSqueezeLongCaution, "Feature_SqueezeLongCaution", display=display.data_window)
+plot(featureSqueezeShortCaution, "Feature_SqueezeShortCaution", display=display.data_window)
+plot(featureDivBullConfirmed, "Feature_DivBullConfirmed", display=display.data_window)
+plot(featureDivBearConfirmed, "Feature_DivBearConfirmed", display=display.data_window)
+plot(featureDivBullFresh, "Feature_DivBullFresh", display=display.data_window)
+plot(featureDivBearFresh, "Feature_DivBearFresh", display=display.data_window)
+plot(featureDivLongBoost, "Feature_DivLongBoost", display=display.data_window)
+plot(featureDivShortBoost, "Feature_DivShortBoost", display=display.data_window)
+plot(featureDivLongPenalty, "Feature_DivLongPenalty", display=display.data_window)
+plot(featureDivShortPenalty, "Feature_DivShortPenalty", display=display.data_window)
+plot(featureDivLongCaution, "Feature_DivLongCaution", display=display.data_window)
+plot(featureDivShortCaution, "Feature_DivShortCaution", display=display.data_window)
+plot(featureLongEarlyExitAllowed, "Feature_LongEarlyExitAllowed", display=display.data_window)
+plot(featureShortEarlyExitAllowed, "Feature_ShortEarlyExitAllowed", display=display.data_window)
+plot(featureLongTrailTightened, "Feature_LongTrailTightened", display=display.data_window)
+plot(featureShortTrailTightened, "Feature_ShortTrailTightened", display=display.data_window)
 plot(featureBlockLongTrendX, "Feature_BlockLong_TrendX", display=display.data_window)
 plot(featureBlockShortTrendX, "Feature_BlockShort_TrendX", display=display.data_window)
 plot(featureBlockLongPred, "Feature_BlockLong_Pred", display=display.data_window)

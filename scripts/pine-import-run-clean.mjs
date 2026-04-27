@@ -183,7 +183,7 @@ async function main() {
     }
   }
 
-  const cliPath = path.resolve(cwd, 'node_modules/@backtest-kit/cli/build/index.mjs');
+  const cliPath = await fs.realpath(path.resolve(cwd, 'node_modules/@backtest-kit/cli/build/index.mjs'));
   const runArgs = [
     cliPath,
     '--symbol', symbol,
@@ -204,10 +204,10 @@ async function main() {
     runArgs.push('--noCache');
   }
 
-  console.log(`[run] node ${runArgs.join(' ')}`);
-  await runProcess('node', runArgs, cwd);
-
   const pineDir = path.dirname(flattenedPath);
+  console.log(`[run] node ${runArgs.join(' ')}`);
+  await runProcess('node', runArgs, pineDir);
+
   const dumpDir = path.join(pineDir, 'dump');
   const rawJsonlPath = path.join(dumpDir, `${outputBase}.jsonl`);
   const cleanedPath = path.join(dumpDir, `${outputBase}.cleaned.jsonl`);

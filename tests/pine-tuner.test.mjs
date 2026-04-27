@@ -671,6 +671,7 @@ test('getCandidateGrid returns squeeze-context and divergence-context grids', ()
     divFreshBars: [6, 8],
     divLongBoostValue: [0.25, 0.5],
     divShortBoostValue: [0.25, 0.5],
+    divCautionPenaltyValue: [0.0, 0.25],
   });
 });
 
@@ -690,6 +691,7 @@ test('filterSweepCombos drops squeeze and divergence knobs when modules are disa
       divFreshBars: 6,
       divLongBoostValue: 0.25,
       divShortBoostValue: 0.25,
+      divCautionPenaltyValue: 0.0,
       useSignalFusion: true,
     },
     {
@@ -706,6 +708,7 @@ test('filterSweepCombos drops squeeze and divergence knobs when modules are disa
       divFreshBars: 8,
       divLongBoostValue: 0.5,
       divShortBoostValue: 0.5,
+      divCautionPenaltyValue: 0.25,
       useSignalFusion: true,
     },
   ];
@@ -728,6 +731,7 @@ test('buildPatchPlan includes squeeze and divergence keys in runtime order', () 
     divFreshBars: 8,
     divLongBoostValue: 0.5,
     divShortBoostValue: 0.5,
+    divCautionPenaltyValue: 0.25,
   });
 
   assert.deepEqual(plan.map((step) => step.key), [
@@ -744,6 +748,7 @@ test('buildPatchPlan includes squeeze and divergence keys in runtime order', () 
     'divFreshBars',
     'divLongBoostValue',
     'divShortBoostValue',
+    'divCautionPenaltyValue',
   ]);
 });
 
@@ -772,6 +777,20 @@ test('getCandidateGrid returns expanded phase3-core grid with broader strategy k
   assert.deepEqual(grid.trailAtrLen, [7, 14, 21]);
   assert.deepEqual(grid.trailAtrMult, [1.0, 1.5, 2.0]);
   assert.deepEqual(grid.trailActivateR, [0.5, 1.0, 1.5]);
+  assert.deepEqual(grid.useSqueezeContext, [true]);
+  assert.deepEqual(grid.squeezeLength, [20, 34]);
+  assert.deepEqual(grid.squeezeBbMult, [2.0, 2.5]);
+  assert.deepEqual(grid.squeezeKcMult, [1.5, 2.0]);
+  assert.deepEqual(grid.squeezeReleaseFreshBars, [4, 8]);
+  assert.deepEqual(grid.squeezeBoostValue, [0.25, 0.5]);
+  assert.deepEqual(grid.useDivergenceContext, [true]);
+  assert.deepEqual(grid.divRsiLen, [14, 21]);
+  assert.deepEqual(grid.divPivotLeft, [3, 5]);
+  assert.deepEqual(grid.divPivotRight, [3, 5]);
+  assert.deepEqual(grid.divFreshBars, [6, 8]);
+  assert.deepEqual(grid.divLongBoostValue, [0.25, 0.5]);
+  assert.deepEqual(grid.divShortBoostValue, [0.25, 0.5]);
+  assert.deepEqual(grid.divCautionPenaltyValue, [0.0, 0.25]);
   assert.deepEqual(grid.useAvwapContext, [false, true]);
   assert.deepEqual(grid.avwapSwingPeriod, [21, 34, 50]);
   assert.deepEqual(grid.avwapReclaimFreshBars, [4, 6, 10]);
@@ -796,6 +815,10 @@ test('getCandidateGrid returns expanded phase3-core grid with broader strategy k
   assert.deepEqual(grid.contextAllowEarlySignalExit, [false, true]);
   assert.ok(Array.isArray(grid.__variants));
   assert.ok(grid.__variants.every((variant) => variant.useStopsTP === true));
+  assert.ok(grid.__variants.every((variant) => variant.useSqueezeContext === true));
+  assert.ok(grid.__variants.every((variant) => variant.useDivergenceContext === true));
+  assert.equal(grid.__variants[0].useContextExitShaping, false);
+  assert.ok(grid.__variants.some((variant) => variant.useContextExitShaping === true));
   assert.ok(grid.__variants.some((variant) => variant.useAvwapContext === true && variant.useChannelContext !== true));
   assert.ok(grid.__variants.some((variant) => variant.useAvwapContext === true && variant.useChannelContext === true));
 });
@@ -896,6 +919,14 @@ test('pine test script defaults to the hardened fusion v4 profile', async () => 
   assert.match(source, /fusionV4ShortAtrWeight\s*=\s*input\.float\(-0\.5,\s+title="Fusion V4 Short ATR Weight"/);
   assert.match(source, /fusionV4ShortEngulfWeight\s*=\s*input\.float\(-0\.1,\s+title="Fusion V4 Short Engulf Weight"/);
   assert.match(source, /fusionV4ShortEmaWeight\s*=\s*input\.float\(0(?:\.0)?,\s+title="Fusion V4 Short EMA Weight"/);
+  assert.match(source, /useContextExitShaping\s*=\s*input\.bool\(false,\s+title="Use Context Exit Shaping"/);
+  assert.match(source, /contextTightenTrailOnCaution\s*=\s*input\.bool\(false,\s+title="Tighten Trail On Caution"/);
+  assert.match(source, /contextAllowEarlySignalExit\s*=\s*input\.bool\(false,\s+title="Allow Early Signal Exit"/);
+  assert.match(source, /useSqueezeContext\s*=\s*input\.bool\(true,\s+title="Use Squeeze Context"/);
+  assert.match(source, /useDivergenceContext\s*=\s*input\.bool\(true,\s+title="Use Divergence Context"/);
+  assert.match(source, /divLongBoostValue\s*=\s*input\.float\(0\.25,\s+title="Divergence Long Boost"/);
+  assert.match(source, /divShortBoostValue\s*=\s*input\.float\(0\.25,\s+title="Divergence Short Boost"/);
+  assert.match(source, /divCautionPenaltyValue\s*=\s*input\.float\(0(?:\.0)?,\s+title="Divergence Caution Penalty"/);
   assert.match(source, /slAtrMult\s*=\s*input\.float\(0\.75,\s+title="SL ATR x"/);
   assert.match(source, /tpAtrMult\s*=\s*input\.float\(5\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
 });

@@ -209,9 +209,32 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
 }
 
 export function buildScoutRegimeAnalysisArtifact({ matrixId, runId, selectedCandidate = null, matrixCandidates = [] } = {}) {
-  const analysisSource = selectedCandidate?.labResults?.[0]?.analysis
-    || matrixCandidates?.[0]?.labResults?.[0]?.analysis
-    || null;
+  const candidatePool = selectedCandidate ? [selectedCandidate] : matrixCandidates;
+  const sourceLabResults = candidatePool.flatMap((candidate) => (
+    candidate?.labResults || []
+  ).map((labResult, labIndex) => ({
+    candidate,
+    labIndex,
+    labResult,
+    analysis: labResult?.analysis || null,
+  })).filter(({ analysis }) => Boolean(analysis)));
+
+  const analysisSource = sourceLabResults.length > 0
+    ? {
+        sourceLabCount: sourceLabResults.length,
+        sourceLabIds: sourceLabResults.map(({ candidate, labIndex }) => candidate?.labResults?.[labIndex]?.lab?.labId || null),
+        analyses: sourceLabResults.map(({ analysis }) => analysis),
+        challenger: {
+          trades: sourceLabResults.flatMap(({ analysis }) => analysis?.challenger?.trades || []),
+          rows: sourceLabResults.flatMap(({ analysis }) => analysis?.challenger?.rows || []),
+        },
+        incumbent: {
+          trades: sourceLabResults.flatMap(({ analysis }) => analysis?.incumbent?.trades || []),
+          rows: sourceLabResults.flatMap(({ analysis }) => analysis?.incumbent?.rows || []),
+        },
+      }
+    : null;
+
   const challengerAnalysis = analysisSource?.challenger || null;
   const incumbentAnalysis = analysisSource?.incumbent || null;
   const trades = challengerAnalysis?.trades || [];
@@ -223,8 +246,8 @@ export function buildScoutRegimeAnalysisArtifact({ matrixId, runId, selectedCand
       runId,
       trades,
       featureRows,
-      championMetrics: incumbentAnalysis?.trades ? summarizeSideMetrics({ trades: incumbentAnalysis.trades }) : {},
-      candidateMetrics: challengerAnalysis?.trades ? summarizeSideMetrics({ trades: challengerAnalysis.trades }) : {},
+      championMetrics: incumbentAnalysis?.trades?.length ? summarizeSideMetrics({ trades: incumbentAnalysis.trades }) : {},
+      candidateMetrics: challengerAnalysis?.trades?.length ? summarizeSideMetrics({ trades: challengerAnalysis.trades }) : null,
     }),
   };
 }

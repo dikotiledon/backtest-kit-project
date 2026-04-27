@@ -561,6 +561,52 @@ test('pine script exports regime-facing features for asymmetry diagnostics', asy
 });
 
 
+test('buildScoutRegimeAnalysisArtifact aggregates all selected-candidate lab analyses', () => {
+  const result = buildScoutRegimeAnalysisArtifact({
+    matrixId: 'pine-autoresearch',
+    runId: 'run-multi-lab',
+    selectedCandidate: {
+      challenger: { configId: 'cand-1' },
+      labResults: [
+        {
+          lab: { labId: 'primary' },
+          analysis: {
+            incumbent: {
+              trades: [{ side: 'long', pnl: 1, mfePct: 2, maePct: 0.5, featureIndex: 0 }],
+              rows: [{ featureCompressionState: 1 }],
+            },
+            challenger: {
+              trades: [{ side: 'long', pnl: 3, mfePct: 4, maePct: 0.3, featureIndex: 0 }],
+              rows: [{ featureCompressionState: 1 }],
+            },
+          },
+        },
+        {
+          lab: { labId: 'shadow-1' },
+          analysis: {
+            incumbent: {
+              trades: [{ side: 'short', pnl: -1, mfePct: 1.5, maePct: 0.9, featureIndex: 0 }],
+              rows: [{ featureCompressionState: 0 }],
+            },
+            challenger: {
+              trades: [{ side: 'short', pnl: 2, mfePct: 2.5, maePct: 0.4, featureIndex: 0 }],
+              rows: [{ featureExpansionState: 1 }],
+            },
+          },
+        },
+      ],
+    },
+    matrixCandidates: [],
+  });
+
+  assert.equal(result.analysisSource.sourceLabCount, 2);
+  assert.deepEqual(result.analysisSource.sourceLabIds, ['primary', 'shadow-1']);
+  assert.equal(result.artifact.evidence.tradeCount, 2);
+  assert.equal(result.artifact.sideMetrics.long.tradeCount, 1);
+  assert.equal(result.artifact.sideMetrics.short.tradeCount, 1);
+  assert.match(result.artifact.markdown, /Threshold surfaces/);
+});
+
 test('buildScoutRegimeAnalysisArtifact keeps analysis output available even without qualifying trade rows', () => {
   const result = buildScoutRegimeAnalysisArtifact({
     matrixId: 'pine-autoresearch',

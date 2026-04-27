@@ -49,8 +49,25 @@ const TRACK_OWN_KNOB_KEYS = {
     'divCautionPenaltyValue',
   ],
   'exit-state': [
+    'useFailedFollowThroughTighten',
+    'followThroughBars',
+    'followThroughMinProgressAtr',
+    'followThroughTightenTrailAtrMult',
     'useTimeStop',
     'timeStopBars',
+    'timeStopMinUnrealizedAtr',
+    'useContextCautionTighten',
+    'contextCautionDelta',
+    'contextCautionTrailAtrMult',
+    'usePartialDerisk',
+    'partialDeriskAtR',
+    'partialDeriskClosePct',
+    'usePostEntrySqueezeCollapseTighten',
+    'postEntrySqueezeCollapseBars',
+    'postEntrySqueezeCollapseTrailAtrMult',
+    'useAdverseDivergenceTighten',
+    'adverseDivergenceBars',
+    'adverseDivergenceTrailAtrMult',
   ],
   asymmetry: [
     'useRegimeFilter',
@@ -141,6 +158,15 @@ const DIVERGENCE_CONTEXT_KEYS = [
   'divLongBoostValue',
   'divShortBoostValue',
   'divCautionPenaltyValue',
+];
+
+const EXIT_STATE_HYPOTHESIS_KEYS = [
+  'useFailedFollowThroughTighten',
+  'useTimeStop',
+  'useContextCautionTighten',
+  'usePartialDerisk',
+  'usePostEntrySqueezeCollapseTighten',
+  'useAdverseDivergenceTighten',
 ];
 
 function deleteKeys(target, keys) {
@@ -250,6 +276,40 @@ export function filterSweepCombos(combos) {
     if (normalized.useDivergenceContext !== true) {
       deleteKeys(normalized, DIVERGENCE_CONTEXT_KEYS);
     }
+
+    if (normalized.useFailedFollowThroughTighten !== true) {
+      delete normalized.followThroughBars;
+      delete normalized.followThroughMinProgressAtr;
+      delete normalized.followThroughTightenTrailAtrMult;
+    }
+
+    if (normalized.useTimeStop !== true) {
+      delete normalized.timeStopBars;
+      delete normalized.timeStopMinUnrealizedAtr;
+    }
+
+    if (normalized.useContextCautionTighten !== true) {
+      delete normalized.contextCautionDelta;
+      delete normalized.contextCautionTrailAtrMult;
+    }
+
+    if (normalized.usePartialDerisk !== true) {
+      delete normalized.partialDeriskAtR;
+      delete normalized.partialDeriskClosePct;
+    }
+
+    if (normalized.usePostEntrySqueezeCollapseTighten !== true) {
+      delete normalized.postEntrySqueezeCollapseBars;
+      delete normalized.postEntrySqueezeCollapseTrailAtrMult;
+    }
+
+    if (normalized.useAdverseDivergenceTighten !== true) {
+      delete normalized.adverseDivergenceBars;
+      delete normalized.adverseDivergenceTrailAtrMult;
+    }
+
+    const enabledExitStateHypotheses = EXIT_STATE_HYPOTHESIS_KEYS.filter((key) => normalized[key] === true).length;
+    if (enabledExitStateHypotheses > 1) continue;
 
     const key = JSON.stringify(normalized);
     if (seen.has(key)) continue;
@@ -527,6 +587,25 @@ const PATCHERS = {
   contextBoostValue: floatInputPatcher('contextBoostValue', 'Context Boost Value'),
   useContextExitShaping: boolInputPatcher('useContextExitShaping', 'Use Context Exit Shaping'),
   contextTrailTightenFactor: floatInputPatcher('contextTrailTightenFactor', 'Context Trail Tighten Factor'),
+  useFailedFollowThroughTighten: boolInputPatcher('useFailedFollowThroughTighten', 'Use Failed Follow-Through Tighten'),
+  followThroughBars: intInputPatcher('followThroughBars', 'Follow-Through Bars'),
+  followThroughMinProgressAtr: floatInputPatcher('followThroughMinProgressAtr', 'Follow-Through Min Progress ATR'),
+  followThroughTightenTrailAtrMult: floatInputPatcher('followThroughTightenTrailAtrMult', 'Follow-Through Tighten Trail ATR x'),
+  useTimeStop: boolInputPatcher('useTimeStop', 'Use Time Stop'),
+  timeStopBars: intInputPatcher('timeStopBars', 'Time Stop Bars'),
+  timeStopMinUnrealizedAtr: floatInputPatcher('timeStopMinUnrealizedAtr', 'Time Stop Min Unrealized ATR'),
+  useContextCautionTighten: boolInputPatcher('useContextCautionTighten', 'Use Context Caution Tighten'),
+  contextCautionDelta: floatInputPatcher('contextCautionDelta', 'Context Caution Delta'),
+  contextCautionTrailAtrMult: floatInputPatcher('contextCautionTrailAtrMult', 'Context Caution Trail ATR x'),
+  usePartialDerisk: boolInputPatcher('usePartialDerisk', 'Use Partial De-Risk'),
+  partialDeriskAtR: floatInputPatcher('partialDeriskAtR', 'Partial De-Risk At R'),
+  partialDeriskClosePct: floatInputPatcher('partialDeriskClosePct', 'Partial De-Risk Close Pct'),
+  usePostEntrySqueezeCollapseTighten: boolInputPatcher('usePostEntrySqueezeCollapseTighten', 'Use Post-Entry Squeeze Collapse Tighten'),
+  postEntrySqueezeCollapseBars: intInputPatcher('postEntrySqueezeCollapseBars', 'Post-Entry Squeeze Collapse Bars'),
+  postEntrySqueezeCollapseTrailAtrMult: floatInputPatcher('postEntrySqueezeCollapseTrailAtrMult', 'Post-Entry Squeeze Collapse Trail ATR x'),
+  useAdverseDivergenceTighten: boolInputPatcher('useAdverseDivergenceTighten', 'Use Adverse Divergence Tighten'),
+  adverseDivergenceBars: intInputPatcher('adverseDivergenceBars', 'Adverse Divergence Bars'),
+  adverseDivergenceTrailAtrMult: floatInputPatcher('adverseDivergenceTrailAtrMult', 'Adverse Divergence Trail ATR x'),
   useSqueezeContext: boolInputPatcher('useSqueezeContext', 'Use Squeeze Context'),
   squeezeLength: intInputPatcher('squeezeLength', 'Squeeze Length'),
   squeezeBbMult: floatInputPatcher('squeezeBbMult', 'BB Multiplier'),
@@ -639,13 +718,129 @@ export function exitTuningCandidateGrid() {
   };
 }
 
-export function exitStateCandidateGrid() {
+function toSweepGrid(config) {
+  return Object.fromEntries(Object.entries(config).map(([key, value]) => [key, [value]]));
+}
+
+function exitStateBaseConfig() {
   return {
-    useContextExitShaping: [true],
-    contextTightenTrailOnCaution: [false, true],
-    contextTrailTightenFactor: [0.5, 0.75],
-    contextAllowEarlySignalExit: [false, true],
+    useFailedFollowThroughTighten: false,
+    followThroughBars: 4,
+    followThroughMinProgressAtr: 0.75,
+    followThroughTightenTrailAtrMult: 0.75,
+    useTimeStop: false,
+    timeStopBars: 8,
+    timeStopMinUnrealizedAtr: 0.5,
+    useContextCautionTighten: false,
+    contextCautionDelta: 0.5,
+    contextCautionTrailAtrMult: 0.75,
+    usePartialDerisk: false,
+    partialDeriskAtR: 1.0,
+    partialDeriskClosePct: 50,
+    usePostEntrySqueezeCollapseTighten: false,
+    postEntrySqueezeCollapseBars: 4,
+    postEntrySqueezeCollapseTrailAtrMult: 0.75,
+    useAdverseDivergenceTighten: false,
+    adverseDivergenceBars: 6,
+    adverseDivergenceTrailAtrMult: 0.75,
   };
+}
+
+function exitStateResearchVariants() {
+  const base = exitStateBaseConfig();
+  return [
+    { ...base, variantId: 'exit-state-failed-follow-through', useFailedFollowThroughTighten: true },
+    { ...base, variantId: 'exit-state-time-stop', useTimeStop: true },
+    { ...base, variantId: 'exit-state-context-caution', useContextCautionTighten: true },
+    { ...base, variantId: 'exit-state-partial-derisk', usePartialDerisk: true },
+    { ...base, variantId: 'exit-state-post-entry-squeeze', usePostEntrySqueezeCollapseTighten: true },
+    { ...base, variantId: 'exit-state-adverse-divergence', useAdverseDivergenceTighten: true },
+  ];
+}
+
+export function exitStateResearchCandidateGrid() {
+  return {
+    ...toSweepGrid(exitStateBaseConfig()),
+    __variants: exitStateResearchVariants(),
+  };
+}
+
+export function exitStateTighteningCandidateGrid() {
+  return exitStateResearchCandidateGrid();
+}
+
+export function exitStateTimeStopCandidateGrid() {
+  return {
+    ...toSweepGrid(exitStateBaseConfig()),
+    useTimeStop: [true],
+    timeStopBars: [6, 8, 12],
+    timeStopMinUnrealizedAtr: [0.0, 0.5, 1.0],
+    useFailedFollowThroughTighten: [false],
+    useContextCautionTighten: [false],
+    usePartialDerisk: [false],
+    usePostEntrySqueezeCollapseTighten: [false],
+    useAdverseDivergenceTighten: [false],
+  };
+}
+
+export function exitStatePartialDeriskCandidateGrid() {
+  return {
+    ...toSweepGrid(exitStateBaseConfig()),
+    usePartialDerisk: [true],
+    partialDeriskAtR: [0.75, 1.0, 1.5],
+    partialDeriskClosePct: [25, 50],
+    useFailedFollowThroughTighten: [false],
+    useTimeStop: [false],
+    useContextCautionTighten: [false],
+    usePostEntrySqueezeCollapseTighten: [false],
+    useAdverseDivergenceTighten: [false],
+  };
+}
+
+export function exitStateContextCautionCandidateGrid() {
+  return {
+    ...toSweepGrid(exitStateBaseConfig()),
+    useContextCautionTighten: [true],
+    contextCautionDelta: [0.25, 0.5, 0.75],
+    contextCautionTrailAtrMult: [0.5, 0.75],
+    useFailedFollowThroughTighten: [false],
+    useTimeStop: [false],
+    usePartialDerisk: [false],
+    usePostEntrySqueezeCollapseTighten: [false],
+    useAdverseDivergenceTighten: [false],
+  };
+}
+
+export function exitStatePostEntrySqueezeCandidateGrid() {
+  return {
+    ...toSweepGrid(exitStateBaseConfig()),
+    usePostEntrySqueezeCollapseTighten: [true],
+    postEntrySqueezeCollapseBars: [3, 5, 8],
+    postEntrySqueezeCollapseTrailAtrMult: [0.5, 0.75],
+    useFailedFollowThroughTighten: [false],
+    useTimeStop: [false],
+    useContextCautionTighten: [false],
+    usePartialDerisk: [false],
+    useAdverseDivergenceTighten: [false],
+  };
+}
+
+export function exitStateAdverseDivergenceCandidateGrid() {
+  return {
+    ...toSweepGrid(exitStateBaseConfig()),
+    useAdverseDivergenceTighten: [true],
+    adverseDivergenceBars: [4, 6, 8],
+    adverseDivergenceTrailAtrMult: [0.5, 0.75],
+    useFailedFollowThroughTighten: [false],
+    useTimeStop: [false],
+    useContextCautionTighten: [false],
+    usePartialDerisk: [false],
+    usePostEntrySqueezeCollapseTighten: [false],
+  };
+}
+
+export function exitStateCandidateGrid() {
+  return exitStateResearchCandidateGrid();
 }
 
 export function asymmetryCandidateGrid() {
@@ -1031,7 +1226,12 @@ export function getCandidateGrid(name = 'default') {
   if (name === 'root-cause') return rootCauseCandidateGrid();
   if (name === 'profit-candidate') return profitCandidateGrid();
   if (name === 'exit-tuning' || name === 'exit-side') return exitTuningCandidateGrid();
-  if (name === 'exit-state' || name === 'exit-state-context') return exitStateCandidateGrid();
+  if (name === 'exit-state-tightening' || name === 'exit-state-research' || name === 'exit-state' || name === 'exit-state-context') return exitStateCandidateGrid();
+  if (name === 'exit-state-time-stop') return exitStateTimeStopCandidateGrid();
+  if (name === 'exit-state-partial-derisk') return exitStatePartialDeriskCandidateGrid();
+  if (name === 'exit-state-context-caution') return exitStateContextCautionCandidateGrid();
+  if (name === 'exit-state-post-entry-squeeze') return exitStatePostEntrySqueezeCandidateGrid();
+  if (name === 'exit-state-adverse-divergence') return exitStateAdverseDivergenceCandidateGrid();
   if (name === 'asymmetry' || name === 'asymmetry-context') return asymmetryCandidateGrid();
   if (name === 'fusion-safe') return fusionSafeCandidateGrid();
   if (name === 'fusion-v2') return fusionV2CandidateGrid();

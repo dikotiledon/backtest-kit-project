@@ -273,6 +273,125 @@ test('getCandidateGrid returns exit-tuning grid without side toggles', () => {
   assert.deepEqual(grid.tpAtrMult, [1.0, 1.5, 2.0, 2.5]);
 });
 
+test('getCandidateGrid returns isolated exit-state research grids', () => {
+  const grid = getCandidateGrid('exit-state-tightening');
+
+  assert.ok(grid.useFailedFollowThroughTighten);
+  assert.ok(grid.useTimeStop);
+  assert.ok(grid.useContextCautionTighten);
+  assert.ok(grid.usePartialDerisk);
+  assert.ok(grid.usePostEntrySqueezeCollapseTighten);
+  assert.ok(grid.useAdverseDivergenceTighten);
+  assert.equal(Array.isArray(grid.__variants), true);
+});
+
+test('selectSweepCombos does not combine unvalidated exit hypotheses in one candidate', () => {
+  const combos = selectSweepCombos(getCandidateGrid('exit-state-tightening'), { maxConfigs: 16 });
+
+  assert.equal(combos.some((combo) => combo.useTimeStop && combo.usePartialDerisk), false);
+  assert.equal(combos.some((combo) => combo.useFailedFollowThroughTighten && combo.useAdverseDivergenceTighten), false);
+});
+
+test('filterSweepCombos drops candidates that activate multiple exit-state hypotheses', () => {
+  const combos = filterSweepCombos([
+    {
+      useContextExitShaping: true,
+      contextTightenTrailOnCaution: true,
+      useFailedFollowThroughTighten: true,
+      followThroughBars: 4,
+      followThroughMinProgressAtr: 0.75,
+      followThroughTightenTrailAtrMult: 0.75,
+      useTimeStop: true,
+      timeStopBars: 8,
+      timeStopMinUnrealizedAtr: 0.5,
+      useContextCautionTighten: false,
+      contextCautionDelta: 0.5,
+      contextCautionTrailAtrMult: 0.75,
+      usePartialDerisk: false,
+      partialDeriskAtR: 1.0,
+      partialDeriskClosePct: 50,
+      usePostEntrySqueezeCollapseTighten: false,
+      postEntrySqueezeCollapseBars: 4,
+      postEntrySqueezeCollapseTrailAtrMult: 0.75,
+      useAdverseDivergenceTighten: false,
+      adverseDivergenceBars: 6,
+      adverseDivergenceTrailAtrMult: 0.75,
+    },
+    {
+      useContextExitShaping: true,
+      contextTightenTrailOnCaution: true,
+      useFailedFollowThroughTighten: true,
+      followThroughBars: 4,
+      followThroughMinProgressAtr: 0.75,
+      followThroughTightenTrailAtrMult: 0.75,
+      useTimeStop: false,
+      timeStopBars: 8,
+      timeStopMinUnrealizedAtr: 0.5,
+      useContextCautionTighten: false,
+      contextCautionDelta: 0.5,
+      contextCautionTrailAtrMult: 0.75,
+      usePartialDerisk: false,
+      partialDeriskAtR: 1.0,
+      partialDeriskClosePct: 50,
+      usePostEntrySqueezeCollapseTighten: false,
+      postEntrySqueezeCollapseBars: 4,
+      postEntrySqueezeCollapseTrailAtrMult: 0.75,
+      useAdverseDivergenceTighten: false,
+      adverseDivergenceBars: 6,
+      adverseDivergenceTrailAtrMult: 0.75,
+    },
+  ]);
+
+  assert.equal(combos.length, 1);
+  assert.equal(combos[0].useTimeStop, false);
+});
+
+test('buildPatchPlan includes phase 4 exit-state input patch steps', () => {
+  const plan = buildPatchPlan({
+    useFailedFollowThroughTighten: true,
+    followThroughBars: 4,
+    followThroughMinProgressAtr: 0.75,
+    followThroughTightenTrailAtrMult: 0.75,
+    useTimeStop: true,
+    timeStopBars: 8,
+    timeStopMinUnrealizedAtr: 0.5,
+    useContextCautionTighten: true,
+    contextCautionDelta: 0.5,
+    contextCautionTrailAtrMult: 0.75,
+    usePartialDerisk: true,
+    partialDeriskAtR: 1.0,
+    partialDeriskClosePct: 50,
+    usePostEntrySqueezeCollapseTighten: true,
+    postEntrySqueezeCollapseBars: 4,
+    postEntrySqueezeCollapseTrailAtrMult: 0.75,
+    useAdverseDivergenceTighten: true,
+    adverseDivergenceBars: 6,
+    adverseDivergenceTrailAtrMult: 0.75,
+  });
+
+  assert.deepEqual(plan.map((step) => step.key), [
+    'useFailedFollowThroughTighten',
+    'followThroughBars',
+    'followThroughMinProgressAtr',
+    'followThroughTightenTrailAtrMult',
+    'useTimeStop',
+    'timeStopBars',
+    'timeStopMinUnrealizedAtr',
+    'useContextCautionTighten',
+    'contextCautionDelta',
+    'contextCautionTrailAtrMult',
+    'usePartialDerisk',
+    'partialDeriskAtR',
+    'partialDeriskClosePct',
+    'usePostEntrySqueezeCollapseTighten',
+    'postEntrySqueezeCollapseBars',
+    'postEntrySqueezeCollapseTrailAtrMult',
+    'useAdverseDivergenceTighten',
+    'adverseDivergenceBars',
+    'adverseDivergenceTrailAtrMult',
+  ]);
+});
+
 test('applyPatchPlan patches signal-fusion inputs', () => {
   const source = [
     'useSignalFusion = input.bool(false, title="Use Signal Fusion", group="Edge Controls")',

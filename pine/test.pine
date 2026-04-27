@@ -428,6 +428,26 @@ divLongBoostValue = input.float(0.25, title="Divergence Long Boost", minval=0.0,
 divShortBoostValue = input.float(0.25, title="Divergence Short Boost", minval=0.0, step=0.05, group="Phase 3: Divergence Context")
 divCautionPenaltyValue = input.float(0.0, title="Divergence Caution Penalty", minval=0.0, step=0.05, group="Phase 3: Divergence Context")
 
+useFailedFollowThroughTighten = input.bool(false, title="Use Failed Follow-Through Tighten", group="Phase 4: Exit-State Research")
+followThroughBars = input.int(4, title="Follow-Through Bars", minval=1, group="Phase 4: Exit-State Research")
+followThroughMinProgressAtr = input.float(0.75, title="Follow-Through Min Progress ATR", minval=0.0, step=0.25, group="Phase 4: Exit-State Research")
+followThroughTightenTrailAtrMult = input.float(0.75, title="Follow-Through Tighten Trail ATR x", minval=0.1, step=0.05, group="Phase 4: Exit-State Research")
+useTimeStop = input.bool(false, title="Use Time Stop", group="Phase 4: Exit-State Research")
+timeStopBars = input.int(8, title="Time Stop Bars", minval=1, group="Phase 4: Exit-State Research")
+timeStopMinUnrealizedAtr = input.float(0.5, title="Time Stop Min Unrealized ATR", minval=0.0, step=0.25, group="Phase 4: Exit-State Research")
+useContextCautionTighten = input.bool(false, title="Use Context Caution Tighten", group="Phase 4: Exit-State Research")
+contextCautionDelta = input.float(0.5, title="Context Caution Delta", minval=0.0, step=0.25, group="Phase 4: Exit-State Research")
+contextCautionTrailAtrMult = input.float(0.75, title="Context Caution Trail ATR x", minval=0.1, step=0.05, group="Phase 4: Exit-State Research")
+usePartialDerisk = input.bool(false, title="Use Partial De-Risk", group="Phase 4: Exit-State Research")
+partialDeriskAtR = input.float(1.0, title="Partial De-Risk At R", minval=0.0, step=0.25, group="Phase 4: Exit-State Research")
+partialDeriskClosePct = input.float(50.0, title="Partial De-Risk Close Pct", minval=0.0, maxval=100.0, step=5.0, group="Phase 4: Exit-State Research")
+usePostEntrySqueezeCollapseTighten = input.bool(false, title="Use Post-Entry Squeeze Collapse Tighten", group="Phase 4: Exit-State Research")
+postEntrySqueezeCollapseBars = input.int(4, title="Post-Entry Squeeze Collapse Bars", minval=1, group="Phase 4: Exit-State Research")
+postEntrySqueezeCollapseTrailAtrMult = input.float(0.75, title="Post-Entry Squeeze Collapse Trail ATR x", minval=0.1, step=0.05, group="Phase 4: Exit-State Research")
+useAdverseDivergenceTighten = input.bool(false, title="Use Adverse Divergence Tighten", group="Phase 4: Exit-State Research")
+adverseDivergenceBars = input.int(6, title="Adverse Divergence Bars", minval=1, group="Phase 4: Exit-State Research")
+adverseDivergenceTrailAtrMult = input.float(0.75, title="Adverse Divergence Trail ATR x", minval=0.1, step=0.05, group="Phase 4: Exit-State Research")
+
 fusion3LineBull = close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
 fusion3LineBear = close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
 fusionEngulfingBull = open <= close[1] and open < open[1] and close > open[1]
@@ -631,11 +651,16 @@ var float simRiskDistance = na
 var float simBaseStop = na
 var float simTakeProfit = na
 var float simTrailStop = na
+var float simEntryContextScore = na
+var bool simEntrySqueezeOn = false
 var float activeStop = na
 var float activeTakeProfit = na
 
 atrNow := ta.atr(riskAtrLen)
 trailAtrNow := ta.atr(trailAtrLen)
+
+exitStateLongContextScore = (not avwapLongOk ? 1.0 : 0.0) + (channelLongHostile ? 1.0 : 0.0) + (squeezeLongCaution ? 1.0 : 0.0) + (divLongCaution ? 1.0 : 0.0)
+exitStateShortContextScore = (not avwapShortOk ? 1.0 : 0.0) + (channelShortHostile ? 1.0 : 0.0) + (squeezeShortCaution ? 1.0 : 0.0) + (divShortCaution ? 1.0 : 0.0)
 
 if enableStrategy
     if startLongTrade and simPos <= 0
@@ -645,6 +670,8 @@ if enableStrategy
         simBaseStop := useStopsTP ? close - simRiskDistance : na
         simTakeProfit := useStopsTP ? close + tpAtrMult * atrNow : na
         simTrailStop := na
+        simEntryContextScore := exitStateLongContextScore
+        simEntrySqueezeOn := squeezeOn
         lastEntryBar := bar_index
     if startShortTrade and simPos >= 0
         simPos := -1
@@ -653,14 +680,63 @@ if enableStrategy
         simBaseStop := useStopsTP ? close + simRiskDistance : na
         simTakeProfit := useStopsTP ? close - tpAtrMult * atrNow : na
         simTrailStop := na
+        simEntryContextScore := exitStateShortContextScore
+        simEntrySqueezeOn := squeezeOn
         lastEntryBar := bar_index
+
+barsInTrade = simPos != 0 and not na(lastEntryBar) ? bar_index - lastEntryBar : na
+
+longFailedFollowThroughTighten = useFailedFollowThroughTighten and simPos == 1 and not na(simEntryPrice) and not na(barsInTrade) and barsInTrade >= followThroughBars and atrNow > 0 and ((high - simEntryPrice) / atrNow) < followThroughMinProgressAtr
+shortFailedFollowThroughTighten = useFailedFollowThroughTighten and simPos == -1 and not na(simEntryPrice) and not na(barsInTrade) and barsInTrade >= followThroughBars and atrNow > 0 and ((simEntryPrice - low) / atrNow) < followThroughMinProgressAtr
+
+longTimeStopExit = useTimeStop and simPos == 1 and not na(simEntryPrice) and not na(barsInTrade) and barsInTrade >= timeStopBars and atrNow > 0 and ((close - simEntryPrice) / atrNow) <= timeStopMinUnrealizedAtr
+shortTimeStopExit = useTimeStop and simPos == -1 and not na(simEntryPrice) and not na(barsInTrade) and barsInTrade >= timeStopBars and atrNow > 0 and ((simEntryPrice - close) / atrNow) <= timeStopMinUnrealizedAtr
+
+longContextCautionTighten = useContextCautionTighten and simPos == 1 and not na(simEntryContextScore) and (exitStateLongContextScore - simEntryContextScore) >= contextCautionDelta
+shortContextCautionTighten = useContextCautionTighten and simPos == -1 and not na(simEntryContextScore) and (exitStateShortContextScore - simEntryContextScore) >= contextCautionDelta
+
+longPartialDeriskTriggered = usePartialDerisk and simPos == 1 and not na(simEntryPrice) and not na(simRiskDistance) and simRiskDistance > 0 and ((close - simEntryPrice) / simRiskDistance) >= partialDeriskAtR
+shortPartialDeriskTriggered = usePartialDerisk and simPos == -1 and not na(simEntryPrice) and not na(simRiskDistance) and simRiskDistance > 0 and ((simEntryPrice - close) / simRiskDistance) >= partialDeriskAtR
+
+longPostEntrySqueezeCollapseTighten = usePostEntrySqueezeCollapseTighten and simPos == 1 and not na(barsInTrade) and barsInTrade <= postEntrySqueezeCollapseBars and simEntrySqueezeOn and not squeezeOn
+shortPostEntrySqueezeCollapseTighten = usePostEntrySqueezeCollapseTighten and simPos == -1 and not na(barsInTrade) and barsInTrade <= postEntrySqueezeCollapseBars and simEntrySqueezeOn and not squeezeOn
+
+longAdverseDivergenceTighten = useAdverseDivergenceTighten and simPos == 1 and not na(barsInTrade) and barsInTrade <= adverseDivergenceBars and divLongCaution
+shortAdverseDivergenceTighten = useAdverseDivergenceTighten and simPos == -1 and not na(barsInTrade) and barsInTrade <= adverseDivergenceBars and divShortCaution
+
+longTrailAtrMultInForce = trailAtrMult
+shortTrailAtrMultInForce = trailAtrMult
+
+if contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, trailAtrMult * contextTrailTightenFactor)
+if longFailedFollowThroughTighten
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, followThroughTightenTrailAtrMult)
+if longContextCautionTighten
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, contextCautionTrailAtrMult)
+if longPartialDeriskTriggered
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, math.max(0.1, trailAtrMult * (1.0 - partialDeriskClosePct / 100.0)))
+if longPostEntrySqueezeCollapseTighten
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, postEntrySqueezeCollapseTrailAtrMult)
+if longAdverseDivergenceTighten
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, adverseDivergenceTrailAtrMult)
+
+if contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, trailAtrMult * contextTrailTightenFactor)
+if shortFailedFollowThroughTighten
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, followThroughTightenTrailAtrMult)
+if shortContextCautionTighten
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, contextCautionTrailAtrMult)
+if shortPartialDeriskTriggered
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, math.max(0.1, trailAtrMult * (1.0 - partialDeriskClosePct / 100.0)))
+if shortPostEntrySqueezeCollapseTighten
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, postEntrySqueezeCollapseTrailAtrMult)
+if shortAdverseDivergenceTighten
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, adverseDivergenceTrailAtrMult)
 
 longTrailActive = useTrailingStop and simPos == 1 and not na(simRiskDistance) and close >= simEntryPrice + trailActivateR * simRiskDistance
 shortTrailActive = useTrailingStop and simPos == -1 and not na(simRiskDistance) and close <= simEntryPrice - trailActivateR * simRiskDistance
-contextTrailAtrMultLong = contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution ? trailAtrMult * contextTrailTightenFactor : trailAtrMult
-contextTrailAtrMultShort = contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution ? trailAtrMult * contextTrailTightenFactor : trailAtrMult
-longTrailCandidate = longTrailActive ? close - contextTrailAtrMultLong * trailAtrNow : na
-shortTrailCandidate = shortTrailActive ? close + contextTrailAtrMultShort * trailAtrNow : na
+longTrailCandidate = longTrailActive ? close - longTrailAtrMultInForce * trailAtrNow : na
+shortTrailCandidate = shortTrailActive ? close + shortTrailAtrMultInForce * trailAtrNow : na
 
 if simPos == 1 and longTrailActive
     simTrailStop := na(simTrailStop) ? longTrailCandidate : math.max(simTrailStop, longTrailCandidate)
@@ -677,20 +753,24 @@ shortTakeHit = useStopsTP and simPos == -1 and not na(activeTakeProfit) and (ta.
 longTrailExit = useTrailingStop and simPos == 1 and not na(simTrailStop) and longStopHit
 shortTrailExit = useTrailingStop and simPos == -1 and not na(simTrailStop) and shortStopHit
 
-if simPos == 1 and ((useSignalExits and endLongTrade) or longStopHit or longTakeHit)
+if simPos == 1 and ((useSignalExits and endLongTrade) or longStopHit or longTakeHit or longTimeStopExit)
     simPos := 0
     simEntryPrice := na
     simRiskDistance := na
     simBaseStop := na
     simTakeProfit := na
     simTrailStop := na
-if simPos == -1 and ((useSignalExits and endShortTrade) or shortStopHit or shortTakeHit)
+    simEntryContextScore := na
+    simEntrySqueezeOn := false
+if simPos == -1 and ((useSignalExits and endShortTrade) or shortStopHit or shortTakeHit or shortTimeStopExit)
     simPos := 0
     simEntryPrice := na
     simRiskDistance := na
     simBaseStop := na
     simTakeProfit := na
     simTrailStop := na
+    simEntryContextScore := na
+    simEntrySqueezeOn := false
 
 // =========================
 // ======== Alerts =========
@@ -700,8 +780,8 @@ shortEntryAlert = enableStrategy and simPos == -1 and simPos[1] != -1
 alertcondition(longEntryAlert,  title="Long Position Opened",  message="Long opened on {{ticker}} {{interval}} @ {{close}}")
 alertcondition(shortEntryAlert, title="Short Position Opened", message="Short opened on {{ticker}} {{interval}} @ {{close}}")
 
-longExitAlert  = enableStrategy and simPos == 0 and simPos[1] == 1 and endLongTrade
-shortExitAlert = enableStrategy and simPos == 0 and simPos[1] == -1 and endShortTrade
+longExitAlert  = enableStrategy and simPos == 0 and simPos[1] == 1 and (endLongTrade or longTimeStopExit)
+shortExitAlert = enableStrategy and simPos == 0 and simPos[1] == -1 and (endShortTrade or shortTimeStopExit)
 alertcondition(longExitAlert,  title="Long Exit",  message="Long exit on {{ticker}} {{interval}} @ {{close}}")
 alertcondition(shortExitAlert, title="Short Exit", message="Short exit on {{ticker}} {{interval}} @ {{close}}")
 
@@ -797,8 +877,16 @@ featureDivLongCaution = divLongCaution ? 1 : 0
 featureDivShortCaution = divShortCaution ? 1 : 0
 featureLongEarlyExitAllowed = contextAllowLongEarlyExit ? 1 : 0
 featureShortEarlyExitAllowed = contextAllowShortEarlyExit ? 1 : 0
-featureLongTrailTightened = contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution ? 1 : 0
-featureShortTrailTightened = contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution ? 1 : 0
+featureFailedFollowThroughTighten = (longFailedFollowThroughTighten or shortFailedFollowThroughTighten) ? 1 : 0
+featureTimeStopTriggered = (longTimeStopExit or shortTimeStopExit) ? 1 : 0
+featureContextCautionTightened = (longContextCautionTighten or shortContextCautionTighten) ? 1 : 0
+featurePartialDeriskTriggered = (longPartialDeriskTriggered or shortPartialDeriskTriggered) ? 1 : 0
+featurePostEntrySqueezeCollapseTighten = (longPostEntrySqueezeCollapseTighten or shortPostEntrySqueezeCollapseTighten) ? 1 : 0
+featureAdverseDivergenceTighten = (longAdverseDivergenceTighten or shortAdverseDivergenceTighten) ? 1 : 0
+featureTrailAtrMultInForce = simPos == 1 ? longTrailAtrMultInForce : simPos == -1 ? shortTrailAtrMultInForce : trailAtrMult
+featureLiveContextScoreDelta = simPos == 1 and not na(simEntryContextScore) ? exitStateLongContextScore - simEntryContextScore : simPos == -1 and not na(simEntryContextScore) ? exitStateShortContextScore - simEntryContextScore : 0.0
+featureLongTrailTightened = simPos == 1 and longTrailAtrMultInForce < trailAtrMult ? 1 : 0
+featureShortTrailTightened = simPos == -1 and shortTrailAtrMultInForce < trailAtrMult ? 1 : 0
 featureBlockLongTrendX = baseStartLong and not trendXLongPass ? 1 : 0
 featureBlockShortTrendX = baseStartShort and not trendXShortPass ? 1 : 0
 featureBlockLongPred = baseStartLong and trendXLongPass and not predLongStrengthPass ? 1 : 0
@@ -921,6 +1009,14 @@ plot(featureTrailStopDistance, "Feature_TrailStopDistance", display=display.data
 plot(featureTrailMoved, "Feature_TrailMoved", display=display.data_window)
 plot(featureTrailExitLong, "Feature_TrailExitLong", display=display.data_window)
 plot(featureTrailExitShort, "Feature_TrailExitShort", display=display.data_window)
+plot(featureFailedFollowThroughTighten, "Feature_FailedFollowThroughTighten", display=display.data_window)
+plot(featureTimeStopTriggered, "Feature_TimeStopTriggered", display=display.data_window)
+plot(featureContextCautionTightened, "Feature_ContextCautionTightened", display=display.data_window)
+plot(featurePartialDeriskTriggered, "Feature_PartialDeriskTriggered", display=display.data_window)
+plot(featurePostEntrySqueezeCollapseTighten, "Feature_PostEntrySqueezeCollapseTighten", display=display.data_window)
+plot(featureAdverseDivergenceTighten, "Feature_AdverseDivergenceTighten", display=display.data_window)
+plot(featureTrailAtrMultInForce, "Feature_TrailAtrMultInForce", display=display.data_window)
+plot(featureLiveContextScoreDelta, "Feature_LiveContextScoreDelta", display=display.data_window)
 plot(featureSimPos, "Feature_SimPos", display=display.data_window)
 
 // =========================

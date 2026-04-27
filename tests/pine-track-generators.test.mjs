@@ -97,7 +97,27 @@ test('shared and track-owned knob lists are exposed', () => {
   assert.ok(shared.includes('minBarsBetween'));
   assert.ok(squeezeOwn.includes('squeezeLength'));
   assert.ok(divergenceOwn.includes('divRsiLen'));
-  assert.deepEqual(exitOwn, ['useTimeStop', 'timeStopBars']);
+  assert.deepEqual(exitOwn, [
+    'useFailedFollowThroughTighten',
+    'followThroughBars',
+    'followThroughMinProgressAtr',
+    'followThroughTightenTrailAtrMult',
+    'useTimeStop',
+    'timeStopBars',
+    'timeStopMinUnrealizedAtr',
+    'useContextCautionTighten',
+    'contextCautionDelta',
+    'contextCautionTrailAtrMult',
+    'usePartialDerisk',
+    'partialDeriskAtR',
+    'partialDeriskClosePct',
+    'usePostEntrySqueezeCollapseTighten',
+    'postEntrySqueezeCollapseBars',
+    'postEntrySqueezeCollapseTrailAtrMult',
+    'useAdverseDivergenceTighten',
+    'adverseDivergenceBars',
+    'adverseDivergenceTrailAtrMult',
+  ]);
 });
 
 test('squeeze track emits plain patch metadata with shared and own keys', () => {

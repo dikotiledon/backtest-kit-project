@@ -36,8 +36,8 @@ test('pine script gates final entries through asymmetric context policy', async 
 test('pine script tightens exits from context caution without weakening hard risk controls', async () => {
   const source = await fs.readFile(sourcePath, 'utf8');
 
-  assert.match(source, /contextTrailAtrMultLong\s*=\s*contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution \? trailAtrMult \* contextTrailTightenFactor : trailAtrMult/);
-  assert.match(source, /contextTrailAtrMultShort\s*=\s*contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution \? trailAtrMult \* contextTrailTightenFactor : trailAtrMult/);
+  assert.match(source, /if contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution\r?\n\s+longTrailAtrMultInForce := math\.min\(longTrailAtrMultInForce, trailAtrMult \* contextTrailTightenFactor\)/);
+  assert.match(source, /if contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution\r?\n\s+shortTrailAtrMultInForce := math\.min\(shortTrailAtrMultInForce, trailAtrMult \* contextTrailTightenFactor\)/);
   assert.match(source, /endLongTrade\s*=\s*[\s\S]*\(contextAllowLongEarlyExit and endLongTradeDynamic\)/);
   assert.match(source, /endShortTrade\s*=\s*[\s\S]*\(contextAllowShortEarlyExit and endShortTradeDynamic\)/);
 });

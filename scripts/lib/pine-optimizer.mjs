@@ -150,6 +150,8 @@ export function calculateMetrics(trades) {
   const tradeCount = trades.length;
   const winTrades = trades.filter((trade) => trade.pnl > 0);
   const lossTrades = trades.filter((trade) => trade.pnl < 0);
+  const winReturnTrades = trades.filter((trade) => trade.returnPct > 0);
+  const lossReturnTrades = trades.filter((trade) => trade.returnPct < 0);
   const totalProfit = winTrades.reduce((sum, trade) => sum + trade.pnl, 0);
   const totalLossAbs = Math.abs(lossTrades.reduce((sum, trade) => sum + trade.pnl, 0));
   const roiPctRaw = trades.reduce((sum, trade) => sum + trade.returnPct, 0);
@@ -166,6 +168,8 @@ export function calculateMetrics(trades) {
 
   const avgReturnPct = tradeCount ? roiPctRaw / tradeCount : 0;
   const avgPnl = tradeCount ? (totalProfit - totalLossAbs) / tradeCount : 0;
+  const avgWin = winReturnTrades.length ? winReturnTrades.reduce((sum, trade) => sum + trade.returnPct, 0) / winReturnTrades.length : 0;
+  const avgLoss = lossReturnTrades.length ? Math.abs(lossReturnTrades.reduce((sum, trade) => sum + trade.returnPct, 0) / lossReturnTrades.length) : 0;
   const profitFactor = totalLossAbs === 0
     ? (totalProfit > 0 ? Number.POSITIVE_INFINITY : 0)
     : totalProfit / totalLossAbs;
@@ -178,6 +182,8 @@ export function calculateMetrics(trades) {
     roiPct: round(roiPctRaw),
     avgReturnPct: round(avgReturnPct),
     avgPnl: round(avgPnl),
+    avgWin: round(avgWin),
+    avgLoss: round(avgLoss),
     totalPnl: round(totalProfit - totalLossAbs),
     totalProfit: round(totalProfit),
     totalLossAbs: round(totalLossAbs),

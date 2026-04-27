@@ -77,6 +77,12 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function round(value, digits = 2) {
+  if (!Number.isFinite(value)) return 0;
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
 export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy = {}, researchTracks = [], previousCycle = null } = {}) {
   const enabledTracks = normalizeResearchTracks(researchTracks).filter((track) => track.enabled !== false);
   const noChangeStreakRotateAfter = rotationPolicy.noChangeStreakRotateAfter ?? 3;
@@ -146,6 +152,39 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
   const rotationTrigger = trackState.rotationTrigger ?? null;
   const rotationReason = trackState.rotationReason ?? rotationTrigger ?? null;
   const sameTrackCycleStreak = Number.isFinite(trackState.sameTrackCycleStreak) ? trackState.sameTrackCycleStreak : 0;
+  const expectancyPolicy = {
+    enabled: false,
+    wrJumpDiagnosticThreshold: 8,
+    rejectWrGainAvgWinLoss: true,
+    requireExpectancyNonRegression: true,
+    ...(config.expectancyPolicy || {}),
+  };
+  const expectancyChampion = selectedCandidate?.labResults?.[0]?.incumbent || championSummary;
+  const expectancyChallenger = selectedCandidate?.labResults?.[0]?.challenger || challengerSummary;
+  const expectancyGate = selectedCandidate?.labResults?.[0]?.decision?.expectancyGate || selectedCandidate?.labResults?.[0]?.decision?.expectancy || null;
+  const expectancy = {
+    champion: {
+      winRatePct: expectancyChampion?.winRatePct ?? 0,
+      avgWin: expectancyChampion?.avgWin ?? 0,
+      avgLoss: expectancyChampion?.avgLoss ?? 0,
+      expectancy: expectancyChampion?.expectancy ?? 0,
+    },
+    challenger: {
+      winRatePct: expectancyChallenger?.winRatePct ?? 0,
+      avgWin: expectancyChallenger?.avgWin ?? 0,
+      avgLoss: expectancyChallenger?.avgLoss ?? 0,
+      expectancy: expectancyChallenger?.expectancy ?? 0,
+    },
+    delta: {
+      winRatePct: round((expectancyChallenger?.winRatePct ?? 0) - (expectancyChampion?.winRatePct ?? 0), 2),
+      avgWin: round((expectancyChallenger?.avgWin ?? 0) - (expectancyChampion?.avgWin ?? 0), 2),
+      avgLoss: round((expectancyChallenger?.avgLoss ?? 0) - (expectancyChampion?.avgLoss ?? 0), 2),
+      expectancy: round((expectancyChallenger?.expectancy ?? 0) - (expectancyChampion?.expectancy ?? 0), 4),
+    },
+    gate: expectancyGate,
+    wrDecompositionRequired: Boolean(expectancyGate?.diagnostics?.wrDecompositionRequired),
+    policy: expectancyPolicy,
+  };
 
   return {
     variantFilePath: path.join(config.researchRoot, `${runId}-variants.json`),
@@ -184,9 +223,12 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
         challenger: item.challenger,
         matrixDecision: item.matrixDecision,
         robustness: item.robustness,
+        expectancy: item.expectancy ?? null,
       })),
       labResults,
       matrixDecision,
+      expectancyPolicy,
+      expectancy,
       researchState: {
         steadyState,
         noChangeStreak,
@@ -387,6 +429,13 @@ async function loadConfig(cwd, configPath, overrides = {}) {
       minShadowPassRatio: 0,
       requireCandidateChange: true,
       ...(raw.matrixPolicy || {}),
+    },
+    expectancyPolicy: {
+      enabled: true,
+      wrJumpDiagnosticThreshold: 8,
+      rejectWrGainAvgWinLoss: true,
+      requireExpectancyNonRegression: true,
+      ...(raw.expectancyPolicy || {}),
     },
     autoPromotion: {
       enabled: false,
@@ -755,6 +804,7 @@ async function evaluateMatrix(config, runId, championState, challengerSummary) {
       incumbent: incumbentResult,
       challenger: challengerResult,
       thresholds: lab.thresholds,
+      expectancyPolicy: config.expectancyPolicy,
     });
 
     labResults.push({
@@ -870,7 +920,7 @@ async function runScout(config) {
       aggregateProfitFactorDelta: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.profitFactorDelta || 0), 0),
       aggregateDrawdownDeltaPct: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.drawdownDeltaPct || 0), 0),
     };
-    matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, robustness });
+    matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, robustness, expectancy: labResults[0]?.decision?.expectancy || null });
   }
 
   const selectedCandidate = selectRobustMatrixCandidate({ candidates: matrixCandidates });

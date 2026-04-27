@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { computeExpectancy, evaluateExpectancyGuard } from './pine-expectancy.mjs';
 
 function round(value, digits = 2) {
   if (!Number.isFinite(value)) return 0;
@@ -175,15 +176,26 @@ export function selectRobustMatrixCandidate({ candidates = [] }) {
 
 export function summarizeResult(result) {
   if (!result) return null;
+  const tradeCount = result.metrics?.tradeCount ?? result.tradeCount ?? 0;
+  const roiPct = round(result.metrics?.roiPct ?? result.roiPct ?? 0, 2);
+  const winRatePct = round(result.metrics?.winRatePct ?? result.winRatePct ?? 0, 2);
+  const avgWin = round(result.metrics?.avgWin ?? result.avgWin ?? 0, 2);
+  const avgLoss = round(result.metrics?.avgLoss ?? result.avgLoss ?? 0, 2);
+  const expectancy = computeExpectancy({ winRatePct, avgWin, avgLoss }).expectancy;
+
   return {
     label: result.label || result.configId || 'unknown',
     configId: result.configId,
     score: round(result.score, 2),
-    tradeCount: result.metrics?.tradeCount ?? result.tradeCount ?? 0,
-    roiPct: round(result.metrics?.roiPct ?? result.roiPct ?? 0, 2),
-    winRatePct: round(result.metrics?.winRatePct ?? result.winRatePct ?? 0, 2),
+    tradeCount,
+    roiPct,
+    winRatePct,
     profitFactor: round(result.metrics?.profitFactor ?? result.profitFactor ?? 0, 2),
     maxDrawdownPct: round(result.metrics?.maxDrawdownPct ?? result.maxDrawdownPct ?? 0, 2),
+    avgPnl: round(result.metrics?.avgPnl ?? result.avgPnl ?? 0, 2),
+    avgWin,
+    avgLoss,
+    expectancy,
     config: result.config || null,
   };
 }
@@ -219,7 +231,7 @@ export function selectChampionBootstrapSource({ latestManifest, seedPayload } = 
   return candidates[0] || null;
 }
 
-export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = {} }) {
+export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = {}, expectancyPolicy = {} }) {
   if (!incumbent) {
     throw new Error('Incumbent result is required');
   }
@@ -233,6 +245,8 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
         challengerPresent: false,
       },
       failedGates: ['challengerPresent'],
+      expectancy: null,
+      expectancyGate: null,
     };
   }
 
@@ -242,6 +256,8 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
   const maxDrawdownDeltaPct = thresholds.maxDrawdownDeltaPct ?? 0.75;
   const minTradeCount = thresholds.minTradeCount ?? 100;
   const minTradeRatioVsIncumbent = thresholds.minTradeRatioVsIncumbent ?? 0.75;
+  const expectancyEnabled = expectancyPolicy.enabled ?? false;
+  const wrJumpDiagnosticThreshold = expectancyPolicy.wrJumpDiagnosticThreshold ?? 8;
 
   const comparisons = {
     scoreDelta: round((challenger.score ?? 0) - (incumbent.score ?? 0), 2),
@@ -250,6 +266,8 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
     drawdownDeltaPct: round((challenger.metrics?.maxDrawdownPct ?? 0) - (incumbent.metrics?.maxDrawdownPct ?? 0), 2),
     tradeDelta: (challenger.metrics?.tradeCount ?? 0) - (incumbent.metrics?.tradeCount ?? 0),
     tradeRatioVsIncumbent: round((challenger.metrics?.tradeCount ?? 0) / Math.max(1, incumbent.metrics?.tradeCount ?? 0), 3),
+    avgWinDelta: round((challenger.metrics?.avgWin ?? 0) - (incumbent.metrics?.avgWin ?? 0), 2),
+    avgLossDelta: round((challenger.metrics?.avgLoss ?? 0) - (incumbent.metrics?.avgLoss ?? 0), 2),
   };
 
   if (isSteadyStateCandidate(incumbent, challenger)) {
@@ -269,6 +287,8 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
         minTradeCount,
         minTradeRatioVsIncumbent,
       },
+      expectancy: null,
+      expectancyGate: null,
     };
   }
 
@@ -281,6 +301,25 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
     tradeRatio: comparisons.tradeRatioVsIncumbent >= minTradeRatioVsIncumbent,
   };
 
+  let expectancyGate = null;
+  if (expectancyEnabled) {
+    expectancyGate = evaluateExpectancyGuard({
+      champion: {
+        winRatePct: incumbent.metrics?.winRatePct ?? incumbent.winRatePct ?? 0,
+        avgWin: incumbent.metrics?.avgWin ?? incumbent.avgWin ?? 0,
+        avgLoss: incumbent.metrics?.avgLoss ?? incumbent.avgLoss ?? 0,
+      },
+      challenger: {
+        winRatePct: challenger.metrics?.winRatePct ?? challenger.winRatePct ?? 0,
+        avgWin: challenger.metrics?.avgWin ?? challenger.avgWin ?? 0,
+        avgLoss: challenger.metrics?.avgLoss ?? challenger.avgLoss ?? 0,
+      },
+      wrJumpDiagnosticThreshold,
+      policy: expectancyPolicy,
+    });
+    gates.expectancy = expectancyGate.passed;
+  }
+
   const failedGates = Object.entries(gates)
     .filter(([, passed]) => !passed)
     .map(([name]) => name);
@@ -288,7 +327,9 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
   const recommendation = failedGates.length === 0 ? 'promote' : 'hold';
   const summary = recommendation === 'promote'
     ? `Promote challenger ${challenger.configId}: all promotion gates passed.`
-    : `Hold incumbent ${incumbent.configId}: challenger ${challenger.configId} failed ${failedGates.join(', ')} gate(s).`;
+    : expectancyGate && !expectancyGate.passed
+      ? `Hold incumbent ${incumbent.configId}: challenger ${challenger.configId} failed expectancy gate (${expectancyGate.failedGates.join(', ')}).`
+      : `Hold incumbent ${incumbent.configId}: challenger ${challenger.configId} failed ${failedGates.join(', ')} gate(s).`;
 
   return {
     recommendation,
@@ -304,6 +345,8 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
       minTradeCount,
       minTradeRatioVsIncumbent,
     },
+    expectancy: expectancyGate,
+    expectancyGate,
   };
 }
 
@@ -434,6 +477,19 @@ function appendTrackDiagnostics(lines, manifest) {
   lines.push(`- rotationReason: ${manifest?.rotationReason ?? 'n/a'}`);
 }
 
+function appendExpectancyDiagnostics(lines, manifest) {
+  if (!manifest?.expectancy) return;
+  const expectancy = manifest.expectancy;
+  lines.push('', '## Expectancy', '');
+  lines.push(`- championExpectancy: ${expectancy.champion?.expectancy ?? 'n/a'}`);
+  lines.push(`- challengerExpectancy: ${expectancy.challenger?.expectancy ?? 'n/a'}`);
+  lines.push(`- avgWinDelta: ${expectancy.delta?.avgWin ?? expectancy.comparisons?.avgWinDelta ?? 'n/a'}`);
+  lines.push(`- avgLossDelta: ${expectancy.delta?.avgLoss ?? expectancy.comparisons?.avgLossDelta ?? 'n/a'}`);
+  lines.push(`- expectancyDelta: ${expectancy.delta?.expectancy ?? expectancy.comparisons?.expectancyDelta ?? 'n/a'}`);
+  lines.push(`- expectancyGate: ${expectancy.gate?.passed === false ? 'hold' : 'pass'}`);
+  lines.push(`- wrDecompositionRequired: ${Boolean(expectancy.wrDecompositionRequired)}`);
+}
+
 export function renderScoutMarkdown({ config, manifest }) {
   const champion = manifest.champion || manifest.incumbent;
   const challenger = manifest.challenger;
@@ -487,6 +543,7 @@ export function renderScoutMarkdown({ config, manifest }) {
 
   if (manifest) {
     appendTrackDiagnostics(lines, manifest);
+    appendExpectancyDiagnostics(lines, manifest);
   }
 
   if (manifest.searchPlan) {
@@ -574,6 +631,7 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
 
   if (latestManifest) {
     appendTrackDiagnostics(lines, latestManifest);
+    appendExpectancyDiagnostics(lines, latestManifest);
   }
 
   if (latestManifest?.searchPlan) {
@@ -669,6 +727,10 @@ export function summarizeDigestAnnouncement({ latestManifest, previousManifest }
 
   if (decision.counts) {
     parts.push(`labs ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
+  }
+
+  if (latestManifest?.expectancy) {
+    parts.push(`exp ${latestManifest.expectancy.challenger?.expectancy ?? 'n/a'} vs ${latestManifest.expectancy.champion?.expectancy ?? 'n/a'}`);
   }
 
   if (previous) {

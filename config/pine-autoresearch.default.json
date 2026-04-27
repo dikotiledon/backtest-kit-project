@@ -79,6 +79,12 @@
     "minTradeCount": 0,
     "minTradeRatioVsIncumbent": 0
   },
+  "expectancyPolicy": {
+    "enabled": true,
+    "wrJumpDiagnosticThreshold": 8,
+    "rejectWrGainAvgWinLoss": true,
+    "requireExpectancyNonRegression": true
+  },
   "windowPolicy": {
     "primary": "primary",
     "shadow": "shadow",

@@ -24,6 +24,8 @@ function makeResult({
   roiPct,
   profitFactor,
   maxDrawdownPct,
+  avgWin,
+  avgLoss,
   config,
 }) {
   return {
@@ -35,6 +37,8 @@ function makeResult({
       roiPct,
       profitFactor,
       maxDrawdownPct,
+      avgWin,
+      avgLoss,
     },
   };
 }
@@ -153,6 +157,101 @@ test('decideAutoresearchOutcome marks unchanged challenger as steady-state hold'
   assert.equal(result.recommendation, 'hold');
   assert.deepEqual(result.failedGates, ['candidateChanged']);
   assert.match(result.summary, /steady-state validation only/);
+});
+
+test('decideAutoresearchOutcome holds when expectancy regresses despite a higher win rate', () => {
+  const incumbent = makeResult({
+    configId: 'champion',
+    score: 70.78,
+    tradeCount: 239,
+    roiPct: 47.19,
+    profitFactor: 1.8,
+    maxDrawdownPct: 4.45,
+    avgWin: 2.4,
+    avgLoss: 1.0,
+  });
+
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 71.4,
+    tradeCount: 244,
+    roiPct: 48.9,
+    profitFactor: 1.86,
+    maxDrawdownPct: 4.3,
+    avgWin: 1.5,
+    avgLoss: 1.2,
+  });
+
+  const result = decideAutoresearchOutcome({
+    incumbent,
+    challenger,
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+    expectancyPolicy: {
+      enabled: true,
+      wrJumpDiagnosticThreshold: 8,
+      rejectWrGainAvgWinLoss: true,
+      requireExpectancyNonRegression: true,
+    },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.match(result.failedGates.join(','), /expectancy/);
+  assert.equal(result.expectancyGate.passed, false);
+  assert.match(result.summary, /expectancy gate/i);
+});
+
+test('decideAutoresearchOutcome can promote when expectancy improves even if win rate falls', () => {
+  const incumbent = makeResult({
+    configId: 'champion',
+    score: 70.78,
+    tradeCount: 239,
+    roiPct: 47.19,
+    profitFactor: 1.8,
+    maxDrawdownPct: 4.45,
+    avgWin: 1.2,
+    avgLoss: 1.1,
+  });
+
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 71.4,
+    tradeCount: 244,
+    roiPct: 48.9,
+    profitFactor: 1.86,
+    maxDrawdownPct: 4.3,
+    avgWin: 2.0,
+    avgLoss: 0.8,
+  });
+
+  const result = decideAutoresearchOutcome({
+    incumbent,
+    challenger,
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+    expectancyPolicy: {
+      enabled: true,
+      wrJumpDiagnosticThreshold: 8,
+      rejectWrGainAvgWinLoss: true,
+      requireExpectancyNonRegression: true,
+    },
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.expectancyGate.passed, true);
+  assert.ok(result.expectancyGate.comparisons.expectancyDelta > 0);
 });
 
 test('decideMatrixPromotion recommends promote when primary and enough shadows pass', () => {
@@ -491,10 +590,40 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
 
   const matrixCandidates = [
     {
-      challenger: { configId: 'c1', config: { minPredSum: 1.5 } },
-      labResults: [{ decision: { recommendation: 'promote', comparisons: { scoreDelta: 1, roiDeltaPct: 2, profitFactorDelta: 0.1, drawdownDeltaPct: -0.2 } } }],
+      challenger: { configId: 'c1', config: { minPredSum: 1.5 }, winRatePct: 40, avgWin: 2.1, avgLoss: 0.9, expectancy: 0.15 },
+      labResults: [{
+        incumbent: { configId: 'champion', winRatePct: 32, avgWin: 1.8, avgLoss: 1.0, expectancy: 0.02 },
+        challenger: { configId: 'c1', winRatePct: 40, avgWin: 2.1, avgLoss: 0.9, expectancy: 0.15 },
+        decision: {
+          recommendation: 'promote',
+          comparisons: { scoreDelta: 1, roiDeltaPct: 2, profitFactorDelta: 0.1, drawdownDeltaPct: -0.2, avgWinDelta: 0.3, avgLossDelta: -0.1 },
+          expectancy: {
+            passed: true,
+            comparisons: { expectancyDelta: 0.13, avgWinDelta: 0.3, avgLossDelta: -0.1 },
+            champion: { expectancy: 0.02 },
+            challenger: { expectancy: 0.15 },
+            gate: { passed: true },
+            diagnostics: { wrDecompositionRequired: false },
+          },
+          expectancyGate: {
+            passed: true,
+            comparisons: { expectancyDelta: 0.13, avgWinDelta: 0.3, avgLossDelta: -0.1 },
+            champion: { expectancy: 0.02 },
+            challenger: { expectancy: 0.15 },
+            gate: { passed: true },
+            diagnostics: { wrDecompositionRequired: false },
+          },
+        },
+      }],
       matrixDecision: { recommendation: 'promote', gates: { candidateChanged: true } },
       robustness: { aggregateScoreDelta: 1, aggregateRoiDeltaPct: 2, aggregateProfitFactorDelta: 0.1, aggregateDrawdownDeltaPct: -0.2 },
+      expectancy: {
+        champion: { winRatePct: 32, avgWin: 1.8, avgLoss: 1.0, expectancy: 0.02 },
+        challenger: { winRatePct: 40, avgWin: 2.1, avgLoss: 0.9, expectancy: 0.15 },
+        delta: { winRatePct: 8, avgWin: 0.3, avgLoss: -0.1, expectancy: 0.13 },
+        gate: { passed: true },
+        wrDecompositionRequired: false,
+      },
     },
   ];
 
@@ -517,6 +646,9 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
   assert.equal(result.manifest.challenger.configId, 'c1');
   assert.equal(result.manifest.researchState.steadyState, false);
   assert.equal(result.manifest.pinnedData.enabled, true);
+  assert.equal(result.manifest.expectancy.gate.passed, true);
+  assert.equal(result.manifest.expectancy.wrDecompositionRequired, false);
+  assert.ok(result.manifest.expectancy.delta.expectancy > 0);
 });
 
 
@@ -801,6 +933,13 @@ test('renderDigestMarkdown includes search-plan, shortlist summary, and rotation
       promotionEligible: true,
       promotionEligibleReason: 'Promote robust-winner',
       rotationReason: 'noChangeStreak',
+      expectancy: {
+        champion: { expectancy: 0.1 },
+        challenger: { expectancy: 0.22 },
+        delta: { expectancy: 0.12, avgWin: 0.2, avgLoss: -0.1 },
+        gate: { passed: true },
+        wrDecompositionRequired: false,
+      },
     },
     previousManifest: null,
     historyEvents: [],
@@ -815,6 +954,9 @@ test('renderDigestMarkdown includes search-plan, shortlist summary, and rotation
   assert.match(markdown, /sameTrackCycleStreak: 9/);
   assert.match(markdown, /promotionEligible: true/);
   assert.match(markdown, /promotionEligibleReason: Promote robust-winner/);
+  assert.match(markdown, /Expectancy/);
+  assert.match(markdown, /challengerExpectancy: 0\.22/);
+  assert.match(markdown, /wrDecompositionRequired: false/);
 });
 
 test('default autoresearch config enables incumbent-local shortlist policy', async () => {
@@ -829,6 +971,12 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     exploreFamilies: ['signal'],
     paretoShortlistSize: 4,
     matrixCandidateLimit: 3,
+  });
+  assert.deepEqual(config.expectancyPolicy, {
+    enabled: true,
+    wrJumpDiagnosticThreshold: 8,
+    rejectWrGainAvgWinLoss: true,
+    requireExpectancyNonRegression: true,
   });
 });
 

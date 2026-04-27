@@ -75,17 +75,39 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy = {} } = {}) {
-  const hardRotationTrigger = (schedulerState.noChangeStreak >= (rotationPolicy.noChangeStreakRotateAfter ?? 3) ? 'noChangeStreak' : null);
-  const activeTrackSelectionState = hardRotationTrigger === 'noChangeStreak'
-    ? {
-        ...schedulerState,
-        activeTrackId: null,
-        cycleIndex: (Number.isFinite(schedulerState.cycleIndex) ? schedulerState.cycleIndex : 0) + 1,
-      }
-    : schedulerState;
+export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy = {}, researchTracks = [], previousCycle = null } = {}) {
+  const enabledTracks = normalizeResearchTracks(researchTracks).filter((track) => track.enabled !== false);
+  const noChangeStreakRotateAfter = rotationPolicy.noChangeStreakRotateAfter ?? 3;
+  const similarityRotateAbove = rotationPolicy.similarityRotateAbove ?? 0.85;
+  const maxCyclesPerTrack = rotationPolicy.maxCyclesPerTrack ?? 8;
+  const hardRotationTrigger = (schedulerState.noChangeStreak >= noChangeStreakRotateAfter ? 'noChangeStreak' : null)
+    ?? (Number.isFinite(previousCycle?.topCandidateSimilarity) && previousCycle.topCandidateSimilarity > similarityRotateAbove ? 'noveltySimilarity' : null)
+    ?? (schedulerState.sameTrackCycleStreak > maxCyclesPerTrack && previousCycle?.promotionEligible === false ? 'maxCyclesPerTrack' : null);
 
-  return { hardRotationTrigger, activeTrackSelectionState };
+  if (!hardRotationTrigger) {
+    return { hardRotationTrigger: null, activeTrackSelectionState: schedulerState };
+  }
+
+  const currentCycleIndex = Number.isFinite(schedulerState.cycleIndex) ? schedulerState.cycleIndex : 0;
+  let selectionCycleIndex = currentCycleIndex + 1;
+  if (enabledTracks.length > 0 && schedulerState.activeTrackId) {
+    const currentIndex = enabledTracks.findIndex((track) => track.trackId === schedulerState.activeTrackId);
+    if (currentIndex >= 0) {
+      const nextIndex = (currentIndex + 1) % enabledTracks.length;
+      while (((selectionCycleIndex - 1) % enabledTracks.length + enabledTracks.length) % enabledTracks.length !== nextIndex) {
+        selectionCycleIndex += 1;
+      }
+    }
+  }
+
+  return {
+    hardRotationTrigger,
+    activeTrackSelectionState: {
+      ...schedulerState,
+      activeTrackId: null,
+      cycleIndex: selectionCycleIndex,
+    },
+  };
 }
 
 export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {} }) {
@@ -725,9 +747,12 @@ async function runScout(config) {
         }],
   );
   const rotationPolicy = config.rotationPolicy || {};
+  const previousCycle = [...historyEventsBefore].reverse().find((event) => event?.type === 'cycle') || null;
   const { hardRotationTrigger, activeTrackSelectionState } = resolveTrackSelectionState({
     schedulerState,
     rotationPolicy,
+    researchTracks,
+    previousCycle,
   });
   const activeTrack = selectActiveTrack({
     tracks: researchTracks,

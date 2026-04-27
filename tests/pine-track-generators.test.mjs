@@ -146,7 +146,44 @@ test('hard rotation advances to the next enabled track instead of re-picking the
       noChangeStreak: 3,
     },
     rotationPolicy: { noChangeStreakRotateAfter: 3 },
+    researchTracks: tracks,
   });
 
   assert.equal(selectActiveTrack({ tracks, state: activeTrackSelectionState }).trackId, 'track-a');
+});
+
+test('novelty and max-cycle hard rotation use prior-cycle evidence before selecting the next track', () => {
+  const tracks = normalizeResearchTracks([
+    { trackId: 'track-a', name: 'Track A', gridName: 'grid-a', enabled: true },
+    { trackId: 'track-b', name: 'Track B', gridName: 'grid-b', enabled: true },
+    { trackId: 'track-c', name: 'Track C', gridName: 'grid-c', enabled: true },
+  ]);
+
+  const novelty = resolveTrackSelectionState({
+    schedulerState: {
+      ...defaultSchedulerState(),
+      activeTrackId: 'track-b',
+      cycleIndex: 5,
+      sameTrackCycleStreak: 2,
+    },
+    rotationPolicy: { similarityRotateAbove: 0.85, maxCyclesPerTrack: 8 },
+    researchTracks: tracks,
+    previousCycle: { topCandidateSimilarity: 0.91, promotionEligible: false },
+  });
+  assert.equal(novelty.hardRotationTrigger, 'noveltySimilarity');
+  assert.equal(selectActiveTrack({ tracks, state: novelty.activeTrackSelectionState }).trackId, 'track-c');
+
+  const maxCycle = resolveTrackSelectionState({
+    schedulerState: {
+      ...defaultSchedulerState(),
+      activeTrackId: 'track-c',
+      cycleIndex: 7,
+      sameTrackCycleStreak: 9,
+    },
+    rotationPolicy: { similarityRotateAbove: 0.85, maxCyclesPerTrack: 8 },
+    researchTracks: tracks,
+    previousCycle: { topCandidateSimilarity: 0.4, promotionEligible: false },
+  });
+  assert.equal(maxCycle.hardRotationTrigger, 'maxCyclesPerTrack');
+  assert.equal(selectActiveTrack({ tracks, state: maxCycle.activeTrackSelectionState }).trackId, 'track-a');
 });

@@ -588,11 +588,58 @@ test('resolveTrackSelectionState advances cycle index when no-change rotation cl
       sameTrackCycleStreak: 3,
     },
     rotationPolicy: { noChangeStreakRotateAfter: 3, maxCyclesPerTrack: 8 },
+    researchTracks: [
+      { trackId: 'track-a', enabled: true },
+      { trackId: 'track-b', enabled: true },
+      { trackId: 'track-c', enabled: true },
+    ],
   });
 
   assert.equal(hardRotationTrigger, 'noChangeStreak');
   assert.equal(activeTrackSelectionState.activeTrackId, null);
   assert.equal(activeTrackSelectionState.cycleIndex, 4);
+});
+
+test('resolveTrackSelectionState pre-rotates on prior novelty and max-cycle evidence', () => {
+  const novelty = resolveTrackSelectionState({
+    schedulerState: {
+      activeTrackId: 'track-b',
+      cycleIndex: 5,
+      noChangeStreak: 0,
+      sameTrackCycleStreak: 2,
+    },
+    rotationPolicy: { noChangeStreakRotateAfter: 3, similarityRotateAbove: 0.85, maxCyclesPerTrack: 8 },
+    researchTracks: [
+      { trackId: 'track-a', enabled: true },
+      { trackId: 'track-b', enabled: true },
+      { trackId: 'track-c', enabled: true },
+    ],
+    previousCycle: { topCandidateSimilarity: 0.91, promotionEligible: false },
+  });
+
+  assert.equal(novelty.hardRotationTrigger, 'noveltySimilarity');
+  assert.equal(novelty.activeTrackSelectionState.activeTrackId, null);
+  assert.equal(novelty.activeTrackSelectionState.cycleIndex, 6);
+
+  const maxCycle = resolveTrackSelectionState({
+    schedulerState: {
+      activeTrackId: 'track-c',
+      cycleIndex: 7,
+      noChangeStreak: 0,
+      sameTrackCycleStreak: 9,
+    },
+    rotationPolicy: { noChangeStreakRotateAfter: 3, similarityRotateAbove: 0.85, maxCyclesPerTrack: 8 },
+    researchTracks: [
+      { trackId: 'track-a', enabled: true },
+      { trackId: 'track-b', enabled: true },
+      { trackId: 'track-c', enabled: true },
+    ],
+    previousCycle: { topCandidateSimilarity: 0.4, promotionEligible: false },
+  });
+
+  assert.equal(maxCycle.hardRotationTrigger, 'maxCyclesPerTrack');
+  assert.equal(maxCycle.activeTrackSelectionState.activeTrackId, null);
+  assert.equal(maxCycle.activeTrackSelectionState.cycleIndex, 10);
 });
 
 test('buildScoutOrchestrationState does not inherit a stale lastRotationTrigger', () => {

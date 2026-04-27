@@ -75,6 +75,19 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy = {} } = {}) {
+  const hardRotationTrigger = (schedulerState.noChangeStreak >= (rotationPolicy.noChangeStreakRotateAfter ?? 3) ? 'noChangeStreak' : null);
+  const activeTrackSelectionState = hardRotationTrigger === 'noChangeStreak'
+    ? {
+        ...schedulerState,
+        activeTrackId: null,
+        cycleIndex: (Number.isFinite(schedulerState.cycleIndex) ? schedulerState.cycleIndex : 0) + 1,
+      }
+    : schedulerState;
+
+  return { hardRotationTrigger, activeTrackSelectionState };
+}
+
 export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {} }) {
   const championSummary = summarizeResult(championState);
   const paretoShortlist = buildParetoShortlist({
@@ -712,11 +725,10 @@ async function runScout(config) {
         }],
   );
   const rotationPolicy = config.rotationPolicy || {};
-  const hardRotationTrigger = (schedulerState.noChangeStreak >= (rotationPolicy.noChangeStreakRotateAfter ?? 3) ? 'noChangeStreak' : null)
-    ?? (schedulerState.sameTrackCycleStreak > (rotationPolicy.maxCyclesPerTrack ?? 8) ? 'maxCyclesPerTrack' : null);
-  const activeTrackSelectionState = ['noChangeStreak', 'maxCyclesPerTrack'].includes(hardRotationTrigger)
-    ? { ...schedulerState, activeTrackId: null }
-    : schedulerState;
+  const { hardRotationTrigger, activeTrackSelectionState } = resolveTrackSelectionState({
+    schedulerState,
+    rotationPolicy,
+  });
   const activeTrack = selectActiveTrack({
     tracks: researchTracks,
     state: activeTrackSelectionState,

@@ -12,6 +12,7 @@ import {
   normalizeResearchTracks,
   selectActiveTrack,
 } from '../scripts/lib/pine-autoresearch-tracks.mjs';
+import { resolveTrackSelectionState } from '../scripts/pine-autoresearch.mjs';
 
 const incumbent = {
   useTrendXConf: true,
@@ -131,15 +132,21 @@ test('invalid cross-family mutation is rejected before sweep', () => {
   );
 });
 
-test('selectActiveTrack advances when the active track has been cleared for rotation', () => {
+test('hard rotation advances to the next enabled track instead of re-picking the same one', () => {
   const tracks = normalizeResearchTracks([
     { trackId: 'track-a', name: 'Track A', gridName: 'grid-a', enabled: true },
     { trackId: 'track-b', name: 'Track B', gridName: 'grid-b', enabled: true },
     { trackId: 'track-c', name: 'Track C', gridName: 'grid-c', enabled: true },
   ]);
+  const { activeTrackSelectionState } = resolveTrackSelectionState({
+    schedulerState: {
+      ...defaultSchedulerState(),
+      activeTrackId: 'track-c',
+      cycleIndex: 3,
+      noChangeStreak: 3,
+    },
+    rotationPolicy: { noChangeStreakRotateAfter: 3 },
+  });
 
-  assert.equal(
-    selectActiveTrack({ tracks, state: { ...defaultSchedulerState(), activeTrackId: null, cycleIndex: 3 } }).trackId,
-    'track-c',
-  );
+  assert.equal(selectActiveTrack({ tracks, state: activeTrackSelectionState }).trackId, 'track-a');
 });

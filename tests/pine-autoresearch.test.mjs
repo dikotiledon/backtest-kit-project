@@ -15,7 +15,7 @@ import {
   selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
-import { buildScoutOrchestrationState } from '../scripts/pine-autoresearch.mjs';
+import { buildScoutOrchestrationState, resolveTrackSelectionState } from '../scripts/pine-autoresearch.mjs';
 
 function makeResult({
   configId,
@@ -577,6 +577,22 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
   assert.equal(result.manifest.promotionEligible, true);
   assert.equal(result.manifest.promotionEligibleReason, 'Promote c1');
   assert.equal(result.manifest.topCandidateSimilarity, 0.75);
+});
+
+test('resolveTrackSelectionState advances cycle index when no-change rotation clears the active track', () => {
+  const { hardRotationTrigger, activeTrackSelectionState } = resolveTrackSelectionState({
+    schedulerState: {
+      activeTrackId: 'track-c',
+      cycleIndex: 3,
+      noChangeStreak: 3,
+      sameTrackCycleStreak: 3,
+    },
+    rotationPolicy: { noChangeStreakRotateAfter: 3, maxCyclesPerTrack: 8 },
+  });
+
+  assert.equal(hardRotationTrigger, 'noChangeStreak');
+  assert.equal(activeTrackSelectionState.activeTrackId, null);
+  assert.equal(activeTrackSelectionState.cycleIndex, 4);
 });
 
 test('buildScoutOrchestrationState does not inherit a stale lastRotationTrigger', () => {

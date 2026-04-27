@@ -521,6 +521,36 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
 
 
 
+test('buildScoutOrchestrationState evaluates top-candidate similarity across the full candidate set', () => {
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [{ labId: 'shadow-1' }],
+      pinnedData: { enabled: true, datasetsRoot: '/data', cacheRoot: '/cache', exchangeName: 'binance' },
+    },
+    runId: 'pine-autoresearch-124',
+    championState: { configId: 'champion', score: 70, config: { a: 1 } },
+    historyEventsBefore: [],
+    searchBatch: [{ variantId: 'v1', lane: 'exploit', family: 'signal', config: { a: 1 } }],
+    primarySweep: {
+      topConfigs: [
+        { configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230, config: { a: 0 } },
+        { configId: 'c2', score: 71, roiPct: 47, profitFactor: 1.8, maxDrawdownPct: 4.3, tradeCount: 225, config: { a: 0 } },
+        { configId: 'c3', score: 69, roiPct: 46, profitFactor: 1.7, maxDrawdownPct: 4.6, tradeCount: 220, config: { a: 0 } },
+        { configId: 'c4', score: 68, roiPct: 45, profitFactor: 1.6, maxDrawdownPct: 4.8, tradeCount: 210, config: { a: 1, b: 2 } },
+      ],
+    },
+    matrixCandidates: [{ challenger: { configId: 'c1', config: { a: 0 } }, matrixDecision: { recommendation: 'hold', summary: 'Hold c1' }, robustness: {} }],
+  });
+
+  assert.equal(result.manifest.topCandidateSimilarity, 0.5);
+});
+
 test('buildScoutOrchestrationState records active track and novelty metadata', () => {
   const config = {
     matrixId: 'pine-autoresearch',
@@ -564,7 +594,7 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
       sameTrackCycleStreak: 4,
       promotionEligible: true,
       promotionEligibleReason: 'Promote c1',
-      topCandidateSimilarity: 0.75,
+      topCandidateSimilarity: 0.5,
     },
   });
 
@@ -576,7 +606,7 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
   assert.equal(result.manifest.sameTrackCycleStreak, 4);
   assert.equal(result.manifest.promotionEligible, true);
   assert.equal(result.manifest.promotionEligibleReason, 'Promote c1');
-  assert.equal(result.manifest.topCandidateSimilarity, 0.75);
+  assert.equal(result.manifest.topCandidateSimilarity, 0.5);
 });
 
 test('resolveTrackSelectionState advances cycle index when no-change rotation clears the active track', () => {

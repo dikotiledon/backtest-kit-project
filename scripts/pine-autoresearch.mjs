@@ -132,8 +132,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
   const topCandidateSimilaritySummary = summarizeTopCandidateSimilarity({
     championConfig: championState?.config,
     candidates: (primarySweep.topConfigs || [])
-      .filter((candidate) => !sameConfig(candidate?.config, championState?.config))
-      .slice(0, 3),
+      .filter((candidate) => !sameConfig(candidate?.config, championState?.config)),
   });
   const promotionEligible = trackState.promotionEligible ?? Boolean(selectedCandidate?.matrixDecision?.recommendation === 'promote');
   const promotionEligibleReason = trackState.promotionEligibleReason ?? (

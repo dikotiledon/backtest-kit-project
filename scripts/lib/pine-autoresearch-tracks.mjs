@@ -28,18 +28,22 @@ function stableValue(value) {
 
 function similarityRatio(left, right) {
   if (isPlainObject(left) && isPlainObject(right)) {
-    const comparableKeys = Object.keys(left).filter((key) => Object.prototype.hasOwnProperty.call(right, key)).sort();
+    const comparableKeys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
     if (comparableKeys.length === 0) return 1;
-    const score = comparableKeys.reduce((sum, key) => sum + similarityRatio(left[key], right[key]), 0);
+    const score = comparableKeys.reduce((sum, key) => (
+      sum + (Object.prototype.hasOwnProperty.call(left, key) && Object.prototype.hasOwnProperty.call(right, key)
+        ? similarityRatio(left[key], right[key])
+        : 0)
+    ), 0);
     return Number((score / comparableKeys.length).toFixed(3));
   }
 
   if (Array.isArray(left) && Array.isArray(right)) {
-    const limit = Math.min(left.length, right.length);
-    if (limit === 0) return left.length === right.length ? 1 : 0;
+    const limit = Math.max(left.length, right.length);
+    if (limit === 0) return 1;
     let score = 0;
     for (let i = 0; i < limit; i++) {
-      score += similarityRatio(left[i], right[i]);
+      score += i < left.length && i < right.length ? similarityRatio(left[i], right[i]) : 0;
     }
     return Number((score / limit).toFixed(3));
   }

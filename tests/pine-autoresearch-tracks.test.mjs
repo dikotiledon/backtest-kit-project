@@ -163,13 +163,21 @@ test('nextTrackState treats repeated novelty plus unchanged champion as steady s
   assert.equal(changedCandidate.lastRotationTrigger, 'candidate-changed');
 });
 
-test('computeConfigSimilarity scores key-wise equality across comparable config keys', () => {
+test('computeConfigSimilarity penalizes extra object keys and array length differences', () => {
   assert.equal(
     computeConfigSimilarity({
       left: { a: 1, nested: { b: true, c: 'x' } },
       right: { a: 1, nested: { b: false, c: 'x' }, extra: 9 },
     }),
-    0.75,
+    0.5,
+  );
+
+  assert.equal(
+    computeConfigSimilarity({
+      left: [1],
+      right: [1, 2],
+    }),
+    0.5,
   );
 });
 
@@ -184,7 +192,7 @@ test('summarizeTopCandidateSimilarity reports the closest candidate to the champ
   });
 
   assert.equal(summary.topCandidateConfigId, 'near');
-  assert.equal(summary.topCandidateSimilarity, 0.75);
+  assert.equal(summary.topCandidateSimilarity, 0.5);
 });
 
 test('nextTrackState rotates on current novelty similarity and max-cycle evidence', () => {

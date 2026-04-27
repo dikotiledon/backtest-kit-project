@@ -199,6 +199,14 @@ function extractThresholdSurface(metrics = {}) {
   return null;
 }
 
+function surfaceBias(surface, tolerance = 0.25) {
+  if (!surface) return 'unknown';
+  const gap = surface.long - surface.short;
+  if (gap > tolerance) return 'long';
+  if (gap < -tolerance) return 'short';
+  return 'balanced';
+}
+
 export function detectThresholdAsymmetry({ championMetrics = {}, candidateMetrics = {}, tolerance = 0.25 } = {}) {
   const championSurface = extractThresholdSurface(championMetrics);
   const candidateSurface = extractThresholdSurface(candidateMetrics);
@@ -212,20 +220,40 @@ export function detectThresholdAsymmetry({ championMetrics = {}, candidateMetric
       )
     : 0;
 
+  const hasEvidence = Boolean(championSurface && candidateSurface);
   const sideSurfaceDiverged = candidateSurface ? candidateGap > tolerance : false;
   const widened = candidateSurface ? candidateGap >= championGap + tolerance : false;
   const surfaceShifted = championShift > tolerance;
-  const isAsymmetric = Boolean(candidateSurface) && (widened || surfaceShifted || sideSurfaceDiverged);
+  const candidateBias = surfaceBias(candidateSurface, tolerance);
+  const championBias = surfaceBias(championSurface, tolerance);
+  const isAsymmetric = hasEvidence && (widened || surfaceShifted || sideSurfaceDiverged);
+  const nextTrack = !hasEvidence
+    ? 'continue unified track'
+    : isAsymmetric
+      ? (candidateBias === 'long'
+        ? 'split long/short tracks with long-side emphasis'
+        : candidateBias === 'short'
+          ? 'split long/short tracks with short-side emphasis'
+          : 'split long/short tracks')
+      : 'continue unified track';
 
   return {
     isAsymmetric,
-    recommendation: isAsymmetric ? 'split-long-short-track' : 'keep-unified',
+    recommendation: !hasEvidence
+      ? 'limited-evidence'
+      : isAsymmetric
+        ? 'split-long-short-track'
+        : 'keep-unified',
+    nextTrack,
     championSurface,
     candidateSurface,
     championGap: round(championGap, 4),
     candidateGap: round(candidateGap, 4),
     gapDelta,
+    championBias,
+    candidateBias,
     flags: {
+      hasEvidence,
       sideSurfaceDiverged,
       widened,
       surfaceShifted,
@@ -246,13 +274,31 @@ function formatRegimeRow(name, metrics) {
   return `| ${name} | ${metrics.tradeCount} | ${formatPct(metrics.winRate * 100)}% | ${formatPct(metrics.profitFactor)} | ${formatPct(metrics.mfePct)} | ${formatPct(metrics.maePct)} |`;
 }
 
+function formatSurfaceRow(name, surface, bias = 'unknown') {
+  if (!surface) {
+    return `| ${name} | n/a | n/a | n/a | ${bias} |`;
+  }
+
+  const gap = Math.abs(surface.long - surface.short);
+  return `| ${name} | ${formatPct(surface.long)} | ${formatPct(surface.short)} | ${formatPct(gap)} | ${bias} |`;
+}
+
 export function buildRegimeAnalysisMarkdown({ matrixId = 'pine-autoresearch', runId = 'run', sideMetrics = null, regimeSlices = null, asymmetry = null, trackHint = null } = {}) {
   const long = sideMetrics?.long || summarizeBucket([]);
   const short = sideMetrics?.short || summarizeBucket([]);
   const regimes = regimeSlices || {};
   const flags = asymmetry?.flags || {};
   const recommendation = asymmetry?.recommendation || 'keep-unified';
-  const nextTrack = asymmetry?.isAsymmetric ? (trackHint || 'split long/short tracks') : 'continue current track';
+  const nextTrack = asymmetry?.nextTrack || 'continue unified track';
+  const championSurface = asymmetry?.championSurface || null;
+  const candidateSurface = asymmetry?.candidateSurface || null;
+  const evidenceNotes = [];
+  if (!flags.hasEvidence) {
+    evidenceNotes.push('Limited evidence: no matched champion/candidate threshold surfaces were available.');
+  }
+  if ((long.tradeCount + short.tradeCount) === 0) {
+    evidenceNotes.push('No qualifying trade rows were captured for this scout cycle.');
+  }
 
   return [
     `# Pine asymmetry analysis - ${matrixId}`,
@@ -260,6 +306,14 @@ export function buildRegimeAnalysisMarkdown({ matrixId = 'pine-autoresearch', ru
     `- runId: ${runId}`,
     `- recommendation: ${recommendation}`,
     `- nextTrack: ${nextTrack}`,
+    ...(evidenceNotes.length ? ['', '## Evidence quality', '', ...evidenceNotes.map((line) => `- ${line}`)] : []),
+    '',
+    '## Threshold surfaces',
+    '',
+    '| side | long | short | gap | bias |',
+    '| --- | ---: | ---: | ---: | --- |',
+    formatSurfaceRow('champion', championSurface, asymmetry?.championBias || 'unknown'),
+    formatSurfaceRow('candidate', candidateSurface, asymmetry?.candidateBias || 'unknown'),
     '',
     '## Side metrics',
     '',
@@ -291,7 +345,15 @@ export function buildRegimeAnalysisMarkdown({ matrixId = 'pine-autoresearch', ru
 export function buildRegimeAnalysisArtifact({ matrixId, runId, trades = [], featureRows = [], championMetrics = {}, candidateMetrics = null, trackHint = null } = {}) {
   const sideMetrics = summarizeSideMetrics({ trades });
   const regimeSlices = summarizeRegimeSlices({ trades, featureRows });
-  const asymmetry = detectThresholdAsymmetry({ championMetrics, candidateMetrics: candidateMetrics || sideMetrics });
+  const resolvedChampionMetrics = championMetrics ?? sideMetrics;
+  const resolvedCandidateMetrics = candidateMetrics ?? sideMetrics;
+  const asymmetry = detectThresholdAsymmetry({ championMetrics: resolvedChampionMetrics, candidateMetrics: resolvedCandidateMetrics });
+  const evidence = {
+    tradeCount: trades.length,
+    featureRowCount: featureRows.length,
+    hasChampionSurface: Boolean(extractThresholdSurface(resolvedChampionMetrics)),
+    hasCandidateSurface: Boolean(extractThresholdSurface(resolvedCandidateMetrics)),
+  };
   return {
     matrixId,
     runId,
@@ -299,7 +361,8 @@ export function buildRegimeAnalysisArtifact({ matrixId, runId, trades = [], feat
     regimeSlices,
     asymmetry,
     recommendation: asymmetry.recommendation,
-    nextTrack: asymmetry.isAsymmetric ? (trackHint || 'split long/short tracks') : 'continue current track',
+    nextTrack: asymmetry.nextTrack || 'continue unified track',
+    evidence,
     markdown: buildRegimeAnalysisMarkdown({ matrixId, runId, sideMetrics, regimeSlices, asymmetry, trackHint }),
   };
 }

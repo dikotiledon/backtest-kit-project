@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildRegimeAnalysisArtifact,
   classifyRegimeFromFeatures,
   detectThresholdAsymmetry,
   summarizeRegimeSlices,
@@ -65,4 +66,38 @@ test('detectThresholdAsymmetry flags divergent side-optimal surfaces', () => {
   assert.equal(result.isAsymmetric, true);
   assert.equal(result.flags.sideSurfaceDiverged, true);
   assert.match(result.recommendation, /split/i);
+  assert.match(result.nextTrack, /split long\/short/i);
+});
+
+
+test('buildRegimeAnalysisArtifact derives a split-track recommendation from champion/candidate surfaces', () => {
+  const artifact = buildRegimeAnalysisArtifact({
+    matrixId: 'pine-autoresearch',
+    runId: 'run-surface',
+    trades: sampleTrades(),
+    featureRows: sampleFeatureRows(),
+    championMetrics: { thresholdSurface: { long: 1.0, short: 1.1 } },
+    candidateMetrics: { thresholdSurface: { long: 1.8, short: 0.2 } },
+  });
+
+  assert.equal(artifact.asymmetry.isAsymmetric, true);
+  assert.match(artifact.nextTrack, /split long\/short/i);
+  assert.match(artifact.markdown, /Threshold surfaces/);
+  assert.match(artifact.markdown, /candidate/);
+});
+
+test('buildRegimeAnalysisArtifact emits limited-evidence guidance when scout data is missing', () => {
+  const artifact = buildRegimeAnalysisArtifact({
+    matrixId: 'pine-autoresearch',
+    runId: 'run-empty',
+    trades: [],
+    featureRows: [],
+  });
+
+  assert.equal(artifact.recommendation, 'limited-evidence');
+  assert.equal(artifact.evidence.tradeCount, 0);
+  assert.equal(artifact.evidence.featureRowCount, 0);
+  assert.match(artifact.markdown, /Evidence quality/);
+  assert.match(artifact.markdown, /No qualifying trade rows/);
+  assert.match(artifact.markdown, /Threshold surfaces/);
 });

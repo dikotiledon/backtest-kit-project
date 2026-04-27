@@ -15,7 +15,7 @@ import {
   selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
-import { buildScoutOrchestrationState, resolveTrackSelectionState } from '../scripts/pine-autoresearch.mjs';
+import { buildScoutOrchestrationState, buildScoutRegimeAnalysisArtifact, resolveTrackSelectionState } from '../scripts/pine-autoresearch.mjs';
 
 function makeResult({
   configId,
@@ -558,6 +558,21 @@ test('pine script exports regime-facing features for asymmetry diagnostics', asy
   assert.match(source, /plot\(featureExpansionState, "Feature_ExpansionState", display=display\.data_window\)/);
   assert.match(source, /plot\(featureTrendStrengthState, "Feature_TrendStrengthState", display=display\.data_window\)/);
   assert.match(source, /plot\(featureCautionDensity, "Feature_CautionDensity", display=display\.data_window\)/);
+});
+
+
+test('buildScoutRegimeAnalysisArtifact keeps analysis output available even without qualifying trade rows', () => {
+  const result = buildScoutRegimeAnalysisArtifact({
+    matrixId: 'pine-autoresearch',
+    runId: 'run-empty',
+    selectedCandidate: null,
+    matrixCandidates: [],
+  });
+
+  assert.equal(result.artifact.recommendation, 'limited-evidence');
+  assert.equal(result.artifact.evidence.tradeCount, 0);
+  assert.match(result.artifact.markdown, /Evidence quality/);
+  assert.match(result.artifact.markdown, /Threshold surfaces/);
 });
 
 test('buildScoutOrchestrationState records active track and novelty metadata', () => {

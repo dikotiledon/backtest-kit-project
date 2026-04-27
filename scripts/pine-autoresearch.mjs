@@ -30,6 +30,7 @@ import {
   writeJson,
   writeText,
   buildRegimeAnalysisArtifact,
+  summarizeSideMetrics,
 } from './lib/pine-autoresearch.mjs';
 import { stagePinnedDatasetForLab } from './lib/pine-dataset.mjs';
 import {
@@ -112,6 +113,7 @@ export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy
 }
 
 export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {} }) {
+
   const championSummary = summarizeResult(championState);
   const paretoShortlist = buildParetoShortlist({
     champion: championSummary,
@@ -203,6 +205,27 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       labSetId: trackState.labSetId ?? null,
       gridName: trackState.gridName ?? config.grid ?? null,
     },
+  };
+}
+
+export function buildScoutRegimeAnalysisArtifact({ matrixId, runId, selectedCandidate = null, matrixCandidates = [] } = {}) {
+  const analysisSource = selectedCandidate?.labResults?.[0]?.analysis
+    || matrixCandidates?.[0]?.labResults?.[0]?.analysis
+    || null;
+  const challengerAnalysis = analysisSource?.challenger || null;
+  const incumbentAnalysis = analysisSource?.incumbent || null;
+  const trades = challengerAnalysis?.trades || [];
+  const featureRows = challengerAnalysis?.rows || [];
+  return {
+    analysisSource,
+    artifact: buildRegimeAnalysisArtifact({
+      matrixId,
+      runId,
+      trades,
+      featureRows,
+      championMetrics: incumbentAnalysis?.trades ? summarizeSideMetrics({ trades: incumbentAnalysis.trades }) : {},
+      candidateMetrics: challengerAnalysis?.trades ? summarizeSideMetrics({ trades: challengerAnalysis.trades }) : {},
+    }),
   };
 }
 
@@ -923,22 +946,15 @@ async function runScout(config) {
 
   await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest }));
 
-  const asymmetrySource = selectedCandidate?.labResults?.[0]?.analysis?.challenger
-    || selectedCandidate?.labResults?.[0]?.analysis?.incumbent
-    || matrixCandidates?.[0]?.labResults?.[0]?.analysis?.challenger
-    || null;
-  if (asymmetrySource?.trades?.length) {
-    const artifact = buildRegimeAnalysisArtifact({
-      matrixId: trackedConfig.matrixId,
-      runId,
-      trades: asymmetrySource.trades,
-      featureRows: asymmetrySource.rows || [],
-      trackHint: manifest.activeTrackId,
-    });
-    const asymmetryDir = path.join(trackedConfig.digestRoot, 'analysis');
-    const asymmetryPath = path.join(asymmetryDir, `${runId}-asymmetry.md`);
-    await writeText(asymmetryPath, artifact.markdown);
-  }
+  const asymmetryAnalysis = buildScoutRegimeAnalysisArtifact({
+    matrixId: trackedConfig.matrixId,
+    runId,
+    selectedCandidate,
+    matrixCandidates,
+  });
+  const asymmetryDir = path.join(trackedConfig.digestRoot, 'analysis');
+  const asymmetryPath = path.join(asymmetryDir, `${runId}-asymmetry.md`);
+  await writeText(asymmetryPath, asymmetryAnalysis.artifact.markdown);
 
   const updatedHistoryEvents = await rebuildHistoryArtifacts(trackedConfig, championState);
   const previousManifest = await readPreviousManifest(trackedConfig, manifestName);

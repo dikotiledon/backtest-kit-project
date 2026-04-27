@@ -551,6 +551,15 @@ test('buildScoutOrchestrationState evaluates top-candidate similarity across the
   assert.equal(result.manifest.topCandidateSimilarity, 0.5);
 });
 
+test('pine script exports regime-facing features for asymmetry diagnostics', async () => {
+  const source = await fs.readFile(new URL('../pine/test.pine', import.meta.url), 'utf8');
+
+  assert.match(source, /plot\(featureCompressionState, "Feature_CompressionState", display=display\.data_window\)/);
+  assert.match(source, /plot\(featureExpansionState, "Feature_ExpansionState", display=display\.data_window\)/);
+  assert.match(source, /plot\(featureTrendStrengthState, "Feature_TrendStrengthState", display=display\.data_window\)/);
+  assert.match(source, /plot\(featureCautionDensity, "Feature_CautionDensity", display=display\.data_window\)/);
+});
+
 test('buildScoutOrchestrationState records active track and novelty metadata', () => {
   const config = {
     matrixId: 'pine-autoresearch',

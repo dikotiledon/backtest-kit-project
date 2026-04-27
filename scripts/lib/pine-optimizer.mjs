@@ -292,6 +292,7 @@ export async function analyzeJsonlFile(filePath, options = {}) {
     filePath: path.resolve(filePath),
     rowCount: rows.length,
     timeframeMinutes: options.timeframeMinutes || inferTimeframeMinutes(rows),
+    rows,
     trades,
     metrics,
     score,

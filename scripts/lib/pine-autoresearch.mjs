@@ -677,3 +677,12 @@ export function summarizeDigestAnnouncement({ latestManifest, previousManifest }
 
   return parts.join(' | ');
 }
+
+export {
+  buildRegimeAnalysisArtifact,
+  buildRegimeAnalysisMarkdown,
+  classifyRegimeFromFeatures,
+  detectThresholdAsymmetry,
+  summarizeRegimeSlices,
+  summarizeSideMetrics,
+} from './pine-regime-analysis.mjs';

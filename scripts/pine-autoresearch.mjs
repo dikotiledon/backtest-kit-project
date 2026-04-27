@@ -29,6 +29,7 @@ import {
   timestampId,
   writeJson,
   writeText,
+  buildRegimeAnalysisArtifact,
 } from './lib/pine-autoresearch.mjs';
 import { stagePinnedDatasetForLab } from './lib/pine-dataset.mjs';
 import {
@@ -668,6 +669,8 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
     score: analysis.score,
     metrics: analysis.metrics,
     diagnostics: analysis.diagnostics,
+    trades: analysis.trades,
+    rows: analysis.rows,
     cleanedPath,
     runDir: evalDir,
   };
@@ -713,6 +716,16 @@ async function evaluateMatrix(config, runId, championState, challengerSummary) {
       incumbent: summarizeResult(incumbentResult),
       challenger: summarizeResult(challengerResult),
       decision,
+      analysis: {
+        incumbent: {
+          trades: incumbentResult.trades,
+          rows: incumbentResult.rows,
+        },
+        challenger: {
+          trades: challengerResult.trades,
+          rows: challengerResult.rows,
+        },
+      },
     });
   }
 
@@ -909,6 +922,24 @@ async function runScout(config) {
   await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
 
   await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest }));
+
+  const asymmetrySource = selectedCandidate?.labResults?.[0]?.analysis?.challenger
+    || selectedCandidate?.labResults?.[0]?.analysis?.incumbent
+    || matrixCandidates?.[0]?.labResults?.[0]?.analysis?.challenger
+    || null;
+  if (asymmetrySource?.trades?.length) {
+    const artifact = buildRegimeAnalysisArtifact({
+      matrixId: trackedConfig.matrixId,
+      runId,
+      trades: asymmetrySource.trades,
+      featureRows: asymmetrySource.rows || [],
+      trackHint: manifest.activeTrackId,
+    });
+    const asymmetryDir = path.join(trackedConfig.digestRoot, 'analysis');
+    const asymmetryPath = path.join(asymmetryDir, `${runId}-asymmetry.md`);
+    await writeText(asymmetryPath, artifact.markdown);
+  }
+
   const updatedHistoryEvents = await rebuildHistoryArtifacts(trackedConfig, championState);
   const previousManifest = await readPreviousManifest(trackedConfig, manifestName);
   const liveDigestPath = await writeCurrentDigest(trackedConfig, { ...manifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);

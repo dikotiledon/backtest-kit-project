@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { analyzeJsonlFile } from './lib/pine-optimizer.mjs';
 import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
 import { buildIncumbentSearchBatch } from './lib/pine-search-policy.mjs';
+import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
 import {
   appendJsonl,
   buildParetoShortlist,
@@ -699,20 +700,37 @@ async function runScout(config) {
   const labSetId = [config.primaryLab?.labId, ...(config.shadowLabs || []).map((lab) => lab.labId)].filter(Boolean).join(',');
   const trackedConfig = { ...config, grid: gridName };
 
-  const searchBatch = buildIncumbentSearchBatch({
-    incumbent: championState.config,
-    maxConfigs: trackedConfig.maxConfigs,
-    historyEvents: historyEventsBefore,
-    policy: trackedConfig.searchPolicy,
-  });
-  const totalCombos = searchBatch.length;
+  const searchBatch = activeTrack
+    ? buildTrackCandidateBatch({
+        track: activeTrack,
+        incumbent: championState.config,
+        maxConfigs: trackedConfig.maxConfigs,
+        historyEvents: historyEventsBefore,
+        budgetPolicy: trackedConfig.searchPolicy,
+      })
+    : buildIncumbentSearchBatch({
+        incumbent: championState.config,
+        maxConfigs: trackedConfig.maxConfigs,
+        historyEvents: historyEventsBefore,
+        policy: trackedConfig.searchPolicy,
+      });
+
+  const searchVariants = searchBatch.length > 0
+    ? searchBatch
+    : buildIncumbentSearchBatch({
+        incumbent: championState.config,
+        maxConfigs: trackedConfig.maxConfigs,
+        historyEvents: historyEventsBefore,
+        policy: trackedConfig.searchPolicy,
+      });
+  const totalCombos = searchVariants.length;
   const sweepOffset = computeSweepOffset({
     historyEvents: historyEventsBefore,
     maxConfigs: trackedConfig.maxConfigs,
     totalCombos,
   });
   const variantFilePath = path.join(trackedConfig.researchRoot, `${runId}-variants.json`);
-  await writeJson(variantFilePath, searchBatch);
+  await writeJson(variantFilePath, searchVariants);
   const primarySweep = await runPrimarySweep(trackedConfig, runId, { sweepOffset, totalCombos, variantFilePath });
   const paretoShortlist = buildParetoShortlist({
     champion: summarizeResult(championState),
@@ -753,7 +771,7 @@ async function runScout(config) {
     runId,
     championState,
     historyEventsBefore,
-    searchBatch,
+    searchBatch: searchVariants,
     primarySweep,
     matrixCandidates,
     trackState: {

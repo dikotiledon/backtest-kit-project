@@ -18,6 +18,64 @@ export function normalizeVariantRecords(rawVariants = []) {
   });
 }
 
+const SHARED_TRACK_KNOB_KEYS = [
+  'useTrendXConf',
+  'useAdxFilter',
+  'minPredSum',
+  'minBarsBetween',
+  'slAtrMult',
+  'tpAtrMult',
+  'trailAtrMult',
+  'trailActivateR',
+];
+
+const TRACK_OWN_KNOB_KEYS = {
+  squeeze: [
+    'useSqueezeContext',
+    'squeezeLength',
+    'squeezeBbMult',
+    'squeezeKcMult',
+    'squeezeReleaseFreshBars',
+    'squeezeBoostValue',
+  ],
+  divergence: [
+    'useDivergenceContext',
+    'divRsiLen',
+    'divPivotLeft',
+    'divPivotRight',
+    'divFreshBars',
+    'divLongBoostValue',
+    'divShortBoostValue',
+    'divCautionPenaltyValue',
+  ],
+  'exit-state': [
+    'useTimeStop',
+    'timeStopBars',
+  ],
+  asymmetry: [
+    'useRegimeFilter',
+    'regimeThreshold',
+    'adxThreshold',
+  ],
+};
+
+function trackFamilyAliases(name = '') {
+  const normalized = String(name || '').toLowerCase();
+  if (normalized.includes('squeeze')) return 'squeeze';
+  if (normalized.includes('divergence')) return 'divergence';
+  if (normalized.includes('exit')) return 'exit-state';
+  if (normalized.includes('asym')) return 'asymmetry';
+  return normalized;
+}
+
+export function sharedKnobKeys() {
+  return [...SHARED_TRACK_KNOB_KEYS];
+}
+
+export function trackOwnKnobKeys(trackId = '') {
+  return [...(TRACK_OWN_KNOB_KEYS[trackFamilyAliases(trackId)] || [])];
+}
+
 export function cartesianProduct(grid) {
   const entries = Object.entries(grid);
   if (!entries.length) return [{}];
@@ -581,6 +639,24 @@ export function exitTuningCandidateGrid() {
   };
 }
 
+export function exitStateCandidateGrid() {
+  return {
+    useContextExitShaping: [true],
+    contextTightenTrailOnCaution: [false, true],
+    contextTrailTightenFactor: [0.5, 0.75],
+    contextAllowEarlySignalExit: [false, true],
+  };
+}
+
+export function asymmetryCandidateGrid() {
+  return {
+    useRegimeFilter: [false, true],
+    regimeThreshold: [-0.5, 0.5],
+    useAdxFilter: [false, true],
+    adxThreshold: [15, 25],
+  };
+}
+
 export function fusionSafeCandidateGrid() {
   return {
     useRegimeFilter: [false],
@@ -955,6 +1031,8 @@ export function getCandidateGrid(name = 'default') {
   if (name === 'root-cause') return rootCauseCandidateGrid();
   if (name === 'profit-candidate') return profitCandidateGrid();
   if (name === 'exit-tuning' || name === 'exit-side') return exitTuningCandidateGrid();
+  if (name === 'exit-state' || name === 'exit-state-context') return exitStateCandidateGrid();
+  if (name === 'asymmetry' || name === 'asymmetry-context') return asymmetryCandidateGrid();
   if (name === 'fusion-safe') return fusionSafeCandidateGrid();
   if (name === 'fusion-v2') return fusionV2CandidateGrid();
   if (name === 'fusion-v3') return fusionV3CandidateGrid();

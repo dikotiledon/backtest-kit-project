@@ -7,6 +7,11 @@ import {
   trackOwnKnobKeys,
   validateTrackPatch,
 } from '../scripts/lib/pine-track-generators.mjs';
+import {
+  defaultSchedulerState,
+  normalizeResearchTracks,
+  selectActiveTrack,
+} from '../scripts/lib/pine-autoresearch-tracks.mjs';
 
 const incumbent = {
   useTrendXConf: true,
@@ -123,5 +128,18 @@ test('invalid cross-family mutation is rejected before sweep', () => {
       patch: { divRsiLen: 21, squeezeLength: 34 },
     }),
     /divRsiLen|cross-family/i,
+  );
+});
+
+test('selectActiveTrack advances when the active track has been cleared for rotation', () => {
+  const tracks = normalizeResearchTracks([
+    { trackId: 'track-a', name: 'Track A', gridName: 'grid-a', enabled: true },
+    { trackId: 'track-b', name: 'Track B', gridName: 'grid-b', enabled: true },
+    { trackId: 'track-c', name: 'Track C', gridName: 'grid-c', enabled: true },
+  ]);
+
+  assert.equal(
+    selectActiveTrack({ tracks, state: { ...defaultSchedulerState(), activeTrackId: null, cycleIndex: 3 } }).trackId,
+    'track-c',
   );
 });

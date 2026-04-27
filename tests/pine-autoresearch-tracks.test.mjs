@@ -187,6 +187,54 @@ test('summarizeTopCandidateSimilarity reports the closest candidate to the champ
   assert.equal(summary.topCandidateSimilarity, 0.75);
 });
 
+test('nextTrackState rotates on current novelty similarity and max-cycle evidence', () => {
+  const noveltyRotated = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      activeTrackId: 'track-a',
+      cycleIndex: 8,
+      noChangeStreak: 1,
+      sameTrackCycleStreak: 2,
+      lastRotationTrigger: 'candidate-changed',
+    },
+    policy: { noChangeStreakRotateAfter: 3, maxCyclesPerTrack: 8, similarityRotateAbove: 0.85 },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'cand-2',
+      championFingerprint: 'champ-1',
+      topCandidateSimilarity: 0.91,
+      promotionEligible: false,
+      noveltySignature: 'track-a|grid-a|cand-2|window-1|lab-1',
+    },
+  });
+
+  assert.equal(noveltyRotated.activeTrackId, null);
+  assert.equal(noveltyRotated.lastRotationTrigger, 'noveltySimilarity');
+
+  const maxCycleRotated = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      activeTrackId: 'track-a',
+      cycleIndex: 9,
+      noChangeStreak: 0,
+      sameTrackCycleStreak: 9,
+      lastRotationTrigger: 'steady-state',
+    },
+    policy: { noChangeStreakRotateAfter: 3, maxCyclesPerTrack: 8, similarityRotateAbove: 0.85 },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'cand-3',
+      championFingerprint: 'champ-1',
+      topCandidateSimilarity: 0.2,
+      promotionEligible: false,
+      noveltySignature: 'track-a|grid-a|cand-3|window-1|lab-1',
+    },
+  });
+
+  assert.equal(maxCycleRotated.activeTrackId, null);
+  assert.equal(maxCycleRotated.lastRotationTrigger, 'maxCyclesPerTrack');
+});
+
 test('nextTrackState clears sticky activeTrackId when rotation trigger fires', () => {
   const next = nextTrackState({
     state: { activeTrackId: 'squeeze-context', cycleIndex: 8, noChangeStreak: 3, sameTrackCycleStreak: 9 },

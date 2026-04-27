@@ -579,6 +579,47 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
   assert.equal(result.manifest.topCandidateSimilarity, 0.75);
 });
 
+test('buildScoutOrchestrationState does not inherit a stale lastRotationTrigger', () => {
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [{ labId: 'shadow-1' }],
+      pinnedData: { enabled: true, datasetsRoot: '/data', cacheRoot: '/cache', exchangeName: 'binance' },
+      researchTracks: [
+        { trackId: 'squeeze-context', gridName: 'phase3-core', windowSet: 'primary', enabled: true },
+      ],
+    },
+    runId: 'pine-autoresearch-124',
+    championState: { configId: 'champion', score: 70, config: { a: 1 } },
+    historyEventsBefore: [],
+    searchBatch: [{ variantId: 'v1', lane: 'exploit', family: 'signal', config: { a: 1 } }],
+    primarySweep: { topConfigs: [{ configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230, config: { a: 1 } }] },
+    matrixCandidates: [{ challenger: { configId: 'c1', config: { a: 1 } }, matrixDecision: { recommendation: 'promote', summary: 'Promote c1' }, robustness: {} }],
+    trackState: {
+      activeTrackId: 'squeeze-context',
+      windowSetId: 'primary',
+      noveltySignature: 'squeeze-context|phase3-core|cand-1|primary|primary-shadow',
+      lastRotationTrigger: 'noChangeStreak',
+      candidateFingerprint: 'cand-1',
+      championFingerprint: 'champion',
+      labSetId: 'primary,shadow-1',
+      gridName: 'phase3-core',
+      sameTrackCycleStreak: 4,
+      promotionEligible: true,
+      promotionEligibleReason: 'Promote c1',
+      topCandidateSimilarity: 0.75,
+    },
+  });
+
+  assert.equal(result.manifest.rotationTrigger, null);
+  assert.equal(result.manifest.rotationReason, null);
+});
+
 
 test('renderDigestMarkdown includes search-plan, shortlist summary, and rotation diagnostics', () => {
   const markdown = renderDigestMarkdown({

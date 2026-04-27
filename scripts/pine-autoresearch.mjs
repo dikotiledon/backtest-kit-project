@@ -106,7 +106,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       ? selectedCandidate?.matrixDecision?.summary || 'Promotion eligible'
       : selectedCandidate?.matrixDecision?.summary || 'No promotion-eligible challenger'
   );
-  const rotationTrigger = trackState.rotationTrigger ?? trackState.lastRotationTrigger ?? null;
+  const rotationTrigger = trackState.rotationTrigger ?? null;
   const rotationReason = trackState.rotationReason ?? rotationTrigger ?? null;
   const sameTrackCycleStreak = Number.isFinite(trackState.sameTrackCycleStreak) ? trackState.sameTrackCycleStreak : 0;
 
@@ -712,10 +712,9 @@ async function runScout(config) {
         }],
   );
   const rotationPolicy = config.rotationPolicy || {};
-  const hardRotationTrigger = schedulerState.lastRotationTrigger
-    ?? (schedulerState.noChangeStreak >= (rotationPolicy.noChangeStreakRotateAfter ?? 3) ? 'noChangeStreak' : null)
+  const hardRotationTrigger = (schedulerState.noChangeStreak >= (rotationPolicy.noChangeStreakRotateAfter ?? 3) ? 'noChangeStreak' : null)
     ?? (schedulerState.sameTrackCycleStreak > (rotationPolicy.maxCyclesPerTrack ?? 8) ? 'maxCyclesPerTrack' : null);
-  const activeTrackSelectionState = ['noChangeStreak', 'noveltySimilarity', 'maxCyclesPerTrack'].includes(hardRotationTrigger)
+  const activeTrackSelectionState = ['noChangeStreak', 'maxCyclesPerTrack'].includes(hardRotationTrigger)
     ? { ...schedulerState, activeTrackId: null }
     : schedulerState;
   const activeTrack = selectActiveTrack({
@@ -859,6 +858,7 @@ async function runScout(config) {
       candidateFingerprint: manifest.candidateFingerprint,
       championFingerprint: manifest.championFingerprint,
       noveltySignature: manifest.noveltySignature,
+      topCandidateSimilarity: manifest.topCandidateSimilarity,
       rotationTrigger: manifest.rotationTrigger,
       rotationReason: manifest.rotationReason,
       sameTrackCycleStreak: manifest.sameTrackCycleStreak,

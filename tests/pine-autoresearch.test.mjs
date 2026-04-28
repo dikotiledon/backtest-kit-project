@@ -159,6 +159,74 @@ test('decideAutoresearchOutcome marks unchanged challenger as steady-state hold'
   assert.match(result.summary, /steady-state validation only/);
 });
 
+test('decideAutoresearchOutcome accepts return-basis optimizer metrics with raw diagnostic totals', () => {
+  const incumbent = {
+    configId: 'incumbent',
+    score: 147.89,
+    config: { minPredSum: 2 },
+    metrics: {
+      tradeCount: 245,
+      winCount: 105,
+      lossCount: 139,
+      flatCount: 1,
+      roiPct: 86.54,
+      avgWin: 1.14,
+      avgLoss: 0.24,
+      profitFactor: 3.58,
+      maxDrawdownPct: 2.64,
+      totalProfit: 1.78,
+      totalLossAbs: 0.29,
+      totalProfitPct: 120.03,
+      totalLossAbsPct: 33.49,
+      metricBasis: {
+        classification: 'returnPctExact',
+        profitFactor: 'returnPctExact',
+      },
+    },
+  };
+
+  const challenger = {
+    configId: 'challenger',
+    score: 150.56,
+    config: { minPredSum: 2, useSqueezeContext: true },
+    metrics: {
+      tradeCount: 249,
+      winCount: 88,
+      lossCount: 160,
+      flatCount: 1,
+      roiPct: 82.91,
+      avgWin: 1.18,
+      avgLoss: 0.13,
+      profitFactor: 5.03,
+      maxDrawdownPct: 1.43,
+      totalProfit: 1.49,
+      totalLossAbs: 0.04,
+      totalProfitPct: 103.5,
+      totalLossAbsPct: 20.59,
+      metricBasis: {
+        classification: 'returnPctExact',
+        profitFactor: 'returnPctExact',
+      },
+    },
+  };
+
+  const result = decideAutoresearchOutcome({
+    incumbent,
+    challenger,
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.match(result.failedGates.join(','), /roi/);
+});
+
 test('decideAutoresearchOutcome holds when expectancy regresses despite a higher win rate', () => {
   const incumbent = makeResult({
     configId: 'champion',

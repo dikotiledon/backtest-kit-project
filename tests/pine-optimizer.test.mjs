@@ -1,11 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import * as pineOptimizer from '../scripts/lib/pine-optimizer.mjs';
+const loadPineOptimizer = () => import('../scripts/lib/pine-optimizer.mjs');
 
-const { calculateMetrics } = pineOptimizer;
-
-test('calculateMetrics counts tiny exact losses that round to zero raw pnl', () => {
+test('calculateMetrics counts low-price rounded losses from exact return values', async () => {
+  const { calculateMetrics } = await loadPineOptimizer();
   const trades = [
     { pnl: 0, returnPct: -0.2, rawPnlExact: -0.004, returnPctExact: -0.2 },
     { pnl: 0, returnPct: -0.15, rawPnlExact: -0.003, returnPctExact: -0.15 },
@@ -30,7 +29,8 @@ test('calculateMetrics counts tiny exact losses that round to zero raw pnl', () 
   assert.equal(metrics.metricBasis.profitFactor, 'returnPctExact');
 });
 
-test('calculateMetrics is invariant to asset price scale when the return stream matches', () => {
+test('calculateMetrics is invariant to asset price scale when return stream matches', async () => {
+  const { calculateMetrics } = await loadPineOptimizer();
   const xrpTrades = [
     { pnl: 0, returnPct: 1.2, rawPnlExact: 0.0048, returnPctExact: 1.2 },
     { pnl: 0, returnPct: -0.3, rawPnlExact: -0.0012, returnPctExact: -0.3 },
@@ -71,19 +71,18 @@ test('calculateMetrics is invariant to asset price scale when the return stream 
   );
 });
 
-test('scoreMetricsBreakdown exposes the corrected PF contribution for the XRP regression case', () => {
-  assert.equal(typeof pineOptimizer.scoreMetricsBreakdown, 'function');
+test('scoreMetricsBreakdown exposes corrected PF contribution for the XRP regression case', async () => {
+  const pineOptimizer = await loadPineOptimizer();
 
-  const breakdown = pineOptimizer.scoreMetricsBreakdown(
-    {
-      tradeCount: 249,
-      roiPct: 82.91,
-      winRatePct: 35.34,
-      profitFactor: 5.03,
-      maxDrawdownPct: 1.43,
-    },
-    { minTrades: 150 },
-  );
+  assert.equal(typeof pineOptimizer.scoreMetricsBreakdown, 'function', 'scoreMetricsBreakdown export missing');
+
+  const breakdown = pineOptimizer.scoreMetricsBreakdown({
+    tradeCount: 249,
+    roiPct: 82.91,
+    winRatePct: 35.34,
+    profitFactor: 5.03,
+    maxDrawdownPct: 1.43,
+  }, { minTrades: 150 });
 
   assert.deepEqual(breakdown, {
     roi: 82.91,

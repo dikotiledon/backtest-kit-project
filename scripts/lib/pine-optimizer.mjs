@@ -38,11 +38,23 @@ function barsToHold(row, timeframeMinutes) {
   return Math.max(1, Math.ceil(estimatedMinutes / timeframeMinutes));
 }
 
+function exactRawPnl(trade) {
+  if (Number.isFinite(trade?.rawPnlExact)) return trade.rawPnlExact;
+  if (Number.isFinite(trade?.pnl)) return trade.pnl;
+  return 0;
+}
+
+function exactReturnPct(trade) {
+  if (Number.isFinite(trade?.returnPctExact)) return trade.returnPctExact;
+  if (Number.isFinite(trade?.returnPct)) return trade.returnPct;
+  return 0;
+}
+
 function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
-  const rawPnl = position.side === 'long'
+  const rawPnlExact = position.side === 'long'
     ? exitPrice - position.entryPrice
     : position.entryPrice - exitPrice;
-  const returnPct = position.entryPrice === 0 ? 0 : (rawPnl / position.entryPrice) * 100;
+  const returnPctExact = position.entryPrice === 0 ? 0 : (rawPnlExact / position.entryPrice) * 100;
 
   return {
     side: position.side,
@@ -57,8 +69,10 @@ function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
     holdBars: exitIndex - position.entryIndex,
     maxBars: position.maxBars,
     exitReason,
-    pnl: round(rawPnl),
-    returnPct: round(returnPct),
+    rawPnlExact,
+    returnPctExact,
+    pnl: round(rawPnlExact),
+    returnPct: round(returnPctExact),
   };
 }
 
@@ -148,51 +162,65 @@ export function simulateTrades(rows, options = {}) {
 
 export function calculateMetrics(trades) {
   const tradeCount = trades.length;
-  const winTrades = trades.filter((trade) => trade.pnl > 0);
-  const lossTrades = trades.filter((trade) => trade.pnl < 0);
-  const winReturnTrades = trades.filter((trade) => trade.returnPct > 0);
-  const lossReturnTrades = trades.filter((trade) => trade.returnPct < 0);
-  const totalProfit = winTrades.reduce((sum, trade) => sum + trade.pnl, 0);
-  const totalLossAbs = Math.abs(lossTrades.reduce((sum, trade) => sum + trade.pnl, 0));
-  const roiPctRaw = trades.reduce((sum, trade) => sum + trade.returnPct, 0);
+  const winTrades = trades.filter((trade) => exactReturnPct(trade) > 0);
+  const lossTrades = trades.filter((trade) => exactReturnPct(trade) < 0);
+  const flatTrades = trades.filter((trade) => exactReturnPct(trade) === 0);
 
-  let cumulative = 0;
-  let peak = 0;
-  let maxDrawdown = 0;
+  const totalProfitPct = winTrades.reduce((sum, trade) => sum + exactReturnPct(trade), 0);
+  const totalLossPctAbs = Math.abs(lossTrades.reduce((sum, trade) => sum + exactReturnPct(trade), 0));
+  const roiPctRaw = trades.reduce((sum, trade) => sum + exactReturnPct(trade), 0);
+
+  const totalProfitRaw = winTrades.reduce((sum, trade) => sum + Math.max(exactRawPnl(trade), 0), 0);
+  const totalLossRawAbs = Math.abs(lossTrades.reduce((sum, trade) => sum + Math.min(exactRawPnl(trade), 0), 0));
+
+  let cumulativePct = 0;
+  let peakPct = 0;
+  let maxDrawdownPct = 0;
   for (const trade of trades) {
-    cumulative += trade.returnPct;
-    if (cumulative > peak) peak = cumulative;
-    const drawdown = peak - cumulative;
-    if (drawdown > maxDrawdown) maxDrawdown = drawdown;
+    cumulativePct += exactReturnPct(trade);
+    if (cumulativePct > peakPct) peakPct = cumulativePct;
+    const drawdownPct = peakPct - cumulativePct;
+    if (drawdownPct > maxDrawdownPct) maxDrawdownPct = drawdownPct;
   }
 
   const avgReturnPct = tradeCount ? roiPctRaw / tradeCount : 0;
-  const avgPnl = tradeCount ? (totalProfit - totalLossAbs) / tradeCount : 0;
-  const avgWin = winReturnTrades.length ? winReturnTrades.reduce((sum, trade) => sum + trade.returnPct, 0) / winReturnTrades.length : 0;
-  const avgLoss = lossReturnTrades.length ? Math.abs(lossReturnTrades.reduce((sum, trade) => sum + trade.returnPct, 0) / lossReturnTrades.length) : 0;
-  const profitFactor = totalLossAbs === 0
-    ? (totalProfit > 0 ? Number.POSITIVE_INFINITY : 0)
-    : totalProfit / totalLossAbs;
+  const avgPnl = tradeCount ? (totalProfitRaw - totalLossRawAbs) / tradeCount : 0;
+  const avgWin = winTrades.length ? totalProfitPct / winTrades.length : 0;
+  const avgLoss = lossTrades.length ? totalLossPctAbs / lossTrades.length : 0;
+  const profitFactor = totalLossPctAbs === 0
+    ? (totalProfitPct > 0 ? Number.POSITIVE_INFINITY : 0)
+    : totalProfitPct / totalLossPctAbs;
 
   return {
     tradeCount,
     winCount: winTrades.length,
     lossCount: lossTrades.length,
+    flatCount: flatTrades.length,
     winRatePct: round(tradeCount ? (winTrades.length / tradeCount) * 100 : 0),
     roiPct: round(roiPctRaw),
     avgReturnPct: round(avgReturnPct),
     avgPnl: round(avgPnl),
     avgWin: round(avgWin),
     avgLoss: round(avgLoss),
-    totalPnl: round(totalProfit - totalLossAbs),
-    totalProfit: round(totalProfit),
-    totalLossAbs: round(totalLossAbs),
+    totalPnl: round(totalProfitRaw - totalLossRawAbs),
+    totalProfit: round(totalProfitRaw),
+    totalLossAbs: round(totalLossRawAbs),
+    totalProfitPct: round(totalProfitPct),
+    totalLossAbsPct: round(totalLossPctAbs),
     profitFactor: Number.isFinite(profitFactor) ? round(profitFactor) : profitFactor,
-    maxDrawdownPct: round(maxDrawdown),
+    maxDrawdownPct: round(maxDrawdownPct),
+    metricBasis: {
+      classification: 'returnPctExact',
+      roi: 'returnPctExact',
+      avgWinLoss: 'returnPctExact',
+      profitFactor: 'returnPctExact',
+      drawdown: 'returnPctExact',
+      rawTotals: 'rawPnlExact',
+    },
   };
 }
 
-export function scoreMetrics(metrics, options = {}) {
+export function scoreMetricsBreakdown(metrics, options = {}) {
   const minTrades = options.minTrades ?? 10;
   const weights = {
     roi: options.roiWeight ?? 1.0,
@@ -202,17 +230,24 @@ export function scoreMetrics(metrics, options = {}) {
   };
 
   const profitFactor = Number.isFinite(metrics.profitFactor) ? metrics.profitFactor : 10;
-  let score = 0;
-  score += metrics.roiPct * weights.roi;
-  score += metrics.winRatePct * weights.winRate;
-  score += profitFactor * weights.profitFactor;
-  score -= metrics.maxDrawdownPct * weights.drawdown;
+  const roi = round(metrics.roiPct * weights.roi);
+  const winRate = round(metrics.winRatePct * weights.winRate);
+  const profitFactorContribution = round(profitFactor * weights.profitFactor);
+  const drawdown = round(-metrics.maxDrawdownPct * weights.drawdown);
+  const tradePenalty = metrics.tradeCount < minTrades ? round((metrics.tradeCount - minTrades) * 5) : 0;
 
-  if (metrics.tradeCount < minTrades) {
-    score -= (minTrades - metrics.tradeCount) * 5;
-  }
+  return {
+    roi,
+    winRate,
+    profitFactor: profitFactorContribution,
+    drawdown,
+    tradePenalty,
+    total: round(roi + winRate + profitFactorContribution + drawdown + tradePenalty),
+  };
+}
 
-  return round(score);
+export function scoreMetrics(metrics, options = {}) {
+  return scoreMetricsBreakdown(metrics, options).total;
 }
 
 function countHits(rows, key) {

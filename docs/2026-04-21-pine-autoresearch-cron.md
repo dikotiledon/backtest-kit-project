@@ -314,3 +314,16 @@ Auto-promotion stays guarded, not impulsive.
 - When full cross-symbol cache coverage is unavailable, an emergency fallback mode can temporarily trim the matrix to XRPUSDT only and anchor `when` to the latest proven local cache tail until one-time network backfill restores the full matrix.
 - The config is backward-compatible in spirit with phase 1 and 2, but now also supports `pinnedData`, `defaultProfile`, and `scoutProfiles`.
 - Runtime output dirs are ignored in `.gitignore`; only config, scripts, docs, and tests are meant to be committed.
+
+## Metric basis
+
+Autoresearch ranking metrics now use exact per-trade percentage returns as the canonical basis for:
+- `winCount` / `lossCount` / `flatCount`
+- `winRatePct`
+- `roiPct`
+- `avgWin` / `avgLoss`
+- `profitFactor`
+- `maxDrawdownPct`
+- `score`
+
+Raw price-unit totals (`avgPnl`, `totalPnl`, `totalProfit`, `totalLossAbs`) remain in the metric payload as diagnostics only and are not used for candidate ranking.

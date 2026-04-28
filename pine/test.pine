@@ -868,7 +868,6 @@ featureSqueezeShortCaution = squeezeShortCaution ? 1 : 0
 featureCompressionState = (featureSqueezeState > 0 or featureChannelCompressionScore >= 0.6) ? 1 : 0
 featureExpansionState = (featureSqueezeReleaseBull > 0 or featureSqueezeReleaseBear > 0 or featureSqueezeLongBoost > 0 or featureSqueezeShortBoost > 0) ? 1 : 0
 featureTrendStrengthState = ((trendx != 0 ? 1 : 0) + (featureTrendXLongPass ? 1 : 0) + (featureTrendXShortPass ? 1 : 0) + (featureSupertrendBull ? 1 : 0) + (featureSupertrendBear ? 1 : 0)) > 0 ? 1 : 0
-featureCautionDensity = (featureLongContextCaution + featureShortContextCaution + featureSqueezeLongCaution + featureSqueezeShortCaution + featureDivLongCaution + featureDivShortCaution) / 6.0
 featureDivBullConfirmed = divBullConfirmed ? 1 : 0
 featureDivBearConfirmed = divBearConfirmed ? 1 : 0
 featureDivBullFresh = divBullFresh ? 1 : 0
@@ -879,6 +878,7 @@ featureDivLongPenalty = divLongPenalty
 featureDivShortPenalty = divShortPenalty
 featureDivLongCaution = divLongCaution ? 1 : 0
 featureDivShortCaution = divShortCaution ? 1 : 0
+featureCautionDensity = (featureLongContextCaution + featureShortContextCaution + featureSqueezeLongCaution + featureSqueezeShortCaution + featureDivLongCaution + featureDivShortCaution) / 6.0
 featureLongEarlyExitAllowed = contextAllowLongEarlyExit ? 1 : 0
 featureShortEarlyExitAllowed = contextAllowShortEarlyExit ? 1 : 0
 featureFailedFollowThroughTighten = (longFailedFollowThroughTighten or shortFailedFollowThroughTighten) ? 1 : 0

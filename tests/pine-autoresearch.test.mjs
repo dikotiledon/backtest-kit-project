@@ -159,6 +159,74 @@ test('decideAutoresearchOutcome marks unchanged challenger as steady-state hold'
   assert.match(result.summary, /steady-state validation only/);
 });
 
+test('decideAutoresearchOutcome accepts return-basis optimizer metrics with raw diagnostic totals', () => {
+  const incumbent = {
+    configId: 'incumbent',
+    score: 147.89,
+    config: { minPredSum: 2 },
+    metrics: {
+      tradeCount: 245,
+      winCount: 105,
+      lossCount: 139,
+      flatCount: 1,
+      roiPct: 86.54,
+      avgWin: 1.14,
+      avgLoss: 0.24,
+      profitFactor: 3.58,
+      maxDrawdownPct: 2.64,
+      totalProfit: 1.78,
+      totalLossAbs: 0.29,
+      totalProfitPct: 120.03,
+      totalLossAbsPct: 33.49,
+      metricBasis: {
+        classification: 'returnPctExact',
+        profitFactor: 'returnPctExact',
+      },
+    },
+  };
+
+  const challenger = {
+    configId: 'challenger',
+    score: 150.56,
+    config: { minPredSum: 2, useSqueezeContext: true },
+    metrics: {
+      tradeCount: 249,
+      winCount: 88,
+      lossCount: 160,
+      flatCount: 1,
+      roiPct: 82.91,
+      avgWin: 1.18,
+      avgLoss: 0.13,
+      profitFactor: 5.03,
+      maxDrawdownPct: 1.43,
+      totalProfit: 1.49,
+      totalLossAbs: 0.04,
+      totalProfitPct: 103.5,
+      totalLossAbsPct: 20.59,
+      metricBasis: {
+        classification: 'returnPctExact',
+        profitFactor: 'returnPctExact',
+      },
+    },
+  };
+
+  const result = decideAutoresearchOutcome({
+    incumbent,
+    challenger,
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.match(result.failedGates.join(','), /roi/);
+});
+
 test('decideAutoresearchOutcome holds when expectancy regresses despite a higher win rate', () => {
   const incumbent = makeResult({
     configId: 'champion',
@@ -651,6 +719,45 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
   assert.ok(result.manifest.expectancy.delta.expectancy > 0);
 });
 
+
+test('buildScoutOrchestrationState keeps heavy lab analysis out of the persisted manifest', () => {
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [{ labId: 'shadow-1' }],
+      pinnedData: { enabled: true, datasetsRoot: '/data', cacheRoot: '/cache', exchangeName: 'binance' },
+    },
+    runId: 'pine-autoresearch-heavy-manifest',
+    championState: { configId: 'champion', score: 70, config: { a: 1 } },
+    historyEventsBefore: [],
+    searchBatch: [{ variantId: 'v1', lane: 'exploit', family: 'signal', config: { a: 1 } }],
+    primarySweep: { topConfigs: [{ configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230, config: { a: 2 } }] },
+    matrixCandidates: [{
+      challenger: { configId: 'c1', config: { a: 2 } },
+      labResults: [{
+        lab: { labId: 'primary' },
+        incumbent: { configId: 'champion' },
+        challenger: { configId: 'c1' },
+        decision: { recommendation: 'promote' },
+        analysis: {
+          incumbent: { trades: [{ pnl: 1 }], rows: [{ timestamp: '2026-01-01T00:00:00.000Z', Close: 1 }] },
+          challenger: { trades: [{ pnl: 2 }], rows: [{ timestamp: '2026-01-01T00:15:00.000Z', Close: 2 }] },
+        },
+      }],
+      matrixDecision: { recommendation: 'promote', gates: { candidateChanged: true } },
+      robustness: {},
+    }],
+  });
+
+  assert.ok(result.labResults[0].analysis);
+  assert.equal(result.manifest.labResults[0].analysis, undefined);
+  assert.doesNotThrow(() => JSON.stringify(result.manifest));
+});
 
 
 test('buildScoutOrchestrationState evaluates top-candidate similarity across the full candidate set', () => {

@@ -121,7 +121,7 @@
     "timeframe": "15m",
     "limit": 10000,
     "when": "2026-04-21T10:30:00.000Z",
-    "exchange": "ccxt-exchange",
+    "exchange": "default_exchange",
     "thresholds": {
       "minScoreDelta": 0.25,
       "minRoiDeltaPct": 0,
@@ -138,7 +138,7 @@
       "timeframe": "15m",
       "limit": 10000,
       "when": "2026-04-21T10:30:00.000Z",
-      "exchange": "ccxt-exchange",
+      "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
         "minRoiDeltaPct": -0.5,
@@ -154,7 +154,7 @@
       "timeframe": "15m",
       "limit": 10000,
       "when": "2026-04-21T10:30:00.000Z",
-      "exchange": "ccxt-exchange",
+      "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
         "minRoiDeltaPct": -0.5,
@@ -170,7 +170,7 @@
       "timeframe": "15m",
       "limit": 5000,
       "when": "2026-03-17T10:30:00.000Z",
-      "exchange": "ccxt-exchange",
+      "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
         "minRoiDeltaPct": -0.75,
@@ -186,7 +186,7 @@
       "timeframe": "15m",
       "limit": 5000,
       "when": "2026-03-17T10:30:00.000Z",
-      "exchange": "ccxt-exchange",
+      "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
         "minRoiDeltaPct": -0.75,
@@ -202,7 +202,7 @@
       "timeframe": "15m",
       "limit": 2500,
       "when": "2026-02-14T10:30:00.000Z",
-      "exchange": "ccxt-exchange",
+      "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
         "minRoiDeltaPct": -1,

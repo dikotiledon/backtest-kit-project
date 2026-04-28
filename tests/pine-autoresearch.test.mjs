@@ -720,6 +720,45 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
 });
 
 
+test('buildScoutOrchestrationState keeps heavy lab analysis out of the persisted manifest', () => {
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [{ labId: 'shadow-1' }],
+      pinnedData: { enabled: true, datasetsRoot: '/data', cacheRoot: '/cache', exchangeName: 'binance' },
+    },
+    runId: 'pine-autoresearch-heavy-manifest',
+    championState: { configId: 'champion', score: 70, config: { a: 1 } },
+    historyEventsBefore: [],
+    searchBatch: [{ variantId: 'v1', lane: 'exploit', family: 'signal', config: { a: 1 } }],
+    primarySweep: { topConfigs: [{ configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230, config: { a: 2 } }] },
+    matrixCandidates: [{
+      challenger: { configId: 'c1', config: { a: 2 } },
+      labResults: [{
+        lab: { labId: 'primary' },
+        incumbent: { configId: 'champion' },
+        challenger: { configId: 'c1' },
+        decision: { recommendation: 'promote' },
+        analysis: {
+          incumbent: { trades: [{ pnl: 1 }], rows: [{ timestamp: '2026-01-01T00:00:00.000Z', Close: 1 }] },
+          challenger: { trades: [{ pnl: 2 }], rows: [{ timestamp: '2026-01-01T00:15:00.000Z', Close: 2 }] },
+        },
+      }],
+      matrixDecision: { recommendation: 'promote', gates: { candidateChanged: true } },
+      robustness: {},
+    }],
+  });
+
+  assert.ok(result.labResults[0].analysis);
+  assert.equal(result.manifest.labResults[0].analysis, undefined);
+  assert.doesNotThrow(() => JSON.stringify(result.manifest));
+});
+
 
 test('buildScoutOrchestrationState evaluates top-candidate similarity across the full candidate set', () => {
   const result = buildScoutOrchestrationState({

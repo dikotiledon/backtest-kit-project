@@ -185,6 +185,12 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
     wrDecompositionRequired: Boolean(expectancyGate?.diagnostics?.wrDecompositionRequired),
     policy: expectancyPolicy,
   };
+  const manifestLabResults = labResults.map((item) => ({
+    lab: item.lab,
+    incumbent: item.incumbent,
+    challenger: item.challenger,
+    decision: item.decision,
+  }));
 
   return {
     variantFilePath: path.join(config.researchRoot, `${runId}-variants.json`),
@@ -225,7 +231,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
         robustness: item.robustness,
         expectancy: item.expectancy ?? null,
       })),
-      labResults,
+      labResults: manifestLabResults,
       matrixDecision,
       expectancyPolicy,
       expectancy,

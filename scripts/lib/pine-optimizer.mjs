@@ -38,11 +38,19 @@ function barsToHold(row, timeframeMinutes) {
   return Math.max(1, Math.ceil(estimatedMinutes / timeframeMinutes));
 }
 
-function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
-  const rawPnl = position.side === 'long'
+function exactRawPnl(position, exitPrice) {
+  return position.side === 'long'
     ? exitPrice - position.entryPrice
     : position.entryPrice - exitPrice;
-  const returnPct = position.entryPrice === 0 ? 0 : (rawPnl / position.entryPrice) * 100;
+}
+
+function exactReturnPct(position, rawPnlExact) {
+  return position.entryPrice === 0 ? 0 : (rawPnlExact / position.entryPrice) * 100;
+}
+
+function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
+  const rawPnlExact = exactRawPnl(position, exitPrice);
+  const returnPctExact = exactReturnPct(position, rawPnlExact);
 
   return {
     side: position.side,
@@ -57,8 +65,10 @@ function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
     holdBars: exitIndex - position.entryIndex,
     maxBars: position.maxBars,
     exitReason,
-    pnl: round(rawPnl),
-    returnPct: round(returnPct),
+    rawPnlExact,
+    returnPctExact,
+    pnl: round(rawPnlExact),
+    returnPct: round(returnPctExact),
   };
 }
 
@@ -189,6 +199,32 @@ export function calculateMetrics(trades) {
     totalLossAbs: round(totalLossAbs),
     profitFactor: Number.isFinite(profitFactor) ? round(profitFactor) : profitFactor,
     maxDrawdownPct: round(maxDrawdown),
+  };
+}
+
+export function scoreMetricsBreakdown(metrics, options = {}) {
+  const minTrades = options.minTrades ?? 10;
+  const weights = {
+    roi: options.roiWeight ?? 1.0,
+    winRate: options.winRateWeight ?? 0.8,
+    profitFactor: options.profitFactorWeight ?? 8,
+    drawdown: options.drawdownWeight ?? 0.6,
+  };
+
+  const profitFactor = Number.isFinite(metrics.profitFactor) ? metrics.profitFactor : 10;
+  const roi = round(metrics.roiPct * weights.roi);
+  const winRate = round(metrics.winRatePct * weights.winRate);
+  const profitFactorContribution = round(profitFactor * weights.profitFactor);
+  const drawdown = round(-metrics.maxDrawdownPct * weights.drawdown);
+  const tradePenalty = metrics.tradeCount < minTrades ? round((metrics.tradeCount - minTrades) * 5) : 0;
+
+  return {
+    roi,
+    winRate,
+    profitFactor: profitFactorContribution,
+    drawdown,
+    tradePenalty,
+    total: round(roi + winRate + profitFactorContribution + drawdown + tradePenalty),
   };
 }
 

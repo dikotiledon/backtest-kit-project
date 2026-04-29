@@ -15,6 +15,7 @@ import {
   decideAutoresearchOutcome,
   decideMatrixPromotion,
   isoNow,
+  partitionLabs,
   planArtifactPrune,
   readJson,
   readJsonl,
@@ -208,6 +209,12 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       profile: config.selectedProfile,
       primaryLab: config.primaryLab,
       shadowLabs: config.shadowLabs,
+      labTiers: {
+        training: partitionLabs(config).trainingLabs.map((lab) => lab.labId),
+        selection: partitionLabs(config).selectionLabs.map((lab) => lab.labId),
+        blindHoldout: partitionLabs(config).blindHoldoutLabs.map((lab) => lab.labId),
+      },
+      blindHoldoutLabs: config.blindHoldoutLabs,
       pinnedData: config.pinnedData?.enabled ? {
         enabled: true,
         datasetsRoot: config.pinnedData.datasetsRoot,
@@ -778,7 +785,7 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
 }
 
 async function evaluateMatrix(config, runId, championState, challengerSummary) {
-  const labs = [config.primaryLab, ...config.shadowLabs];
+  const labs = partitionLabs(config).selectionLabs;
   const sameCandidate = sameConfig(championState.config, challengerSummary?.config);
   const labResults = [];
 
@@ -811,6 +818,7 @@ async function evaluateMatrix(config, runId, championState, challengerSummary) {
       challenger: challengerResult,
       thresholds: lab.thresholds,
       expectancyPolicy: config.expectancyPolicy,
+      complexityPolicy: config.complexityPolicy,
     });
 
     labResults.push({
@@ -886,12 +894,14 @@ async function runScout(config) {
         maxConfigs: trackedConfig.maxConfigs,
         historyEvents: historyEventsBefore,
         budgetPolicy: trackedConfig.searchPolicy,
+        schedulerState,
       })
     : buildIncumbentSearchBatch({
         incumbent: championState.config,
         maxConfigs: trackedConfig.maxConfigs,
         historyEvents: historyEventsBefore,
         policy: trackedConfig.searchPolicy,
+        schedulerState,
       });
 
   const searchVariants = searchBatch.length > 0
@@ -901,6 +911,7 @@ async function runScout(config) {
         maxConfigs: trackedConfig.maxConfigs,
         historyEvents: historyEventsBefore,
         policy: trackedConfig.searchPolicy,
+        schedulerState,
       });
   const totalCombos = searchVariants.length;
   const sweepOffset = computeSweepOffset({
@@ -1091,6 +1102,96 @@ async function writePromotionNote(config, latest, mode) {
   return notePath;
 }
 
+
+async function runBlindHoldout(config) {
+  await ensureDirs(config);
+  const championState = await ensureChampionState(config);
+  const latest = await readLatestManifest(config);
+  if (!latest?.challenger?.config) {
+    throw new Error('No latest challenger available for blind holdout');
+  }
+  const labs = partitionLabs(config).blindHoldoutLabs;
+  if (!labs.length) {
+    throw new Error('No blindHoldoutLabs configured');
+  }
+
+  const runId = `${buildRunId(config)}-blind-holdout`;
+  const labResults = [];
+  for (const lab of labs) {
+    const incumbentResult = await evaluateConfigOnLab({
+      config,
+      lab,
+      runId,
+      variantKey: 'champion',
+      candidate: championState,
+    });
+    const challengerResult = sameConfig(championState.config, latest.challenger.config)
+      ? {
+          ...clone(incumbentResult),
+          label: latest.challenger.label || latest.challenger.configId || incumbentResult.label,
+          configId: latest.challenger.configId || incumbentResult.configId,
+          config: latest.challenger.config || incumbentResult.config,
+        }
+      : await evaluateConfigOnLab({
+          config,
+          lab,
+          runId,
+          variantKey: 'challenger',
+          candidate: latest.challenger,
+        });
+    const decision = decideAutoresearchOutcome({
+      incumbent: incumbentResult,
+      challenger: challengerResult,
+      thresholds: lab.thresholds,
+      expectancyPolicy: config.expectancyPolicy,
+      complexityPolicy: config.complexityPolicy,
+    });
+    labResults.push({
+      lab,
+      incumbent: summarizeResult(incumbentResult),
+      challenger: summarizeResult(challengerResult),
+      decision,
+    });
+  }
+
+  const matrixDecision = decideMatrixPromotion({
+    labResults,
+    policy: {
+      requirePrimaryPromote: false,
+      minShadowPassCount: labs.length,
+      minShadowPassRatio: 1,
+      requireCandidateChange: true,
+      ...(config.blindHoldoutPolicy || {}),
+    },
+    champion: championState,
+    challenger: latest.challenger,
+  });
+  const payload = {
+    generatedAt: isoNow(),
+    matrixId: config.matrixId,
+    runId,
+    sourceManifestPath: latest.manifestPath || latestManifestPath(config),
+    status: matrixDecision.recommendation === 'promote' ? 'holdout_pass' : 'premise_burn',
+    blindHoldoutOnly: true,
+    labResults,
+    matrixDecision,
+  };
+  const holdoutRoot = path.join(config.researchRoot, 'blind-holdouts');
+  const holdoutPath = path.join(holdoutRoot, `${runId}.json`);
+  await writeJson(holdoutPath, payload);
+  await appendJsonl(historyPath(config), {
+    timestamp: payload.generatedAt,
+    type: 'blindHoldout',
+    runId,
+    championConfigId: championState.configId,
+    challengerConfigId: latest.challenger.configId,
+    recommendation: matrixDecision.recommendation,
+    summary: matrixDecision.summary,
+    status: payload.status,
+  });
+  return { holdoutPath, payload };
+}
+
 async function runPromote(config, args, mode = 'manual') {
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
@@ -1211,6 +1312,13 @@ async function main() {
     console.log(result.summary);
     console.log(`[autoresearch] digest=${result.digestPath}`);
     console.log(`[autoresearch] live-digest=${result.liveDigestPath}`);
+    return;
+  }
+
+  if (command === 'holdout' || command === 'blind-holdout') {
+    const result = await runBlindHoldout(config);
+    console.log(`[autoresearch] blind-holdout=${result.payload.status}`);
+    console.log(`[autoresearch] holdout=${result.holdoutPath}`);
     return;
   }
 

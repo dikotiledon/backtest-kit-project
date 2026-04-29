@@ -6,10 +6,21 @@
     "mode": "incumbent-local",
     "exploitRatio": 0.8,
     "freezeArchitecture": true,
-    "exploitFamilies": ["signal", "risk"],
-    "exploreFamilies": ["signal"],
+    "exploitFamilies": [
+      "signal",
+      "risk"
+    ],
+    "exploreFamilies": [
+      "signal"
+    ],
     "paretoShortlistSize": 4,
-    "matrixCandidateLimit": 3
+    "matrixCandidateLimit": 3,
+    "annealing": {
+      "enabled": true,
+      "baseTemperature": 0.4,
+      "growthFactor": 1.8,
+      "maxTemperature": 4
+    }
   },
   "defaultProfile": "full",
   "researchBudget": {
@@ -88,7 +99,11 @@
   "windowPolicy": {
     "primary": "primary",
     "shadow": "shadow",
-    "rotating": ["primary", "shadow", "rotating"],
+    "rotating": [
+      "primary",
+      "shadow",
+      "rotating"
+    ],
     "minCoverage": 2,
     "maxAge": 12
   },
@@ -120,7 +135,7 @@
     "symbol": "XRPUSDT",
     "timeframe": "15m",
     "limit": 10000,
-    "when": "2026-04-21T10:30:00.000Z",
+    "when": "2026-04-21T10:30:00Z",
     "exchange": "default_exchange",
     "thresholds": {
       "minScoreDelta": 0.25,
@@ -137,7 +152,7 @@
       "symbol": "BTCUSDT",
       "timeframe": "15m",
       "limit": 10000,
-      "when": "2026-04-21T10:30:00.000Z",
+      "when": "2026-04-21T10:30:00Z",
       "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
@@ -153,7 +168,7 @@
       "symbol": "ETHUSDT",
       "timeframe": "15m",
       "limit": 10000,
-      "when": "2026-04-21T10:30:00.000Z",
+      "when": "2026-04-21T10:30:00Z",
       "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
@@ -169,7 +184,7 @@
       "symbol": "XRPUSDT",
       "timeframe": "15m",
       "limit": 5000,
-      "when": "2026-03-17T10:30:00.000Z",
+      "when": "2026-03-17T10:30:00Z",
       "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
@@ -185,7 +200,7 @@
       "symbol": "BTCUSDT",
       "timeframe": "15m",
       "limit": 5000,
-      "when": "2026-03-17T10:30:00.000Z",
+      "when": "2026-03-17T10:30:00Z",
       "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
@@ -201,7 +216,7 @@
       "symbol": "ETHUSDT",
       "timeframe": "15m",
       "limit": 2500,
-      "when": "2026-02-14T10:30:00.000Z",
+      "when": "2026-02-14T10:30:00Z",
       "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
@@ -234,5 +249,56 @@
   "outputs": {
     "researchRoot": "../pine/autoresearch/pine-fusion-v4-core-15m-locked-window",
     "digestRoot": "../report/pine-autoresearch/pine-fusion-v4-core-15m-locked-window"
-  }
+  },
+  "complexityPolicy": {
+    "enabled": true,
+    "scorePenaltyPerActivatedParam": 0.75,
+    "roiPenaltyPctPerActivatedParam": 0.5,
+    "profitFactorPenaltyPerActivatedParam": 0,
+    "scorePenaltyPerChangedParam": 0,
+    "roiPenaltyPctPerChangedParam": 0,
+    "profitFactorPenaltyPerChangedParam": 0,
+    "ignoreKeys": [
+      "configId",
+      "label",
+      "sourcePath",
+      "sourceRunId",
+      "promotedAt",
+      "configFingerprint"
+    ]
+  },
+  "blindHoldoutLabs": [
+    {
+      "labId": "xrpusdt-15m-nov2025-blind-holdout",
+      "symbol": "XRPUSDT",
+      "timeframe": "15m",
+      "limit": 3000,
+      "when": "2025-11-30T23:45:00.000Z",
+      "exchange": "default_exchange",
+      "thresholds": {
+        "minScoreDelta": 0,
+        "minRoiDeltaPct": 0,
+        "minProfitFactorDelta": 0,
+        "maxDrawdownDeltaPct": 0.75,
+        "minTradeCount": 60,
+        "minTradeRatioVsIncumbent": 0.75
+      }
+    },
+    {
+      "labId": "btcusdt-15m-nov2025-blind-holdout",
+      "symbol": "BTCUSDT",
+      "timeframe": "15m",
+      "limit": 3000,
+      "when": "2025-11-30T23:45:00.000Z",
+      "exchange": "default_exchange",
+      "thresholds": {
+        "minScoreDelta": 0,
+        "minRoiDeltaPct": 0,
+        "minProfitFactorDelta": 0,
+        "maxDrawdownDeltaPct": 0.75,
+        "minTradeCount": 60,
+        "minTradeRatioVsIncumbent": 0.75
+      }
+    }
+  ]
 }

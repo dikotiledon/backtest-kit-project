@@ -3,11 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildParetoShortlist,
+  computeParameterComplexityPenalty,
   computeSweepOffset,
   decideAutoPromotionAction,
   decideAutoresearchOutcome,
   decideMatrixPromotion,
   extractChampionBootstrapCandidate,
+  partitionLabs,
   planArtifactPrune,
   renderDigestMarkdown,
   sameConfig,
@@ -1078,7 +1080,16 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     exploreFamilies: ['signal'],
     paretoShortlistSize: 4,
     matrixCandidateLimit: 3,
+    annealing: {
+      enabled: true,
+      baseTemperature: 0.4,
+      growthFactor: 1.8,
+      maxTemperature: 4,
+    },
   });
+  assert.deepEqual(config.complexityPolicy.enabled, true);
+  assert.equal(config.blindHoldoutLabs.length, 2);
+  assert.match(config.blindHoldoutLabs[0].labId, /blind-holdout/);
   assert.deepEqual(config.expectancyPolicy, {
     enabled: true,
     wrJumpDiagnosticThreshold: 8,
@@ -1094,4 +1105,65 @@ test('default autoresearch config rotates across multiple pinned windows', async
 
   assert.ok(whens.size >= 3);
   assert.ok(config.shadowLabs.length >= 5);
+});
+
+
+test('complexity penalty makes newly activated parameters pay for degrees of freedom', () => {
+  const incumbent = makeResult({
+    configId: 'incumbent',
+    score: 70,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.6,
+    maxDrawdownPct: 4,
+    config: { useRegimeFilter: false, useSqueezeContext: false, minPredSum: 2 },
+  });
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 70.5,
+    tradeCount: 210,
+    roiPct: 40.2,
+    profitFactor: 1.7,
+    maxDrawdownPct: 4,
+    config: { useRegimeFilter: true, useSqueezeContext: false, minPredSum: 2 },
+  });
+
+  const complexity = computeParameterComplexityPenalty({
+    incumbentConfig: incumbent.config,
+    challengerConfig: challenger.config,
+    policy: { enabled: true, scorePenaltyPerActivatedParam: 0.75, roiPenaltyPctPerActivatedParam: 0.5 },
+  });
+  assert.deepEqual(complexity.activatedKeys, ['useRegimeFilter']);
+  assert.equal(complexity.scorePenalty, 0.75);
+
+  const result = decideAutoresearchOutcome({
+    incumbent,
+    challenger,
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+    complexityPolicy: { enabled: true, scorePenaltyPerActivatedParam: 0.75, roiPenaltyPctPerActivatedParam: 0.5 },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.match(result.failedGates.join(','), /score/);
+  assert.equal(result.thresholds.adjusted.minScoreDelta, 1);
+  assert.equal(result.complexity.activatedCount, 1);
+});
+
+test('partitionLabs keeps blind holdout out of selection labs', () => {
+  const tiers = partitionLabs({
+    primaryLab: { labId: 'train-primary' },
+    shadowLabs: [{ labId: 'selection-shadow' }],
+    blindHoldoutLabs: [{ labId: 'november-blind' }],
+  });
+
+  assert.deepEqual(tiers.trainingLabs.map((lab) => lab.labId), ['train-primary']);
+  assert.deepEqual(tiers.selectionLabs.map((lab) => lab.labId), ['train-primary', 'selection-shadow']);
+  assert.deepEqual(tiers.blindHoldoutLabs.map((lab) => lab.labId), ['november-blind']);
 });

@@ -231,6 +231,13 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     : candidateChanged
       ? 0
       : previous.noChangeStreak + 1;
+  const tabuLimit = Number.isFinite(policy.tabuLimit) ? policy.tabuLimit : 128;
+  const priorTabu = Array.isArray(previous.tabuRejectedFingerprints) ? previous.tabuRejectedFingerprints : [];
+  const nextRejected = manifest.rejectedCandidateFingerprint && manifest.rejectedCandidateFingerprint !== championFingerprint
+    ? [...priorTabu, manifest.rejectedCandidateFingerprint]
+    : priorTabu;
+  const tabuRejectedFingerprints = [...new Set(nextRejected)].slice(-tabuLimit);
+
   const sameTrackCycleStreak = rotationHappened
     ? (resolvedRotationTrigger && ['noChangeStreak', 'noveltySimilarity', 'maxCyclesPerTrack'].includes(resolvedRotationTrigger)
       ? 0

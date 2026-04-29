@@ -17,7 +17,7 @@ import {
   selectSweepCombos,
   normalizeVariantRecords,
 } from '../scripts/lib/pine-tuner.mjs';
-import { allocateLaneBudget, buildIncumbentSearchBatch } from '../scripts/lib/pine-search-policy.mjs';
+import { allocateLaneBudget, buildIncumbentSearchBatch, computeAnnealingState } from '../scripts/lib/pine-search-policy.mjs';
 
 test('allocateLaneBudget keeps an 80/20 split while guaranteeing at least one explore slot', () => {
   assert.deepEqual(allocateLaneBudget(8, 0.8), { exploit: 6, explore: 2 });
@@ -1112,4 +1112,45 @@ test('pine-sweep rejects non-array variant files with a useful error', async () 
 
   assert.notEqual(result.code, 0);
   assert.match(result.stderr, /variant-file must contain a JSON array of variant records/);
+});
+
+
+test('computeAnnealingState raises temperature from no-change streak', () => {
+  assert.equal(computeAnnealingState({ schedulerState: { noChangeStreak: 0 }, policy: { annealing: { enabled: true, baseTemperature: 0.4, growthFactor: 2, maxTemperature: 4 } } }).temperature, 0.4);
+  assert.equal(computeAnnealingState({ schedulerState: { noChangeStreak: 3 }, policy: { annealing: { enabled: true, baseTemperature: 0.4, growthFactor: 2, maxTemperature: 4 } } }).temperature, 3.2);
+  assert.equal(computeAnnealingState({ schedulerState: { noChangeStreak: 5 }, policy: { annealing: { enabled: true, baseTemperature: 0.4, growthFactor: 2, maxTemperature: 4 } } }).temperature, 4);
+});
+
+test('buildIncumbentSearchBatch skips tabu fingerprints when possible', () => {
+  const incumbent = {
+    useSignalFusion: true,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    useSupertrendFilter: true,
+    useTrailingStop: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    slAtrMult: 1,
+    tpAtrMult: 2.5,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+    riskAtrLen: 14,
+  };
+  const first = buildIncumbentSearchBatch({ incumbent, maxConfigs: 1, policy: { annealing: { enabled: false } } })[0];
+  const tabu = JSON.stringify(Object.keys(first.config).sort().reduce((acc, key) => { acc[key] = first.config[key]; return acc; }, {}));
+  const next = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    policy: { annealing: { enabled: false } },
+    schedulerState: { tabuRejectedFingerprints: [tabu] },
+  })[0];
+
+  assert.notDeepEqual(next.config, first.config);
+  assert.equal(next.tabuSkipped, 1);
 });

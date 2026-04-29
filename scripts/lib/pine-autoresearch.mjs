@@ -41,6 +41,72 @@ export function sameConfig(left, right) {
   return configFingerprint(left) === configFingerprint(right);
 }
 
+
+function isActivatedValue(previous, next) {
+  return (previous === false || previous == null) && next === true;
+}
+
+export function computeParameterComplexityPenalty({ incumbentConfig = {}, challengerConfig = {}, policy = {} } = {}) {
+  const enabled = policy.enabled ?? false;
+  if (!enabled) {
+    return {
+      enabled: false,
+      activatedKeys: [],
+      changedKeys: [],
+      activatedCount: 0,
+      changedCount: 0,
+      scorePenalty: 0,
+      roiPenaltyPct: 0,
+      profitFactorPenalty: 0,
+    };
+  }
+
+  const ignoredKeys = new Set(policy.ignoreKeys || ['configId', 'label', 'sourcePath', 'sourceRunId', 'promotedAt', 'configFingerprint']);
+  const keys = [...new Set([...Object.keys(incumbentConfig || {}), ...Object.keys(challengerConfig || {})])]
+    .filter((key) => !ignoredKeys.has(key))
+    .sort();
+  const activatedKeys = [];
+  const changedKeys = [];
+
+  for (const key of keys) {
+    const previous = incumbentConfig?.[key];
+    const next = challengerConfig?.[key];
+    if (JSON.stringify(stableValue(previous)) !== JSON.stringify(stableValue(next))) {
+      changedKeys.push(key);
+    }
+    if (isActivatedValue(previous, next)) {
+      activatedKeys.push(key);
+    }
+  }
+
+  const activatedCount = activatedKeys.length;
+  const changedCount = changedKeys.length;
+  const changedOnlyCount = Math.max(0, changedCount - activatedCount);
+
+  return {
+    enabled: true,
+    activatedKeys,
+    changedKeys,
+    activatedCount,
+    changedCount,
+    scorePenalty: round(
+      activatedCount * (policy.scorePenaltyPerActivatedParam ?? 0.75)
+      + changedOnlyCount * (policy.scorePenaltyPerChangedParam ?? 0),
+      4,
+    ),
+    roiPenaltyPct: round(
+      activatedCount * (policy.roiPenaltyPctPerActivatedParam ?? 0.5)
+      + changedOnlyCount * (policy.roiPenaltyPctPerChangedParam ?? 0),
+      4,
+    ),
+    profitFactorPenalty: round(
+      activatedCount * (policy.profitFactorPenaltyPerActivatedParam ?? 0)
+      + changedOnlyCount * (policy.profitFactorPenaltyPerChangedParam ?? 0),
+      4,
+    ),
+  };
+}
+
 export function computeSweepOffset({ historyEvents = [], maxConfigs, totalCombos }) {
   if (!(Number.isFinite(maxConfigs) && maxConfigs > 0 && Number.isFinite(totalCombos) && totalCombos > 0)) {
     return 0;
@@ -231,7 +297,7 @@ export function selectChampionBootstrapSource({ latestManifest, seedPayload } = 
   return candidates[0] || null;
 }
 
-export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = {}, expectancyPolicy = {} }) {
+export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = {}, expectancyPolicy = {}, complexityPolicy = {} }) {
   if (!incumbent) {
     throw new Error('Incumbent result is required');
   }
@@ -259,6 +325,17 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
   const expectancyEnabled = expectancyPolicy.enabled ?? false;
   const wrJumpDiagnosticThreshold = expectancyPolicy.wrJumpDiagnosticThreshold ?? 8;
 
+  const complexity = computeParameterComplexityPenalty({
+    incumbentConfig: incumbent.config || {},
+    challengerConfig: challenger.config || {},
+    policy: complexityPolicy,
+  });
+  const adjustedThresholds = {
+    minScoreDelta: round(minScoreDelta + complexity.scorePenalty, 4),
+    minRoiDeltaPct: round(minRoiDeltaPct + complexity.roiPenaltyPct, 4),
+    minProfitFactorDelta: round(minProfitFactorDelta + complexity.profitFactorPenalty, 4),
+  };
+
   const comparisons = {
     scoreDelta: round((challenger.score ?? 0) - (incumbent.score ?? 0), 2),
     roiDeltaPct: round((challenger.metrics?.roiPct ?? 0) - (incumbent.metrics?.roiPct ?? 0), 2),
@@ -268,6 +345,9 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
     tradeRatioVsIncumbent: round((challenger.metrics?.tradeCount ?? 0) / Math.max(1, incumbent.metrics?.tradeCount ?? 0), 3),
     avgWinDelta: round((challenger.metrics?.avgWin ?? 0) - (incumbent.metrics?.avgWin ?? 0), 2),
     avgLossDelta: round((challenger.metrics?.avgLoss ?? 0) - (incumbent.metrics?.avgLoss ?? 0), 2),
+    penalizedScoreDelta: round(((challenger.score ?? 0) - (incumbent.score ?? 0)) - complexity.scorePenalty, 4),
+    penalizedRoiDeltaPct: round(((challenger.metrics?.roiPct ?? 0) - (incumbent.metrics?.roiPct ?? 0)) - complexity.roiPenaltyPct, 4),
+    penalizedProfitFactorDelta: round(((challenger.metrics?.profitFactor ?? 0) - (incumbent.metrics?.profitFactor ?? 0)) - complexity.profitFactorPenalty, 4),
   };
 
   if (isSteadyStateCandidate(incumbent, challenger)) {
@@ -293,9 +373,9 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
   }
 
   const gates = {
-    score: comparisons.scoreDelta >= minScoreDelta,
-    roi: comparisons.roiDeltaPct >= minRoiDeltaPct,
-    profitFactor: comparisons.profitFactorDelta >= minProfitFactorDelta,
+    score: comparisons.scoreDelta >= adjustedThresholds.minScoreDelta,
+    roi: comparisons.roiDeltaPct >= adjustedThresholds.minRoiDeltaPct,
+    profitFactor: comparisons.profitFactorDelta >= adjustedThresholds.minProfitFactorDelta,
     drawdown: comparisons.drawdownDeltaPct <= maxDrawdownDeltaPct,
     tradeFloor: (challenger.metrics?.tradeCount ?? 0) >= minTradeCount,
     tradeRatio: comparisons.tradeRatioVsIncumbent >= minTradeRatioVsIncumbent,
@@ -344,7 +424,9 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
       maxDrawdownDeltaPct,
       minTradeCount,
       minTradeRatioVsIncumbent,
+      adjusted: adjustedThresholds,
     },
+    complexity,
     expectancy: expectancyGate,
     expectancyGate,
   };
@@ -401,6 +483,16 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
     },
   };
 }
+
+export function partitionLabs({ primaryLab, shadowLabs = [], blindHoldoutLabs = [] } = {}) {
+  return {
+    trainingLabs: [primaryLab].filter(Boolean),
+    selectionLabs: [primaryLab, ...shadowLabs].filter(Boolean),
+    blindHoldoutLabs: [...blindHoldoutLabs].filter(Boolean),
+  };
+}
+
+
 
 export function decideAutoPromotionAction({ latestManifest, historyEvents = [], championState, policy = {}, now = isoNow() }) {
   const enabled = policy.enabled ?? false;

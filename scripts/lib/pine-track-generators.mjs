@@ -1,4 +1,5 @@
 import { sharedKnobKeys as tunerSharedKnobKeys, trackOwnKnobKeys as tunerTrackOwnKnobKeys } from './pine-tuner.mjs';
+import { computeAnnealingState } from './pine-search-policy.mjs';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -207,7 +208,7 @@ export function validateTrackPatch({ trackId, patch }) {
   return rawPatch;
 }
 
-export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, historyEvents = [], budgetPolicy = {} }) {
+export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, historyEvents = [], budgetPolicy = {}, schedulerState = {} }) {
   const normalizedTrack = isPlainObject(track) ? track : { trackId: track };
   const trackId = String(normalizedTrack.trackId ?? normalizedTrack.id ?? normalizedTrack.name ?? 'track');
   const family = resolveTrackFamily(normalizedTrack);
@@ -238,7 +239,14 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
     const fallbackPool = incumbentLocalPatches(base);
     const fallbackLimit = Math.min(limit - batch.length, fallbackPool.length);
     for (let index = 0; index < fallbackLimit; index++) {
-      const patch = clone(fallbackPool[(offset + index) % fallbackPool.length]);
+      const { patch, tabuSkipped } = selectNonTabuPatch({
+        base,
+        pool: fallbackPool,
+        offset,
+        index,
+        tabuSet,
+        temperature: annealingState.temperature,
+      });
       validateTrackPatch({ trackId: 'incumbent-local', patch });
       batch.push(buildMetadata({
         trackId: 'incumbent-local',

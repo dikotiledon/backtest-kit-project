@@ -119,7 +119,7 @@ Reduction rules:
 
 ## Locking
 
-### Global JS lock
+### JS canonical lock
 
 `cycle`, `promote`, and `autopromote` all pass through the same JS lock layer:
 `state/autoresearch.lock.json`
@@ -154,7 +154,7 @@ Stale-dead-lock reclaim exists there too.
 - manual promote can use exact `--manifest` or safe `--run-id`
 - `force` can override autopromote gate block only, not queue integrity
 - pending promotion pauses cycles unless `--force-cycle`
-- global JS lock around cycle/promote/autopromote
+- JS canonical lock around cycle/promote/autopromote
 - scheduler wrapper lock is defense-in-depth and stale-dead-lock reclaim exists
 
 ## Operational runbook

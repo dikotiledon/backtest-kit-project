@@ -319,25 +319,25 @@ Storage.take<PhoneModel>({
 Here’s a rundown of the demo projects showcasing `agent-swarm-kit` in action:
 
 
-- 📈 [**binance-candle-chat**](./demo/binance-candle-chat/): A cryptocurrency trading swarm with a triage agent routing to specialized trader agents (BTC, ETH, BNB, XRP, SOL) that calculate buy/sell orders and predict trends using OpenAI completion. 💹
+- 📈 [**binance-candle-chat**](binance-candle-chat/): A cryptocurrency trading swarm with a triage agent routing to specialized trader agents (BTC, ETH, BNB, XRP, SOL) that calculate buy/sell orders and predict trends using OpenAI completion. 💹
 
-- 🖥️ [**it-consulting-swarm**](./demo/it-consulting-swarm/): A multi-agent system with a triage agent routing queries to specialized agents for tech trends, cybersecurity, environment, health, and finance, all powered by OpenAI completion. 🔒
+- 🖥️ [**it-consulting-swarm**](it-consulting-swarm/): A multi-agent system with a triage agent routing queries to specialized agents for tech trends, cybersecurity, environment, health, and finance, all powered by OpenAI completion. 🔒
 
-- 💊 [**langchain-stream**](./demo/langchain-stream/): A pharma sales demo with a triage agent using Cohere completion and LangChain for real-time token streaming, alongside Ollama and LMStudio, to assist with consultations and cart operations. 🛒
+- 💊 [**langchain-stream**](langchain-stream/): A pharma sales demo with a triage agent using Cohere completion and LangChain for real-time token streaming, alongside Ollama and LMStudio, to assist with consultations and cart operations. 🛒
 
-- 💾 [**redis-persist-chat**](./demo/redis-persist-chat/): A chat system with a triage agent using Saiga Yandex GPT, persisting chat history and states (like Tic-tac-toe) in Redis, with policies to restrict sensitive topics. 🎲
+- 💾 [**redis-persist-chat**](redis-persist-chat/): A chat system with a triage agent using Saiga Yandex GPT, persisting chat history and states (like Tic-tac-toe) in Redis, with policies to restrict sensitive topics. 🎲
 
-- 🌐 [**nginx-balancer-chat**](./demo/nginx-balancer-chat/): A test environment demonstrating load balancing across 5 chat instances via Nginx, with a single agent reporting the server port using OpenAI completion. ⚖️
+- 🌐 [**nginx-balancer-chat**](nginx-balancer-chat/): A test environment demonstrating load balancing across 5 chat instances via Nginx, with a single agent reporting the server port using OpenAI completion. ⚖️
 
-- 🔄 [**cohere-token-rotate**](./demo/cohere-token-rotate/): A pharma sales system with a triage agent using Cohere completion and a token rotation mechanism (10 trial tokens in parallel) for optimized API performance. 🔧
+- 🔄 [**cohere-token-rotate**](cohere-token-rotate/): A pharma sales system with a triage agent using Cohere completion and a token rotation mechanism (10 trial tokens in parallel) for optimized API performance. 🔧
 
-- 🎙️ [**whisper-voice-chat**](./demo/whisper-voice-chat/): A voice-based chat system using Whisper for real-time transcription and a single test agent powered by Nemotron Mini (via Ollama) to handle user interactions. 🗣️
+- 🎙️ [**whisper-voice-chat**](whisper-voice-chat/): A voice-based chat system using Whisper for real-time transcription and a single test agent powered by Nemotron Mini (via Ollama) to handle user interactions. 🗣️
 
-- 📱 [**telegram-ollama-chat**](./demo/telegram-ollama-chat/): A Telegram-based pharma sales chatbot with a triage agent routing requests to a sales agent, both using Ollama for natural conversations and managing product data from a shared storage. 💬
+- 📱 [**telegram-ollama-chat**](telegram-ollama-chat/): A Telegram-based pharma sales chatbot with a triage agent routing requests to a sales agent, both using Ollama for natural conversations and managing product data from a shared storage. 💬
 
-- 🛍️ [**repl-phone-seller**](./demo/repl-phone-seller/): A REPL terminal app featuring a sales agent that helps users add phones to a cart, leveraging Ollama completions and tools for searching phones by keywords or diagonal size. 📲
+- 🛍️ [**repl-phone-seller**](repl-phone-seller/): A REPL terminal app featuring a sales agent that helps users add phones to a cart, leveraging Ollama completions and tools for searching phones by keywords or diagonal size. 📲
 
-- 🌐 [**client-server-chat**](./demo/client-server-chat/): A WebSocket-based pharma sales demo with a single test agent using Saiga Yandex GPT to provide consultations and manage a cart. 🛠️
+- 🌐 [**client-server-chat**](client-server-chat/): A WebSocket-based pharma sales demo with a single test agent using Saiga Yandex GPT to provide consultations and manage a cart. 🛠️
 
 ---
 
@@ -345,7 +345,7 @@ Here’s a rundown of the demo projects showcasing `agent-swarm-kit` in action:
 
 1. 🤖 Several chatgpt sessions (agents) [execute tool calls](https://ollama.com/blog/tool-support). Each agent can use different model, for example, [mistral 7b](https://ollama.com/library/mistral) for small talk, [nemotron](https://ollama.com/library/nemotron) for business conversation. 🧠
 
-2. 🌐 The agent swarm navigate messages to the active chatgpt session (agent) for each `WebSocket` channel [by using `clientId` url parameter](demo/client-server-chat/src/server.ts#L15) 🔗
+2. 🌐 The agent swarm navigate messages to the active chatgpt session (agent) for each `WebSocket` channel [by using `clientId` url parameter](client-server-chat server example) 🔗
 
 3. 🔄 The active chatgpt session (agent) in the swarm could be changed [by executing function tool](https://platform.openai.com/docs/assistants/tools/function-calling). ⚙️
 

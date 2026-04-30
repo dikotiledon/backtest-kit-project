@@ -44,6 +44,21 @@ const incumbent = {
   adxThreshold: 20,
 };
 
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map((item) => stableValue(item));
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = stableValue(value[key]);
+      return acc;
+    }, {});
+  }
+  return value;
+}
+
+function configFingerprint(config) {
+  return JSON.stringify(stableValue(config || {}));
+}
+
 function changedKeys(candidateConfig) {
   return Object.keys(candidateConfig).filter((key) => JSON.stringify(candidateConfig[key]) !== JSON.stringify(incumbent[key]));
 }
@@ -150,6 +165,229 @@ test('invalid cross-family mutation is rejected before sweep', () => {
     }),
     /divRsiLen|cross-family/i,
   );
+});
+
+test('track batch skips tabu rejected candidate fingerprints instead of replaying ping-pong losers', () => {
+  const track = { trackId: 'squeeze-context', sourceFamily: 'squeeze' };
+  const baseline = buildTrackCandidateBatch({ track, incumbent, maxConfigs: 5, historyEvents: [], budgetPolicy: {} });
+  const rejectedFingerprint = configFingerprint(baseline[0].config);
+
+  const filtered = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs: 5,
+    historyEvents: [],
+    budgetPolicy: {},
+    schedulerState: { tabuRejectedFingerprints: [rejectedFingerprint] },
+  });
+
+  assert.equal(filtered.length, 4);
+  assert.equal(filtered.some((item) => configFingerprint(item.config) === rejectedFingerprint), false);
+  assert.equal(filtered[0].tabuSkipped, 1);
+});
+
+test('track batch returns no variants when every track candidate is tabu', () => {
+  const track = { trackId: 'divergence-context', sourceFamily: 'divergence' };
+  const baseline = buildTrackCandidateBatch({ track, incumbent, maxConfigs: 5, historyEvents: [], budgetPolicy: {} });
+  const rejectedFingerprints = baseline.map((item) => configFingerprint(item.config));
+
+  const filtered = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs: 5,
+    historyEvents: [],
+    budgetPolicy: {},
+    schedulerState: { tabuRejectedFingerprints: rejectedFingerprints },
+  });
+
+  assert.deepEqual(filtered, []);
+});
+
+test('track batch includes fallback candidates when nested config activates self-loop escape', () => {
+  const track = { trackId: 'divergence-context', sourceFamily: 'divergence' };
+  const maxConfigs = 8;
+
+  const batch = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs,
+    historyEvents: [],
+    budgetPolicy: {
+      selfLoopEscape: {
+        enabled: true,
+        includeFallback: true,
+        activateAfter: 1,
+        fallbackFamilies: ['signal', 'risk'],
+        minFallbackConfigs: 3,
+        temperatureBoost: 1.5,
+      },
+    },
+    schedulerState: { noNewCandidateStreak: 2 },
+  });
+
+  const fallback = batch.filter((item) => item.lane === 'self-loop-fallback');
+  const fingerprints = batch.map((item) => configFingerprint(item.config));
+
+  assert.ok(batch.length <= maxConfigs);
+  assert.ok(fallback.length > 0);
+  assert.ok(fallback.length >= 3);
+  assert.ok(batch.every((item) => item.temperature >= 1));
+  assert.equal(new Set(fingerprints).size, fingerprints.length);
+});
+
+test('self-loop fallback signal pool emits valid incumbent-local patches without validation skips', () => {
+  const track = { trackId: 'divergence-context', sourceFamily: 'divergence' };
+  const maxConfigs = 16;
+
+  const batch = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs,
+    historyEvents: [],
+    budgetPolicy: {
+      selfLoopEscape: {
+        enabled: true,
+        includeFallback: true,
+        activateAfter: 1,
+        fallbackFamilies: ['signal'],
+        minFallbackConfigs: 6,
+        temperatureBoost: 1.5,
+      },
+    },
+    schedulerState: { noNewCandidateStreak: 2 },
+  });
+
+  const fallback = batch.filter((item) => item.lane === 'self-loop-fallback');
+
+  assert.ok(fallback.length > 0);
+  assert.equal(fallback.length, 6);
+  assert.ok(fallback.every((item) => item.tabuSkipped === 0));
+  assert.ok(fallback.every((item) => !Object.hasOwn(item.patch, 'adxThreshold')));
+});
+
+test('self-loop fallback excludes tabu fingerprints and does not duplicate track candidates', () => {
+  const track = { trackId: 'squeeze-context', sourceFamily: 'squeeze' };
+  const maxConfigs = 8;
+  const budgetPolicy = {
+    selfLoopEscape: {
+      enabled: true,
+      includeFallback: true,
+      activateAfter: 1,
+      fallbackFamilies: ['signal', 'risk'],
+      minFallbackConfigs: 3,
+      temperatureBoost: 1.5,
+    },
+  };
+  const schedulerState = { noNewCandidateStreak: 2 };
+
+  const firstBatch = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs,
+    historyEvents: [],
+    budgetPolicy,
+    schedulerState,
+  });
+  const rejectedFingerprint = configFingerprint(firstBatch[0].config);
+
+  const secondBatch = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs,
+    historyEvents: [],
+    budgetPolicy,
+    schedulerState: { ...schedulerState, tabuRejectedFingerprints: [rejectedFingerprint] },
+  });
+  const fingerprints = secondBatch.map((item) => configFingerprint(item.config));
+
+  assert.ok(secondBatch.length <= maxConfigs);
+  assert.equal(fingerprints.includes(rejectedFingerprint), false);
+  assert.equal(new Set(fingerprints).size, fingerprints.length);
+});
+
+test('self-loop fallback backfills track candidates when every fallback candidate is tabu', () => {
+  const track = { trackId: 'squeeze-context', sourceFamily: 'squeeze' };
+  const maxConfigs = 32;
+  const budgetPolicy = {
+    selfLoopEscape: {
+      enabled: true,
+      includeFallback: true,
+      activateAfter: 1,
+      fallbackFamilies: ['signal', 'risk'],
+      minFallbackConfigs: 3,
+      temperatureBoost: 1.5,
+    },
+  };
+  const schedulerState = { noNewCandidateStreak: 2 };
+
+  const baseline = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs,
+    historyEvents: [],
+    budgetPolicy,
+    schedulerState,
+  });
+  const fallbackFingerprints = baseline
+    .filter((item) => item.lane === 'self-loop-fallback')
+    .map((item) => configFingerprint(item.config));
+  const normalTrackBatch = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs,
+    historyEvents: [],
+    budgetPolicy: {},
+  });
+
+  const batch = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs,
+    historyEvents: [],
+    budgetPolicy,
+    schedulerState: { ...schedulerState, tabuRejectedFingerprints: fallbackFingerprints },
+  });
+
+  assert.ok(fallbackFingerprints.length > 0);
+  assert.ok(batch.length > 0);
+  assert.ok(batch.length <= maxConfigs);
+  assert.ok(batch.every((item) => item.lane !== 'self-loop-fallback'));
+  assert.equal(batch.length, Math.min(maxConfigs, normalTrackBatch.length));
+});
+
+test('self-loop fallback temperature never shrinks below normal mutation scale', () => {
+  const track = { trackId: 'divergence-context', sourceFamily: 'divergence' };
+  const maxConfigs = 8;
+
+  const batch = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs,
+    historyEvents: [],
+    budgetPolicy: {
+      annealing: {
+        enabled: true,
+        baseTemperature: 0.4,
+        growthFactor: 1,
+        maxTemperature: 1,
+      },
+      selfLoopEscape: {
+        enabled: true,
+        includeFallback: true,
+        activateAfter: 1,
+        fallbackFamilies: ['signal', 'risk'],
+        minFallbackConfigs: 3,
+        temperatureBoost: 1.5,
+      },
+    },
+    schedulerState: { noNewCandidateStreak: 2, noChangeStreak: 0 },
+  });
+
+  const fallback = batch.find((item) => item.lane === 'self-loop-fallback');
+
+  assert.ok(batch.length <= maxConfigs);
+  assert.ok(fallback);
+  assert.equal(fallback.temperature, 1.5);
 });
 
 test('hard rotation advances to the next enabled track instead of re-picking the same one', () => {

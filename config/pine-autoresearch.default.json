@@ -15,6 +15,17 @@
     ],
     "paretoShortlistSize": 4,
     "matrixCandidateLimit": 3,
+    "selfLoopEscape": {
+      "enabled": true,
+      "activateAfter": 1,
+      "includeFallback": true,
+      "fallbackFamilies": [
+        "signal",
+        "risk"
+      ],
+      "minFallbackConfigs": 3,
+      "temperatureBoost": 1.5
+    },
     "annealing": {
       "enabled": true,
       "baseTemperature": 0.4,

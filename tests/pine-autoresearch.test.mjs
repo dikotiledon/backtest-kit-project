@@ -1,4 +1,6 @@
 import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -17,7 +19,14 @@ import {
   selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
-import { buildScoutOrchestrationState, buildScoutRegimeAnalysisArtifact, resolveTrackSelectionState } from '../scripts/pine-autoresearch.mjs';
+import {
+  buildScoutOrchestrationState,
+  buildScoutRegimeAnalysisArtifact,
+  loadConfig,
+  mergeSchedulerTabuFingerprints,
+  resolveTrackSelectionState,
+  selectChangedMatrixCandidate,
+} from '../scripts/pine-autoresearch.mjs';
 
 function makeResult({
   configId,
@@ -622,6 +631,97 @@ test('selectRobustMatrixCandidate prefers multi-window strength over single prim
   assert.equal(selected.challenger.configId, 'robust-winner');
 });
 
+test('selectChangedMatrixCandidate ignores unchanged champion candidates', () => {
+  const championState = { config: { a: 1 } };
+  const selected = selectChangedMatrixCandidate({
+    championState,
+    candidates: [
+      { challenger: { configId: 'champion', config: { a: 1 } }, matrixDecision: { recommendation: 'hold' } },
+      { challenger: { configId: 'changed', config: { a: 2 } }, matrixDecision: { recommendation: 'hold' }, robustness: { aggregateScoreDelta: -1 } },
+    ],
+  });
+
+  assert.equal(selected.challenger.configId, 'changed');
+});
+
+test('selectChangedMatrixCandidate returns null when only champion is available', () => {
+  const selected = selectChangedMatrixCandidate({
+    championState: { config: { a: 1 } },
+    candidates: [
+      { challenger: { configId: 'champion', config: { a: 1 } }, matrixDecision: { recommendation: 'hold' } },
+    ],
+  });
+
+  assert.equal(selected, null);
+});
+
+test('selectChangedMatrixCandidate skips malformed candidates without challenger config', () => {
+  const selected = selectChangedMatrixCandidate({
+    championState: { config: { a: 1 } },
+    candidates: [
+      null,
+      {},
+      { challenger: {} },
+      {
+        challenger: { configId: 'malformed-high-robustness' },
+        matrixDecision: { recommendation: 'promote', counts: { allPassCount: 10, totalLabs: 10, shadowPassCount: 10, shadowPassRatio: 1 } },
+        robustness: { aggregateScoreDelta: 1000, aggregateRoiDeltaPct: 1000, aggregateProfitFactorDelta: 1000, aggregateDrawdownDeltaPct: -1000 },
+      },
+      { challenger: { configId: 'changed', config: { a: 2 } }, matrixDecision: { recommendation: 'hold' }, robustness: { aggregateScoreDelta: -10 } },
+    ],
+  });
+
+  assert.equal(selected.challenger.configId, 'changed');
+});
+
+test('selectChangedMatrixCandidate returns null when only malformed candidates are available', () => {
+  const selected = selectChangedMatrixCandidate({
+    candidates: [null, {}, { challenger: {} }],
+  });
+
+  assert.equal(selected, null);
+});
+
+test('buildScoutOrchestrationState marks no-new-candidate when selected candidate equals champion', () => {
+  const championConfig = { minPredSum: 2, tpAtrMult: 5.5 };
+  const championState = { configId: 'champion', score: 70, config: championConfig };
+  const challenger = { configId: 'champion', score: 70, config: { ...championConfig } };
+  const matrixDecision = decideMatrixPromotion({
+    labResults: [],
+    champion: championState,
+    challenger,
+    policy: { requireCandidateChange: true },
+  });
+
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-no-new-candidate',
+    championState,
+    historyEventsBefore: [],
+    searchBatch: [{ variantId: 'v1', lane: 'self-loop', family: 'fallback', config: { ...championConfig } }],
+    primarySweep: {
+      topConfigs: [{ configId: 'champion', score: 70, roiPct: 40, profitFactor: 1.5, maxDrawdownPct: 5, tradeCount: 200, config: { ...championConfig } }],
+    },
+    matrixCandidates: [{ challenger, matrixDecision, robustness: {} }],
+    trackState: { rejectedCandidateFingerprint: 'stale-reject' },
+  });
+
+  assert.equal(result.manifest.noNewCandidate, true);
+  assert.equal(result.manifest.rejectedCandidateFingerprint, null);
+  assert.equal(result.manifest.matrixDecision.gates.candidateChanged, false);
+  assert.match(result.manifest.matrixDecision.summary, /No new candidate/);
+});
+
+
 test('buildScoutOrchestrationState wires variant files, shortlist, matrix selection, and manifest fields', () => {
   const config = {
     matrixId: 'pine-autoresearch',
@@ -920,6 +1020,17 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
   assert.equal(result.manifest.topCandidateSimilarity, 0.5);
 });
 
+test('mergeSchedulerTabuFingerprints bootstraps recent manifest rejects without losing existing tabu state', () => {
+  const merged = mergeSchedulerTabuFingerprints({
+    schedulerState: { activeTrackId: 'track-a', tabuRejectedFingerprints: ['old-1', 'old-2'] },
+    recentRejectedFingerprints: ['old-2', 'new-1', 'new-2'],
+    tabuLimit: 3,
+  });
+
+  assert.equal(merged.activeTrackId, 'track-a');
+  assert.deepEqual(merged.tabuRejectedFingerprints, ['old-2', 'new-1', 'new-2']);
+});
+
 test('resolveTrackSelectionState advances cycle index when no-change rotation clears the active track', () => {
   const { hardRotationTrigger, activeTrackSelectionState } = resolveTrackSelectionState({
     schedulerState: {
@@ -1068,6 +1179,33 @@ test('renderDigestMarkdown includes search-plan, shortlist summary, and rotation
   assert.match(markdown, /wrDecompositionRequired: false/);
 });
 
+test('renderDigestMarkdown reports no-new-candidate self-loop state', () => {
+  const markdown = renderDigestMarkdown({
+    config: { matrixId: 'pine-fusion-v4-core-15m-locked-window', primaryLab: { labId: 'xrpusdt-15m-primary' }, shadowLabs: [{}, {}] },
+    championState: { configId: 'champion', score: 145.42, roiPct: 84.66 },
+    latestManifest: {
+      runId: 'run-self-loop',
+      champion: { configId: 'champion', score: 145.42, roiPct: 84.66, config: { minPredSum: 2 } },
+      challenger: { configId: 'champion', score: 145.42, roiPct: 84.66, config: { minPredSum: 2 } },
+      searchPlan: { variantCount: 3, exploitRatio: 0.8 },
+      paretoShortlist: [{ configId: 'champion' }],
+      matrixDecision: { recommendation: 'hold', failedGates: ['candidateChanged'], counts: { allPassCount: 0, totalLabs: 6, shadowPassRatio: 0 }, summary: 'No new candidate' },
+      noNewCandidate: true,
+      noNewCandidateStreak: 2,
+      topCandidateSimilarity: 1,
+      rotationTrigger: 'noveltySimilarity',
+      sameTrackCycleStreak: 0,
+      promotionEligible: false,
+      promotionEligibleReason: 'No changed challenger',
+    },
+    previousManifest: null,
+    historyEvents: [],
+  });
+
+  assert.match(markdown, /noNewCandidate: true/);
+  assert.match(markdown, /noNewCandidateStreak: 2/);
+});
+
 test('default autoresearch config enables incumbent-local shortlist policy', async () => {
   const raw = await fs.readFile(new URL('../config/pine-autoresearch.default.json', import.meta.url), 'utf8');
   const config = JSON.parse(raw);
@@ -1080,6 +1218,14 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     exploreFamilies: ['signal'],
     paretoShortlistSize: 4,
     matrixCandidateLimit: 3,
+    selfLoopEscape: {
+      enabled: true,
+      activateAfter: 1,
+      includeFallback: true,
+      fallbackFamilies: ['signal', 'risk'],
+      minFallbackConfigs: 3,
+      temperatureBoost: 1.5,
+    },
     annealing: {
       enabled: true,
       baseTemperature: 0.4,
@@ -1087,6 +1233,9 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
       maxTemperature: 4,
     },
   });
+  const loaded = await loadConfig(process.cwd(), './config/pine-autoresearch.default.json');
+  assert.deepEqual(loaded.searchPolicy.selfLoopEscape, config.searchPolicy.selfLoopEscape);
+  assert.deepEqual(loaded.searchPolicy.annealing, config.searchPolicy.annealing);
   assert.deepEqual(config.complexityPolicy.enabled, true);
   assert.equal(config.blindHoldoutLabs.length, 2);
   assert.match(config.blindHoldoutLabs[0].labId, /blind-holdout/);
@@ -1154,6 +1303,57 @@ test('complexity penalty makes newly activated parameters pay for degrees of fre
   assert.match(result.failedGates.join(','), /score/);
   assert.equal(result.thresholds.adjusted.minScoreDelta, 1);
   assert.equal(result.complexity.activatedCount, 1);
+});
+
+test('loadConfig normalizes blind holdout labs with slug + merged thresholds', async () => {
+  const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-test-'));
+  const configPath = path.join(tempDir, 'autoresearch.json');
+  await fs.writeFile(configPath, JSON.stringify({
+    matrixId: 'test-matrix',
+    scriptPath: '../pine/test.pine',
+    grid: 'phase3-core',
+    thresholds: {
+      minScoreDelta: 0.5,
+      minTradeCount: 111,
+    },
+    primaryLab: {
+      labId: 'Primary Lab',
+      symbol: 'XRPUSDT',
+      timeframe: '15m',
+      limit: 1000,
+      when: '2026-04-01T00:00:00Z',
+      exchange: 'default_exchange',
+    },
+    blindHoldoutLabs: [
+      {
+        labId: 'Blind Holdout November 2025',
+        symbol: 'BTCUSDT',
+        timeframe: '15m',
+        limit: 500,
+        when: '2025-11-30T23:45:00.000Z',
+        exchange: 'default_exchange',
+        thresholds: {
+          minRoiDeltaPct: 1,
+        },
+      },
+    ],
+    outputs: {
+      researchRoot: './out/research',
+      digestRoot: './out/digest',
+    },
+  }), 'utf8');
+
+  const config = await loadConfig(tempDir, configPath);
+  assert.equal(config.blindHoldoutLabs.length, 1);
+  assert.equal(config.blindHoldoutLabs[0].labId, 'blind-holdout-november-2025');
+  assert.deepEqual(config.blindHoldoutLabs[0].thresholds, {
+    minScoreDelta: 0.5,
+    minRoiDeltaPct: 1,
+    minProfitFactorDelta: 0,
+    maxDrawdownDeltaPct: 0.75,
+    minTradeCount: 111,
+    minTradeRatioVsIncumbent: 0.75,
+  });
 });
 
 test('partitionLabs keeps blind holdout out of selection labs', () => {

@@ -132,12 +132,15 @@ export function defaultSchedulerState() {
     activeTrackId: null,
     cycleIndex: 0,
     noChangeStreak: 0,
+    noNewCandidateStreak: 0,
     sameTrackCycleStreak: 0,
     lastNoveltySignature: null,
     lastChampionFingerprint: null,
     lastCandidateFingerprint: null,
+    lastNoNewCandidateAt: null,
     lastRotationTrigger: null,
     lastPromotionEligibleAt: null,
+    tabuRejectedFingerprints: [],
   };
 }
 
@@ -215,6 +218,8 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
   const rotationHappened = Boolean(resolvedRotationTrigger) || activeTrackChanged;
   const candidateFingerprint = manifest.candidateFingerprint ?? null;
   const championFingerprint = manifest.championFingerprint ?? null;
+  const noNewCandidate = manifest.noNewCandidate === true
+    || (candidateFingerprint != null && championFingerprint != null && candidateFingerprint === championFingerprint);
   const noveltySignature = manifest.noveltySignature ?? buildNoveltySignature({
     trackId: nextActiveTrackId,
     gridName: manifest.gridName ?? manifest.gridId ?? '',
@@ -231,6 +236,9 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     : candidateChanged
       ? 0
       : previous.noChangeStreak + 1;
+  const noNewCandidateStreak = noNewCandidate
+    ? previous.noNewCandidateStreak + 1
+    : 0;
   const tabuLimit = Number.isFinite(policy.tabuLimit) ? policy.tabuLimit : 128;
   const priorTabu = Array.isArray(previous.tabuRejectedFingerprints) ? previous.tabuRejectedFingerprints : [];
   const nextRejected = manifest.rejectedCandidateFingerprint && manifest.rejectedCandidateFingerprint !== championFingerprint
@@ -255,15 +263,20 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     activeTrackId: nextActiveTrackId,
     cycleIndex: Number.isFinite(manifest.cycleIndex) ? manifest.cycleIndex : previous.cycleIndex + 1,
     noChangeStreak,
+    noNewCandidateStreak,
     sameTrackCycleStreak,
     lastNoveltySignature: noveltySignature,
     lastChampionFingerprint: championFingerprint ?? previous.lastChampionFingerprint,
     lastCandidateFingerprint: candidateFingerprint ?? previous.lastCandidateFingerprint,
+    lastNoNewCandidateAt: noNewCandidate
+      ? (manifest.generatedAt ?? previous.lastNoNewCandidateAt)
+      : previous.lastNoNewCandidateAt,
     lastRotationTrigger: resolvedRotationTrigger
       ?? (activeTrackChanged ? 'rotation' : candidateChanged ? 'candidate-changed' : repeatedNovelty ? 'steady-state' : previous.lastRotationTrigger),
     lastPromotionEligibleAt: manifest.promotionEligible === true
       ? (manifest.promotionEligibleAt ?? manifest.generatedAt ?? previous.lastPromotionEligibleAt)
       : previous.lastPromotionEligibleAt,
+    tabuRejectedFingerprints,
   };
 }
 
@@ -275,11 +288,18 @@ function normalizeSchedulerState(state = {}) {
     activeTrackId: state.activeTrackId ?? base.activeTrackId,
     cycleIndex: Number.isFinite(state.cycleIndex) ? state.cycleIndex : base.cycleIndex,
     noChangeStreak: Number.isFinite(state.noChangeStreak) ? state.noChangeStreak : base.noChangeStreak,
+    noNewCandidateStreak: Number.isFinite(state.noNewCandidateStreak) ? state.noNewCandidateStreak : base.noNewCandidateStreak,
     sameTrackCycleStreak: Number.isFinite(state.sameTrackCycleStreak) ? state.sameTrackCycleStreak : base.sameTrackCycleStreak,
     lastNoveltySignature: state.lastNoveltySignature ?? base.lastNoveltySignature,
     lastChampionFingerprint: state.lastChampionFingerprint ?? base.lastChampionFingerprint,
     lastCandidateFingerprint: state.lastCandidateFingerprint ?? base.lastCandidateFingerprint,
+    lastNoNewCandidateAt: typeof state.lastNoNewCandidateAt === 'string' || state.lastNoNewCandidateAt === null
+      ? state.lastNoNewCandidateAt
+      : base.lastNoNewCandidateAt,
     lastRotationTrigger: state.lastRotationTrigger ?? base.lastRotationTrigger,
     lastPromotionEligibleAt: state.lastPromotionEligibleAt ?? base.lastPromotionEligibleAt,
+    tabuRejectedFingerprints: Array.isArray(state.tabuRejectedFingerprints)
+      ? [...state.tabuRejectedFingerprints]
+      : base.tabuRejectedFingerprints,
   };
 }

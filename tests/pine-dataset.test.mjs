@@ -47,6 +47,22 @@ test('getPinnedWindow aligns when and computes since correctly', () => {
   assert.equal(new Date(window.sinceMs).toISOString(), '2026-04-21T09:30:00.000Z');
 });
 
+test('assertDatasetMatchesLab treats equivalent ISO-8601 when formats as equal', () => {
+  const lab = makeLab({ when: '2026-04-21T10:30:00Z' });
+  const datasetLab = makeLab({ when: '2026-04-21T10:30:00.000Z' });
+  const dataset = { lab: datasetLab, candles: makeCandles(lab) };
+
+  assert.doesNotThrow(() => assertDatasetMatchesLab(dataset, lab));
+});
+
+test('assertDatasetMatchesLab rejects different when instants', () => {
+  const lab = makeLab({ when: '2026-04-21T10:30:00Z' });
+  const datasetLab = makeLab({ when: '2026-04-21T10:45:00.000Z' });
+  const dataset = { lab: datasetLab, candles: makeCandles(datasetLab) };
+
+  assert.throws(() => assertDatasetMatchesLab(dataset, lab), /field when expected/);
+});
+
 test('readPinnedCandlesFromCache reads complete locked window from existing local cache', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-dataset-test-'));
   const cacheRoot = path.join(tempRoot, 'cache');

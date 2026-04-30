@@ -723,6 +723,8 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
 
   if (latestManifest) {
     appendTrackDiagnostics(lines, latestManifest);
+    lines.push(`- noNewCandidate: ${Boolean(latestManifest.noNewCandidate)}`);
+    lines.push(`- noNewCandidateStreak: ${latestManifest.noNewCandidateStreak ?? 0}`);
     appendExpectancyDiagnostics(lines, latestManifest);
   }
 

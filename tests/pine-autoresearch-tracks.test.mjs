@@ -124,6 +124,44 @@ test('readSchedulerState and writeSchedulerState round-trip the explicit schedul
   }
 });
 
+test('nextTrackState increments no-new-candidate streak when candidate equals champion', () => {
+  const next = nextTrackState({
+    state: defaultSchedulerState(),
+    manifest: {
+      activeTrackId: 'divergence-context',
+      candidateFingerprint: 'champ-1',
+      championFingerprint: 'champ-1',
+      noNewCandidate: true,
+      generatedAt: '2026-04-29T14:30:00.000Z',
+      noveltySignature: 'divergence-context|phase3-core|champ-1|primary|labs',
+    },
+  });
+
+  assert.equal(next.noNewCandidateStreak, 1);
+  assert.equal(next.lastNoNewCandidateAt, '2026-04-29T14:30:00.000Z');
+});
+
+test('nextTrackState resets no-new-candidate streak when changed candidate appears', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noNewCandidateStreak: 3,
+      lastNoNewCandidateAt: '2026-04-29T14:30:00.000Z',
+    },
+    manifest: {
+      activeTrackId: 'squeeze-context',
+      candidateFingerprint: 'cand-2',
+      championFingerprint: 'champ-1',
+      noNewCandidate: false,
+      generatedAt: '2026-04-29T15:00:00.000Z',
+      noveltySignature: 'squeeze-context|phase3-core|cand-2|primary|labs',
+    },
+  });
+
+  assert.equal(next.noNewCandidateStreak, 0);
+  assert.equal(next.lastNoNewCandidateAt, '2026-04-29T14:30:00.000Z');
+});
+
 test('nextTrackState treats repeated novelty plus unchanged champion as steady state', () => {
   const state = {
     ...defaultSchedulerState(),
@@ -241,6 +279,54 @@ test('nextTrackState rotates on current novelty similarity and max-cycle evidenc
 
   assert.equal(maxCycleRotated.activeTrackId, null);
   assert.equal(maxCycleRotated.lastRotationTrigger, 'maxCyclesPerTrack');
+});
+
+test('nextTrackState records rejected candidate fingerprints in a bounded tabu list', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      tabuRejectedFingerprints: ['old-cand'],
+    },
+    policy: { tabuLimit: 2 },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'cand-1',
+      rejectedCandidateFingerprint: 'cand-1',
+      championFingerprint: 'champ-1',
+      noveltySignature: 'track-a|grid-a|cand-1|window-1|lab-1',
+    },
+  });
+
+  assert.deepEqual(next.tabuRejectedFingerprints, ['old-cand', 'cand-1']);
+
+  const bounded = nextTrackState({
+    state: next,
+    policy: { tabuLimit: 2 },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'cand-2',
+      rejectedCandidateFingerprint: 'cand-2',
+      championFingerprint: 'champ-1',
+      noveltySignature: 'track-a|grid-a|cand-2|window-1|lab-1',
+    },
+  });
+
+  assert.deepEqual(bounded.tabuRejectedFingerprints, ['cand-1', 'cand-2']);
+});
+
+test('nextTrackState does not tabu the champion fingerprint', () => {
+  const next = nextTrackState({
+    state: defaultSchedulerState(),
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'champ-1',
+      rejectedCandidateFingerprint: 'champ-1',
+      championFingerprint: 'champ-1',
+      noveltySignature: 'track-a|grid-a|champ-1|window-1|lab-1',
+    },
+  });
+
+  assert.deepEqual(next.tabuRejectedFingerprints, []);
 });
 
 test('nextTrackState clears sticky activeTrackId when rotation trigger fires', () => {

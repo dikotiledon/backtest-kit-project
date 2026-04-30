@@ -5,6 +5,21 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map((item) => stableValue(item));
+  if (isPlainObject(value)) {
+    return Object.keys(value).sort().reduce((acc, key) => {
+      acc[key] = stableValue(value[key]);
+      return acc;
+    }, {});
+  }
+  return value;
+}
+
+function configFingerprint(config) {
+  return JSON.stringify(stableValue(config || {}));
+}
+
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -38,19 +53,40 @@ function applyPatch(base, patch) {
   return { ...clone(base), ...clone(patch) };
 }
 
-function buildMetadata({ trackId, family, index, patch, config, lane }) {
+function normalizeTabuCache(value) {
+  if (Array.isArray(value)) return new Set(value);
+  if (value && typeof value === 'object') return new Set(Object.keys(value));
+  return new Set();
+}
+
+function scalePatch(base, patch, temperature) {
+  return Object.fromEntries(Object.entries(patch).map(([key, value]) => {
+    const baseValue = Number(base[key]);
+    if (typeof value !== 'number' || !Number.isFinite(baseValue)) return [key, value];
+    const minValue = key.toLowerCase().includes('len') || key.toLowerCase().includes('bars') || key === 'neighborsCount' ? 1 : 0;
+    const scaled = Math.max(minValue, baseValue + ((value - baseValue) * temperature));
+    const integerLike = Number.isInteger(baseValue) && Number.isInteger(value);
+    return [key, integerLike ? Math.round(scaled) : Number(scaled.toFixed(4))];
+  }));
+}
+
+function buildMetadata({ trackId, family, index, patch, config, lane, temperature = 1, tabuSkipped = 0 }) {
   const shared = sharedKnobKeys();
   const own = trackOwnKnobKeys(family);
   const patchKeys = Object.keys(patch);
-  return {
+  const metadata = {
     variantId: `${String(family || trackId)}-${String(index + 1).padStart(2, '0')}`,
     family,
     lane,
     patch: clone(patch),
     sharedKeys: patchKeys.filter((key) => shared.includes(key)),
     ownKeys: patchKeys.filter((key) => own.includes(key)),
+    temperature,
+    tabuSkipped,
     config,
   };
+  if (lane === 'self-loop-fallback') metadata.trackId = trackId;
+  return metadata;
 }
 
 function squeezePatches(base) {
@@ -181,6 +217,38 @@ function getPatchPool(family, base) {
   return incumbentLocalPatches(base);
 }
 
+function getFallbackPatchPool(families = [], base = {}) {
+  const normalizedFamilies = Array.isArray(families) && families.length > 0
+    ? families.map((item) => String(item).toLowerCase())
+    : ['signal', 'risk'];
+  const pools = {
+    signal: [
+      { minPredSum: lowerBound((base.minPredSum ?? 2) - 0.5, 0.5) },
+      { minPredSum: numeric(base.minPredSum ?? 2) + 0.5 },
+      { minBarsBetween: lowerBound((base.minBarsBetween ?? 2) - 1, 0) },
+      { minBarsBetween: numeric(base.minBarsBetween ?? 2) + 2 },
+      {
+        minPredSum: lowerBound((base.minPredSum ?? 2) - 0.25, 0.5),
+        minBarsBetween: lowerBound((base.minBarsBetween ?? 2) - 1, 0),
+      },
+      {
+        minPredSum: numeric(base.minPredSum ?? 2) + 0.25,
+        minBarsBetween: numeric(base.minBarsBetween ?? 2) + 2,
+      },
+    ],
+    risk: [
+      { slAtrMult: lowerBound((base.slAtrMult ?? 1) - 0.25, 0.25) },
+      { slAtrMult: numeric(base.slAtrMult ?? 1) + 0.25 },
+      { tpAtrMult: lowerBound((base.tpAtrMult ?? 2.5) - 0.5, 0.5) },
+      { tpAtrMult: numeric(base.tpAtrMult ?? 2.5) + 0.5 },
+      { trailAtrMult: Math.max(0.5, numeric(base.trailAtrMult ?? 1) - 0.25) },
+      { trailActivateR: numeric(base.trailActivateR ?? 0.5) + 0.5 },
+    ],
+  };
+
+  return normalizedFamilies.flatMap((family) => (pools[family] || []).map((patch) => ({ family, patch })));
+}
+
 function extractPatchObject(patch = {}) {
   if (!isPlainObject(patch)) return {};
   if (isPlainObject(patch.values)) return patch.values;
@@ -218,44 +286,120 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
 
   const pool = getPatchPool(family, base);
   const offset = countCycles(historyEvents) % Math.max(pool.length, 1);
-  const trackLimit = Math.max(0, Math.min(limit, pool.length));
   const batch = [];
+  const annealingState = computeAnnealingState({ schedulerState, policy: budgetPolicy });
+  const temperature = annealingState.temperature;
+  const selfLoopEscape = budgetPolicy.selfLoopEscape || {};
+  const includeSelfLoopFallback = selfLoopEscape.includeFallback === true || budgetPolicy.includeFallback === true;
+  const includeFallback = budgetPolicy.includeFallback === true;
+  const escapeActive = selfLoopEscape.enabled === true
+    && (schedulerState.noNewCandidateStreak ?? 0) >= (selfLoopEscape.activateAfter ?? 1);
+  const fallbackFamilies = Array.isArray(selfLoopEscape.fallbackFamilies) && selfLoopEscape.fallbackFamilies.length > 0
+    ? selfLoopEscape.fallbackFamilies
+    : ['signal', 'risk'];
+  const minFallbackConfigs = Math.max(0, Number(selfLoopEscape.minFallbackConfigs ?? 3) || 0);
+  const selfLoopFallbackPool = escapeActive && includeSelfLoopFallback ? getFallbackPatchPool(fallbackFamilies, base) : [];
+  const trackLimit = Math.max(0, Math.min(limit, pool.length));
+  const tabuSet = normalizeTabuCache(schedulerState.tabuRejectedFingerprints);
+  let tabuSkipped = 0;
 
-  for (let index = 0; index < trackLimit; index++) {
-    const patch = clone(pool[(offset + index) % pool.length]);
+  for (let probe = 0; probe < pool.length && batch.length < trackLimit; probe++) {
+    const rawPatch = clone(pool[(offset + probe) % pool.length]);
+    const patch = scalePatch(base, rawPatch, temperature);
     validateTrackPatch({ trackId, patch });
+    const config = applyPatch(base, patch);
+    const fingerprint = configFingerprint(config);
+    if (tabuSet.has(fingerprint)) {
+      tabuSkipped += 1;
+      continue;
+    }
+    tabuSet.add(fingerprint);
     batch.push(buildMetadata({
       trackId,
       family,
-      index,
+      index: batch.length,
       patch,
       lane: 'track',
-      config: applyPatch(base, patch),
+      temperature,
+      tabuSkipped,
+      config,
     }));
+    tabuSkipped = 0;
   }
 
-  const includeFallback = budgetPolicy.includeFallback === true && batch.length < limit;
-  if (includeFallback) {
+  if (escapeActive && includeSelfLoopFallback) {
+    const fallbackCandidates = [];
+    const temperatureBoost = Number.isFinite(Number(selfLoopEscape.temperatureBoost))
+      ? Number(selfLoopEscape.temperatureBoost)
+      : 1.5;
+    const fallbackTemperature = Number((Math.max(1, temperature) * Math.max(1, temperatureBoost)).toFixed(4));
+    let fallbackSkipped = 0;
+    for (let probe = 0; probe < selfLoopFallbackPool.length && fallbackCandidates.length < limit; probe++) {
+      const { family: fallbackFamily, patch: rawPatch } = selfLoopFallbackPool[(offset + probe) % selfLoopFallbackPool.length];
+      const scaledPatch = scalePatch(base, clone(rawPatch), fallbackTemperature);
+      let patch;
+      try {
+        patch = validateTrackPatch({ trackId: 'incumbent-local', patch: scaledPatch });
+      } catch {
+        continue;
+      }
+      const config = applyPatch(base, patch);
+      const fingerprint = configFingerprint(config);
+      if (tabuSet.has(fingerprint)) {
+        fallbackSkipped += 1;
+        continue;
+      }
+      tabuSet.add(fingerprint);
+      fallbackCandidates.push(buildMetadata({
+        trackId: 'incumbent-local',
+        family: fallbackFamily,
+        index: fallbackCandidates.length,
+        patch,
+        lane: 'self-loop-fallback',
+        temperature: fallbackTemperature,
+        tabuSkipped: fallbackSkipped,
+        config,
+      }));
+      fallbackSkipped = 0;
+    }
+
+    const fallbackLimit = Math.min(limit, minFallbackConfigs, fallbackCandidates.length);
+    const trackCandidates = batch.slice(0, limit - fallbackLimit);
+    const preferredFallback = fallbackCandidates.slice(0, fallbackLimit);
+    const composed = [...trackCandidates, ...preferredFallback];
+    if (composed.length < limit) {
+      composed.push(...fallbackCandidates.slice(fallbackLimit, fallbackLimit + limit - composed.length));
+    }
+    if (composed.length < limit) {
+      composed.push(...batch.slice(trackCandidates.length, trackCandidates.length + limit - composed.length));
+    }
+    return composed.slice(0, limit).map((item, index) => ({ ...item, index }));
+  } else if (includeFallback && batch.length < limit) {
     const fallbackPool = incumbentLocalPatches(base);
     const fallbackLimit = Math.min(limit - batch.length, fallbackPool.length);
-    for (let index = 0; index < fallbackLimit; index++) {
-      const { patch, tabuSkipped } = selectNonTabuPatch({
-        base,
-        pool: fallbackPool,
-        offset,
-        index,
-        tabuSet,
-        temperature: annealingState.temperature,
-      });
+    let fallbackSkipped = 0;
+    for (let probe = 0; probe < fallbackPool.length && batch.filter((item) => item.lane === 'fallback').length < fallbackLimit; probe++) {
+      const rawPatch = clone(fallbackPool[(offset + probe) % fallbackPool.length]);
+      const patch = scalePatch(base, rawPatch, temperature);
       validateTrackPatch({ trackId: 'incumbent-local', patch });
+      const config = applyPatch(base, patch);
+      const fingerprint = configFingerprint(config);
+      if (tabuSet.has(fingerprint)) {
+        fallbackSkipped += 1;
+        continue;
+      }
+      tabuSet.add(fingerprint);
       batch.push(buildMetadata({
         trackId: 'incumbent-local',
         family: 'incumbent-local',
         index: batch.length,
         patch,
         lane: 'fallback',
-        config: applyPatch(base, patch),
+        temperature,
+        tabuSkipped: fallbackSkipped,
+        config,
       }));
+      fallbackSkipped = 0;
     }
   }
 

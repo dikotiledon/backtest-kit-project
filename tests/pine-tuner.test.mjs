@@ -1043,10 +1043,12 @@ test('pine test script defaults to the hardened fusion v4 profile', async () => 
   assert.match(source, /contextAllowEarlySignalExit\s*=\s*input\.bool\(false,\s+title="Allow Early Signal Exit"/);
   assert.match(source, /useSqueezeContext\s*=\s*input\.bool\(true,\s+title="Use Squeeze Context"/);
   assert.match(source, /useDivergenceContext\s*=\s*input\.bool\(true,\s+title="Use Divergence Context"/);
+  assert.match(source, /divPivotLeft\s*=\s*input\.int\(3,\s+title="Divergence Pivot Left"/);
+  assert.match(source, /divPivotRight\s*=\s*input\.int\(3,\s+title="Divergence Pivot Right"/);
   assert.match(source, /divLongBoostValue\s*=\s*input\.float\(0\.25,\s+title="Divergence Long Boost"/);
   assert.match(source, /divShortBoostValue\s*=\s*input\.float\(0\.25,\s+title="Divergence Short Boost"/);
   assert.match(source, /divCautionPenaltyValue\s*=\s*input\.float\(0(?:\.0)?,\s+title="Divergence Caution Penalty"/);
-  assert.match(source, /slAtrMult\s*=\s*input\.float\(0\.75,\s+title="SL ATR x"/);
+  assert.match(source, /slAtrMult\s*=\s*input\.float\(0\.5,\s+title="SL ATR x"/);
   assert.match(source, /tpAtrMult\s*=\s*input\.float\(5\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
 });
 

@@ -84,6 +84,18 @@ function round(value, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+export function mergeSchedulerTabuFingerprints({ schedulerState = {}, recentRejectedFingerprints = [], tabuLimit = 128 } = {}) {
+  const limit = Number.isFinite(tabuLimit) ? Math.max(0, tabuLimit) : 128;
+  const current = Array.isArray(schedulerState.tabuRejectedFingerprints)
+    ? schedulerState.tabuRejectedFingerprints
+    : [];
+  const merged = [...new Set([...current, ...recentRejectedFingerprints.filter(Boolean)])].slice(-limit);
+  return {
+    ...schedulerState,
+    tabuRejectedFingerprints: merged,
+  };
+}
+
 export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy = {}, researchTracks = [], previousCycle = null } = {}) {
   const enabledTracks = normalizeResearchTracks(researchTracks).filter((track) => track.enabled !== false);
   const noChangeStreakRotateAfter = rotationPolicy.noChangeStreakRotateAfter ?? 3;
@@ -119,6 +131,17 @@ export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy
   };
 }
 
+export function selectChangedMatrixCandidate({ candidates = [], championState = null } = {}) {
+  const championConfig = championState?.config;
+  const pool = Array.isArray(candidates) ? candidates : [];
+  const changed = pool.filter((candidate) => {
+    const challengerConfig = candidate?.challenger?.config;
+    if (!challengerConfig) return false;
+    return championConfig ? !sameConfig(championConfig, challengerConfig) : true;
+  });
+  return selectRobustMatrixCandidate({ candidates: changed });
+}
+
 export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {} }) {
 
   const championSummary = summarizeResult(championState);
@@ -128,8 +151,9 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
     limit: config.searchPolicy.paretoShortlistSize,
   });
 
-  const selectedCandidate = selectRobustMatrixCandidate({ candidates: matrixCandidates });
+  const selectedCandidate = selectChangedMatrixCandidate({ candidates: matrixCandidates, championState });
   const challengerSummary = selectedCandidate?.challenger || championSummary;
+  const noNewCandidate = sameConfig(championState?.config, challengerSummary?.config);
   const labResults = selectedCandidate?.labResults || [];
   const matrixDecision = selectedCandidate?.matrixDecision || decideMatrixPromotion({
     labResults,
@@ -255,7 +279,10 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       topCandidateSimilarity: topCandidateSimilaritySummary.topCandidateSimilarity,
       promotionEligible,
       promotionEligibleReason,
+      noNewCandidate,
+      noNewCandidateStreak: trackState.noNewCandidateStreak ?? 0,
       candidateFingerprint: trackState.candidateFingerprint ?? null,
+      rejectedCandidateFingerprint: noNewCandidate ? null : (trackState.rejectedCandidateFingerprint ?? null),
       championFingerprint: trackState.championFingerprint ?? null,
       labSetId: trackState.labSetId ?? null,
       gridName: trackState.gridName ?? config.grid ?? null,
@@ -388,7 +415,7 @@ async function runNode(args, cwd) {
   });
 }
 
-async function loadConfig(cwd, configPath, overrides = {}) {
+export async function loadConfig(cwd, configPath, overrides = {}) {
   const resolvedConfigPath = resolveMaybeRelative(cwd, configPath || './config/pine-autoresearch.default.json');
   const raw = await readJson(resolvedConfigPath);
   const baseDir = path.dirname(resolvedConfigPath);
@@ -432,10 +459,13 @@ async function loadConfig(cwd, configPath, overrides = {}) {
       exploreFamilies: raw.searchPolicy?.exploreFamilies || ['signal'],
       paretoShortlistSize: raw.searchPolicy?.paretoShortlistSize ?? 4,
       matrixCandidateLimit: raw.searchPolicy?.matrixCandidateLimit ?? 3,
+      annealing: raw.searchPolicy?.annealing || {},
+      selfLoopEscape: raw.searchPolicy?.selfLoopEscape || {},
     },
     seedChampionPath: resolveMaybeRelative(baseDir, raw.seedChampion?.path || raw.incumbent?.path),
     primaryLab: normalizeLab(primarySource, defaultThresholds, 0, 'primary'),
     shadowLabs: shadowSources.map((lab, index) => normalizeLab(lab, defaultThresholds, index, 'shadow')),
+    blindHoldoutLabs: (raw.blindHoldoutLabs || []).map((lab, index) => normalizeLab(lab, defaultThresholds, index, 'blind-holdout')),
     matrixPolicy: {
       requirePrimaryPromote: true,
       minShadowPassCount: 0,
@@ -588,6 +618,28 @@ async function readPreviousManifest(config, latestFileName) {
   const filtered = latestFileName ? files.filter((name) => name !== latestFileName) : files;
   if (!filtered.length) return null;
   return readJson(path.join(manifestsDir(config), filtered.at(-1)));
+}
+
+function inferRejectedCandidateFingerprint(manifest) {
+  const recommendation = manifest?.matrixDecision?.recommendation ?? manifest?.recommendation ?? null;
+  const candidateFingerprint = manifest?.rejectedCandidateFingerprint ?? (recommendation === 'hold' ? manifest?.candidateFingerprint : null);
+  const championFingerprint = manifest?.championFingerprint ?? null;
+  return candidateFingerprint && candidateFingerprint !== championFingerprint ? candidateFingerprint : null;
+}
+
+async function collectRecentRejectedCandidateFingerprints(config, limit = 16) {
+  const files = (await listManifestFiles(config)).slice(-Math.max(0, limit));
+  const fingerprints = [];
+  for (const fileName of files) {
+    try {
+      const manifest = await readJson(path.join(manifestsDir(config), fileName));
+      const fingerprint = inferRejectedCandidateFingerprint(manifest);
+      if (fingerprint) fingerprints.push(fingerprint);
+    } catch {
+      // Ignore corrupt or concurrently-pruned manifests; current cycle can still proceed.
+    }
+  }
+  return [...new Set(fingerprints)];
 }
 
 async function loadHistoryEvents(config) {
@@ -856,7 +908,12 @@ async function runScout(config) {
   const runId = buildRunId(config);
   const historyEventsBefore = await loadHistoryEvents(config);
   const schedulerStatePath = resolveSchedulerStatePath({ researchRoot: config.researchRoot, matrixId: config.matrixId });
-  const schedulerState = await readSchedulerState(schedulerStatePath);
+  const loadedSchedulerState = await readSchedulerState(schedulerStatePath);
+  const schedulerState = mergeSchedulerTabuFingerprints({
+    schedulerState: loadedSchedulerState,
+    recentRejectedFingerprints: await collectRecentRejectedCandidateFingerprints(config, config.rotationPolicy?.tabuBootstrapManifestLimit ?? 16),
+    tabuLimit: config.rotationPolicy?.tabuLimit ?? 128,
+  });
   const researchTracks = normalizeResearchTracks(
     Array.isArray(config.researchTracks) && config.researchTracks.length > 0
       ? config.researchTracks
@@ -940,9 +997,15 @@ async function runScout(config) {
     matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, robustness, expectancy: labResults[0]?.decision?.expectancy || null });
   }
 
-  const selectedCandidate = selectRobustMatrixCandidate({ candidates: matrixCandidates });
+  const selectedCandidate = selectChangedMatrixCandidate({ candidates: matrixCandidates, championState });
   const challengerSummary = selectedCandidate?.challenger || summarizeResult(championState);
+  const noNewCandidate = sameConfig(championState.config, challengerSummary.config);
   const candidateFingerprint = configFingerprint(challengerSummary.config);
+  const championFingerprint = configFingerprint(championState.config);
+  const rejectedCandidateFingerprint = selectedCandidate?.matrixDecision?.recommendation === 'hold'
+    && candidateFingerprint !== championFingerprint
+    ? candidateFingerprint
+    : null;
   const noveltySignature = buildNoveltySignature({
     trackId: activeTrackId,
     gridName,
@@ -978,7 +1041,10 @@ async function runScout(config) {
       rotationReason,
       sameTrackCycleStreak,
       candidateFingerprint,
-      championFingerprint: configFingerprint(championState.config),
+      rejectedCandidateFingerprint,
+      noNewCandidate,
+      noNewCandidateStreak: schedulerState.noNewCandidateStreak ?? 0,
+      championFingerprint,
       labSetId,
       gridName,
     },
@@ -1010,6 +1076,9 @@ async function runScout(config) {
     topCandidateSimilarity: manifest.topCandidateSimilarity,
     promotionEligible: manifest.promotionEligible,
     promotionEligibleReason: manifest.promotionEligibleReason,
+    noNewCandidate: manifest.noNewCandidate,
+    noNewCandidateStreak: manifest.noNewCandidateStreak,
+    rejectedCandidateFingerprint: manifest.rejectedCandidateFingerprint,
   });
 
   const updatedSchedulerState = nextTrackState({
@@ -1018,6 +1087,7 @@ async function runScout(config) {
     manifest: {
       activeTrackId: manifest.activeTrackId,
       candidateFingerprint: manifest.candidateFingerprint,
+      rejectedCandidateFingerprint: manifest.rejectedCandidateFingerprint,
       championFingerprint: manifest.championFingerprint,
       noveltySignature: manifest.noveltySignature,
       topCandidateSimilarity: manifest.topCandidateSimilarity,
@@ -1026,6 +1096,7 @@ async function runScout(config) {
       sameTrackCycleStreak: manifest.sameTrackCycleStreak,
       promotionEligible: manifest.promotionEligible,
       promotionEligibleReason: manifest.promotionEligibleReason,
+      noNewCandidate: manifest.noNewCandidate,
       generatedAt: manifest.generatedAt,
       windowSetId: manifest.windowSetId,
       labSetId: manifest.labSetId,

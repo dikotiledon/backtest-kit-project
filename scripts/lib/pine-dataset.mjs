@@ -301,16 +301,26 @@ export async function readPinnedDataset(filePath) {
   return JSON.parse(await fs.readFile(filePath, 'utf8'));
 }
 
+function normalizeWhenForCompare(value) {
+  if (value == null || value === '') return null;
+  const parsed = Date.parse(String(value));
+  return Number.isFinite(parsed) ? parsed : String(value);
+}
+
 export function assertDatasetMatchesLab(dataset, lab) {
   if (!dataset?.lab) {
     throw new Error('Pinned dataset missing lab metadata');
   }
 
-  const keys = ['labId', 'symbol', 'timeframe', 'limit', 'when'];
+  const keys = ['labId', 'symbol', 'timeframe', 'limit'];
   for (const key of keys) {
     if (String(dataset.lab[key]) !== String(lab[key])) {
       throw new Error(`Pinned dataset mismatch for ${lab.labId}: field ${key} expected ${lab[key]}, got ${dataset.lab[key]}`);
     }
+  }
+
+  if (normalizeWhenForCompare(dataset.lab.when) !== normalizeWhenForCompare(lab.when)) {
+    throw new Error(`Pinned dataset mismatch for ${lab.labId}: field when expected ${lab.when}, got ${dataset.lab.when}`);
   }
 
   validateSequentialCandles(dataset.candles || [], lab);

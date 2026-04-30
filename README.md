@@ -11,6 +11,8 @@
 
 A minimal project scaffold for [backtest-kit](https://github.com/tripolskypetr/backtest-kit). All infrastructure (exchange registration, candle caching, runner, UI, Telegram) is handled by `@backtest-kit/cli` — this project contains only your strategy files.
 
+Docs hub: [docs/README.md](docs/README.md). Project layout and runtime boundaries: [docs/project-overview.md](docs/project-overview.md).
+
 ## 📋 Quick Start
 
 ```bash

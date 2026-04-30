@@ -1700,7 +1700,7 @@ npm start
 
 ## 🤖 Are you a robot?
 
-**For language models**: Read extended description in [./LLMs.md](./LLMs.md)
+**For language models**: Read extended description in [./LLMs.md](../README.md)
 
 ## ✅ Tested & Reliable
 

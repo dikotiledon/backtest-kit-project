@@ -44,7 +44,7 @@ Point the CLI at your strategy file, choose a mode, and it handles exchange conn
 | **PineScript**   | `--pine`                   | Run a local `.pine` indicator against exchange data |
 | **Pine Editor**  | `--editor`                 | Open the visual Pine Script editor in the browser   |
 | **Candle Dump**  | `--dump`                   | Fetch and save raw OHLCV candles to a file   |
-| **Flush**        | `--flush`                  | Delete report/log/markdown/agent folders from strategy dump dir |
+| **Flush**        | `--flush`                  | Delete report/log/markdown/agent folders from output dump dir |
 | **Init Project** | `--init`                   | Scaffold a new backtest-kit project          |
 
 ## 🚀 Installation
@@ -183,7 +183,7 @@ Runs the strategy against historical candle data using a registered `FrameSchema
 npm run backtest
 ```
 
-Before running, the CLI removes the `report`, `log`, `markdown`, and `agent` folders from the strategy's `dump/` directory, then warms the candle cache for every interval in `--cacheInterval`. On the next run, cached data is used directly — no API calls needed. Pass `--noCache` to skip cache warming, `--noFlush` to keep existing output folders.
+Before running, the CLI removes the `report`, `log`, `markdown`, and `agent` folders from the strategy's `dump/` directory, then warms the candle cache for every interval in `--cacheInterval`. On the next run, cached data is used directly — no API calls needed. Pass `--noCache` to skip cache warming, `--noFlush` to keep existing output dump directories.
 
 ### Paper Trading
 
@@ -900,7 +900,7 @@ npx @backtest-kit/cli --dump --symbol BTCUSDT --timeframe 15m --limit 500 --json
 
 ## 🗑️ Flushing Strategy Output (`--flush`)
 
-`@backtest-kit/cli` can delete generated output folders from one or more strategy dump directories without touching cached candle data.
+`@backtest-kit/cli` can delete generated output dump directories from one or more output dump directories without touching cached candle data.
 
 ### CLI Flags
 

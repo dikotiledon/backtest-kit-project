@@ -3,6 +3,13 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { analyzeJsonlFile } from './lib/pine-optimizer.mjs';
+import {
+  appendPromotionQueueEvent,
+  buildPromotionQueueItem,
+  promotionQueuePath,
+  readPromotionQueue,
+  selectNextPendingPromotion,
+} from './lib/pine-promotion-queue.mjs';
 import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
 import { buildIncumbentSearchBatch } from './lib/pine-search-policy.mjs';
 import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
@@ -34,6 +41,10 @@ import {
   summarizeSideMetrics,
 } from './lib/pine-autoresearch.mjs';
 import { stagePinnedDatasetForLab } from './lib/pine-dataset.mjs';
+import {
+  acquireAutoresearchLock,
+  releaseAutoresearchLock,
+} from './lib/pine-autoresearch-lock.mjs';
 import {
   buildNoveltySignature,
   nextTrackState,
@@ -82,6 +93,72 @@ function round(value, digits = 2) {
   if (!Number.isFinite(value)) return 0;
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+export function decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction } = {}) {
+  if (!queuedItem) return { recommendation: 'hold', status: 'blocked', reason: 'No pending promotion item' };
+  if (!manifest) return { recommendation: 'hold', status: 'failed', reason: `Queued manifest missing for ${queuedItem.itemId}` };
+  if (manifest.runId !== queuedItem.runId) return { recommendation: 'hold', status: 'failed', reason: `Manifest runId ${manifest.runId} does not match queued runId ${queuedItem.runId}` };
+  if (manifest.matrixDecision?.recommendation !== 'promote') return { recommendation: 'hold', status: 'stale', reason: `Queued manifest recommendation is ${manifest.matrixDecision?.recommendation || 'unknown'}` };
+  if (!manifest.challenger?.config) return { recommendation: 'hold', status: 'failed', reason: 'Queued manifest has no challenger config' };
+  if (sameConfig(championState?.config, manifest.challenger.config)) return { recommendation: 'hold', status: 'stale', reason: `Champion already matches ${manifest.challenger.configId}` };
+  const currentChampionFingerprint = championState?.configFingerprint || configFingerprint(championState?.config || {});
+  if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Queued champion fingerprint missing at decision' };
+  if (currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Current champion changed since queued decision' };
+  if (autoAction?.recommendation !== 'promote') return { recommendation: 'hold', status: 'blocked', reason: autoAction?.summary || 'Autopromote gates did not pass' };
+  return { recommendation: 'promote', status: 'promoted', reason: 'Queued promotion guards passed' };
+}
+
+export function canForceQueuedPromotion(queuedAction = null) {
+  return queuedAction?.status === 'blocked';
+}
+
+export function resolveAutopromoteQueueStatus(result = {}) {
+  if (result?.promoted) return 'promoted';
+  const reason = String(result?.reason || 'promotion_noop');
+  if (/already matches|already promoted/i.test(reason)) return 'stale';
+  return 'blocked';
+}
+
+async function appendAutopromoteQueueStatus(queuePath, queuedItem, result = {}) {
+  await appendPromotionQueueEvent(queuePath, {
+    type: 'status',
+    itemId: queuedItem.itemId,
+    status: resolveAutopromoteQueueStatus(result),
+    reason: result.reason || 'promotion_noop',
+    appliedConfigId: result.appliedConfigId ?? null,
+  });
+}
+
+async function withAutoresearchLock(config, { command, profile, staleMs = 12 * 60 * 60 * 1000 }, fn) {
+  const lockPath = autoresearchLockPath(config);
+  const lock = await acquireAutoresearchLock({ lockPath, command, profile, staleMs });
+  if (!lock.acquired) {
+    return { skipped: true, reason: lock.reason || 'locked', currentOwner: lock.currentOwner };
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await releaseAutoresearchLock({ lockPath, token: lock.owner.token });
+  }
+}
+
+export function autoresearchLockPath(config) {
+  return path.join(config.researchRoot, 'state', 'autoresearch.lock.json');
+}
+
+export function shouldUseAutoresearchLock(command) {
+  return ['cycle', 'promote', 'autopromote'].includes(command);
+}
+
+export function formatAutoresearchLockSkip(command, result = {}) {
+  const reason = result.reason || 'locked';
+  const owner = result.currentOwner;
+  const ownerSuffix = owner
+    ? ` owner=${owner.command || 'unknown'} profile=${owner.profile || 'n/a'}`
+    : '';
+  return `[autoresearch] ${command}=skipped reason=${reason}${ownerSuffix}`;
 }
 
 export function mergeSchedulerTabuFingerprints({ schedulerState = {}, recentRejectedFingerprints = [], tabuLimit = 128 } = {}) {
@@ -338,8 +415,66 @@ function manifestsDir(config) {
   return path.join(config.researchRoot, 'manifests');
 }
 
+function hasUnsafeManifestRunId(runId) {
+  const value = String(runId);
+  return value.includes('/') || value.includes('\\') || value.includes('..');
+}
+
+export function resolvePromotionManifestPath({ config, args = {} } = {}) {
+  if (args.manifest) return args.manifest;
+  if (args['run-id']) {
+    const runId = String(args['run-id']);
+    if (hasUnsafeManifestRunId(runId)) {
+      throw new Error(`Invalid run-id for manifest lookup: ${runId}`);
+    }
+    return path.join(manifestsDir(config), `${runId}.json`);
+  }
+  return null;
+}
+
+export function selectPromotionManifestSource({ latest = null, explicitManifestPath = null, manifestOverride = null } = {}) {
+  if (manifestOverride) return manifestOverride;
+  if (explicitManifestPath && latest && !latest.manifestPath) {
+    return { ...latest, manifestPath: explicitManifestPath };
+  }
+  return latest;
+}
+
+export function withManifestPath(manifest, manifestPath) {
+  if (!manifest || !manifestPath) return manifest;
+  if (manifest.manifestPath === manifestPath) return manifest;
+  return { ...manifest, manifestPath };
+}
+
 function latestManifestPath(config) {
   return path.join(config.researchRoot, 'latest.json');
+}
+
+function promotionQueueFilePath(config) {
+  return promotionQueuePath({ researchRoot: config.researchRoot });
+}
+
+export function shouldQueuePromotionManifest(manifest) {
+  return manifest?.matrixDecision?.recommendation === 'promote'
+    && Boolean(manifest?.challenger?.config)
+    && Boolean(manifest?.candidateFingerprint)
+    && manifest.candidateFingerprint !== manifest.championFingerprint;
+}
+
+export function decideCycleStartAction({ pendingPromotion = null, forceCycle = false } = {}) {
+  if (pendingPromotion && !forceCycle) {
+    return {
+      recommendation: 'skip',
+      reason: 'pending_promotion',
+      pendingPromotion,
+      summary: `Skip cycle: pending promotion ${pendingPromotion.itemId} from run ${pendingPromotion.runId}`,
+    };
+  }
+  return {
+    recommendation: 'run',
+    reason: pendingPromotion ? 'forced' : 'no_pending_promotion',
+    pendingPromotion,
+  };
 }
 
 function championPath(config) {
@@ -549,6 +684,11 @@ async function readLatestManifest(config) {
   } catch {
     return null;
   }
+}
+
+async function readManifestByPath(manifestPath) {
+  if (!manifestPath) return null;
+  return readJson(manifestPath);
 }
 
 async function listRunDirectories(rootDir, prefix = null) {
@@ -904,6 +1044,16 @@ async function evaluateMatrix(config, runId, championState, challengerSummary) {
 
 async function runScout(config) {
   await ensureDirs(config);
+  const queue = await readPromotionQueue(promotionQueueFilePath(config));
+  const pendingPromotion = selectNextPendingPromotion(queue);
+  const cycleStartAction = decideCycleStartAction({ pendingPromotion, forceCycle: config.forceCycle === true });
+  if (cycleStartAction.recommendation === 'skip') {
+    return {
+      skipped: true,
+      reason: cycleStartAction.reason,
+      pendingPromotion,
+    };
+  }
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
   const historyEventsBefore = await loadHistoryEvents(config);
@@ -1057,6 +1207,19 @@ async function runScout(config) {
 
   await writeJson(manifestPath, manifest);
   await writeJson(latestManifestPath(trackedConfig), { ...manifest, manifestPath });
+
+  if (shouldQueuePromotionManifest(manifest)) {
+    const queueItem = buildPromotionQueueItem({
+      manifest: { ...manifest, manifestPath },
+      createdAt: manifest.generatedAt,
+    });
+    await appendPromotionQueueEvent(promotionQueueFilePath(trackedConfig), {
+      type: 'pending',
+      item: queueItem,
+      at: manifest.generatedAt,
+    });
+  }
+
   await appendJsonl(historyPath(trackedConfig), {
     timestamp: manifest.generatedAt,
     type: 'cycle',
@@ -1263,10 +1426,12 @@ async function runBlindHoldout(config) {
   return { holdoutPath, payload };
 }
 
-async function runPromote(config, args, mode = 'manual') {
+async function runPromote(config, args, mode = 'manual', manifestOverride = null) {
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
-  const latest = await readLatestManifest(config);
+  const explicitManifestPath = resolvePromotionManifestPath({ config, args });
+  const loadedLatest = manifestOverride || (explicitManifestPath ? await readManifestByPath(explicitManifestPath) : await readLatestManifest(config));
+  const latest = selectPromotionManifestSource({ latest: loadedLatest, explicitManifestPath, manifestOverride });
   if (!latest) {
     throw new Error('No latest manifest to promote');
   }
@@ -1326,28 +1491,75 @@ async function runPromote(config, args, mode = 'manual') {
 async function runAutopromote(config, args) {
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
-  const latest = await readLatestManifest(config);
-  if (!latest) {
-    throw new Error('No latest manifest for auto-promotion');
+  const queuePath = promotionQueueFilePath(config);
+  const queue = await readPromotionQueue(queuePath);
+  const queuedItem = selectNextPendingPromotion(queue);
+  if (!queuedItem) {
+    return { promoted: false, reason: 'No pending promotion queue item', gates: {} };
   }
 
+  let queuedManifest = null;
+  try {
+    queuedManifest = await readManifestByPath(queuedItem.manifestPath);
+  } catch (error) {
+    const manifestReadReason = `manifest_read_failed:${error?.code || error?.message || String(error)}`;
+    await appendPromotionQueueEvent(queuePath, {
+      type: 'status',
+      itemId: queuedItem.itemId,
+      status: 'failed',
+      reason: manifestReadReason,
+    });
+    return { promoted: false, reason: manifestReadReason, gates: {} };
+  }
+
+  if (!queuedManifest) {
+    const manifestReadReason = 'manifest_read_failed:missing_path';
+    await appendPromotionQueueEvent(queuePath, {
+      type: 'status',
+      itemId: queuedItem.itemId,
+      status: 'failed',
+      reason: manifestReadReason,
+    });
+    return { promoted: false, reason: manifestReadReason, gates: {} };
+  }
+
+  const queuedManifestWithPath = withManifestPath(queuedManifest, queuedItem.manifestPath);
   const historyEvents = await loadHistoryEvents(config);
   const action = decideAutoPromotionAction({
-    latestManifest: latest,
+    latestManifest: queuedManifestWithPath,
     historyEvents,
     championState,
     policy: config.autoPromotion,
   });
+  const queuedAction = decideQueuedPromotionAction({
+    queuedItem,
+    manifest: queuedManifestWithPath,
+    championState,
+    autoAction: action,
+  });
 
-  if (action.recommendation !== 'promote' && !args.force) {
+  const forceableQueuedAction = args.force && canForceQueuedPromotion(queuedAction);
+  if (queuedAction.recommendation !== 'promote' && !forceableQueuedAction) {
+    await appendPromotionQueueEvent(queuePath, {
+      type: 'status',
+      itemId: queuedItem.itemId,
+      status: queuedAction.status,
+      reason: queuedAction.reason,
+    });
     return {
       promoted: false,
-      reason: action.summary,
+      reason: queuedAction.reason,
       gates: action.gates,
+      failedGates: action.failedGates,
     };
   }
 
-  return runPromote(config, { ...args, force: true }, 'auto');
+  const result = await runPromote(config, { ...args, force: true }, 'auto', queuedManifestWithPath);
+  await appendAutopromoteQueueStatus(queuePath, queuedItem, result.promoted ? {
+    ...result,
+    reason: result.reason || 'autopromoted',
+  } : result);
+  return result;
 }
 
 async function main() {
@@ -1365,9 +1577,23 @@ async function main() {
     maxConfigs: args['max-configs'],
     minTrades: args['min-trades'],
   });
+  config.forceCycle = args['force-cycle'] === true;
 
   if (command === 'cycle' || command === 'scout') {
-    const result = await runScout(config);
+    const selectedProfile = args.profile || config.selectedProfile;
+    const result = await withAutoresearchLock(
+      { ...config, selectedProfile },
+      { command: 'cycle', profile: selectedProfile },
+      () => runScout({ ...config, selectedProfile }),
+    );
+    if (result.skipped && result.currentOwner) {
+      console.log(formatAutoresearchLockSkip('cycle', result));
+      return;
+    }
+    if (result.skipped) {
+      console.log(`[autoresearch] cycle=skipped reason=${result.reason} pending=${result.pendingPromotion?.itemId || 'n/a'}`);
+      return;
+    }
     console.log(`\n[autoresearch] manifest=${result.manifestPath}`);
     console.log(`[autoresearch] scout=${result.scoutPath}`);
     console.log(`[autoresearch] recommendation=${result.manifest.matrixDecision.recommendation}`);
@@ -1394,7 +1620,16 @@ async function main() {
   }
 
   if (command === 'promote') {
-    const result = await runPromote(config, args, 'manual');
+    const selectedProfile = args.profile || config.selectedProfile;
+    const result = await withAutoresearchLock(
+      { ...config, selectedProfile },
+      { command: 'promote', profile: selectedProfile },
+      () => runPromote(config, args, 'manual'),
+    );
+    if (result.skipped && result.currentOwner) {
+      console.log(formatAutoresearchLockSkip('promote', result));
+      return;
+    }
     if (!result.promoted) {
       console.log(`[autoresearch] promote=noop ${result.reason}`);
       return;
@@ -1405,7 +1640,16 @@ async function main() {
   }
 
   if (command === 'autopromote') {
-    const result = await runAutopromote(config, args);
+    const selectedProfile = args.profile || config.selectedProfile;
+    const result = await withAutoresearchLock(
+      { ...config, selectedProfile },
+      { command: 'autopromote', profile: selectedProfile },
+      () => runAutopromote(config, args),
+    );
+    if (result.skipped && result.currentOwner) {
+      console.log(formatAutoresearchLockSkip('autopromote', result));
+      return;
+    }
     if (!result.promoted) {
       console.log(`[autoresearch] autopromote=noop ${result.reason}`);
       return;

@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -19,14 +21,68 @@ import {
   selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
+import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs';
+import * as autoresearchCli from '../scripts/pine-autoresearch.mjs';
 import {
   buildScoutOrchestrationState,
   buildScoutRegimeAnalysisArtifact,
+  decideCycleStartAction,
+  canForceQueuedPromotion,
+  decideQueuedPromotionAction,
   loadConfig,
+  resolveAutopromoteQueueStatus,
   mergeSchedulerTabuFingerprints,
+  resolvePromotionManifestPath,
   resolveTrackSelectionState,
   selectChangedMatrixCandidate,
+  selectPromotionManifestSource,
+  shouldQueuePromotionManifest,
+  withManifestPath,
 } from '../scripts/pine-autoresearch.mjs';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+function psSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+async function runPwsh(command, { cwd = repoRoot } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], {
+      cwd,
+      shell: false,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (error) => resolve({ code: -1, stdout, stderr: `${stderr}${error.message ? `\n${error.message}` : ''}`.trim() }));
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function runPwshFile(scriptPath, args = [], { cwd = repoRoot } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', scriptPath, ...args], {
+      cwd,
+      shell: false,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (error) => resolve({ code: -1, stdout, stderr: `${stderr}${error.message ? `\n${error.message}` : ''}`.trim() }));
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function readIfExists(filePath) {
+  try {
+    return await fs.readFile(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+}
 
 function makeResult({
   configId,
@@ -57,6 +113,214 @@ function makeResult({
 test('sameConfig compares deep config content, not object identity', () => {
   assert.equal(sameConfig({ a: 1, nested: { b: true } }, { nested: { b: true }, a: 1 }), true);
   assert.equal(sameConfig({ a: 1 }, { a: 2 }), false);
+});
+
+test('resolvePromotionManifestPath prefers explicit manifest over run-id', () => {
+  const config = { researchRoot: 'D:\\tmp\\research' };
+  const result = resolvePromotionManifestPath({
+    config,
+    args: {
+      manifest: 'D:\\override\\manifest.json',
+      'run-id': 'run-123',
+    },
+  });
+
+  assert.equal(result, 'D:\\override\\manifest.json');
+});
+
+test('resolvePromotionManifestPath resolves run-id under manifests dir', () => {
+  const config = { researchRoot: 'D:\\tmp\\research' };
+  const result = resolvePromotionManifestPath({
+    config,
+    args: { 'run-id': 'run-123' },
+  });
+
+  assert.equal(result, path.join(config.researchRoot, 'manifests', 'run-123.json'));
+});
+
+test('resolvePromotionManifestPath rejects unsafe run-id patterns', () => {
+  const config = { researchRoot: 'D:\\tmp\\research' };
+  const unsafeRunIds = [
+    '/absolute',
+    'foo/bar',
+    '..',
+    'a/../b',
+    '../evil',
+    'foo\\bar',
+    'foo/..\\bar',
+  ];
+
+  for (const runId of unsafeRunIds) {
+    assert.throws(() => resolvePromotionManifestPath({ config, args: { 'run-id': runId } }), (error) => {
+      assert.equal(error instanceof Error, true);
+      assert.equal(error.message, `Invalid run-id for manifest lookup: ${runId}`);
+      return true;
+    });
+  }
+});
+
+test('selectPromotionManifestSource preserves manifestOverride reference', () => {
+  const manifestOverride = {
+    runId: 'run-override',
+    challenger: { configId: 'challenger', config: { a: 1 } },
+    matrixDecision: { recommendation: 'promote' },
+  };
+  const selected = selectPromotionManifestSource({
+    latest: { runId: 'run-loaded', challenger: { configId: 'loaded', config: { a: 2 } }, matrixDecision: { recommendation: 'promote' } },
+    explicitManifestPath: 'D:\\tmp\\research\\manifests\\run-override.json',
+    manifestOverride,
+  });
+
+  assert.equal(selected, manifestOverride);
+  assert.equal(manifestOverride.manifestPath, undefined);
+});
+
+test('withManifestPath copies manifest and preserves exact queued path', () => {
+  const manifest = {
+    runId: 'run-queued',
+    challenger: { configId: 'challenger', config: { a: 1 } },
+    matrixDecision: { recommendation: 'promote' },
+  };
+
+  const selected = withManifestPath(manifest, 'pine/autoresearch/m/manifests/run-queued.json');
+
+  assert.notEqual(selected, manifest);
+  assert.equal(manifest.manifestPath, undefined);
+  assert.equal(selected.manifestPath, 'pine/autoresearch/m/manifests/run-queued.json');
+});
+
+test('selectPromotionManifestSource backfills manifestPath for explicit manifest loads', () => {
+  const latest = {
+    runId: 'run-loaded',
+    challenger: { configId: 'loaded', config: { a: 2 } },
+    matrixDecision: { recommendation: 'promote' },
+  };
+  const selected = selectPromotionManifestSource({
+    latest,
+    explicitManifestPath: 'D:\\tmp\\research\\manifests\\run-loaded.json',
+  });
+
+  assert.notEqual(selected, latest);
+  assert.equal(selected.manifestPath, 'D:\\tmp\\research\\manifests\\run-loaded.json');
+  assert.equal(latest.manifestPath, undefined);
+});
+
+test('resolvePromotionManifestPath returns null without explicit target', () => {
+  const result = resolvePromotionManifestPath({ config: { researchRoot: 'D:\\tmp\\research' }, args: {} });
+
+  assert.equal(result, null);
+});
+
+test('pine-autoresearch-run.ps1 parses cleanly', async () => {
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const command = `$null = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuote(scriptPath)}, [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Host $_.Message }; exit 1 }`;
+  const result = await runPwsh(command);
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+});
+
+test('pine-autoresearch-run.ps1 dry-run skips lock acquisition', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-dry-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const markerPath = path.join(tempRoot, 'marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'dry-run-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
+    '-RepoRoot', tempRoot,
+    '-DryRun',
+  ], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /\[dry-run\]/);
+  assert.equal(await readIfExists(path.join(tempRoot, 'tmp', 'pine-autoresearch-locks', 'scheduler.lock')), null);
+  assert.equal(await readIfExists(markerPath), null);
+});
+
+test('pine-autoresearch-run.ps1 skips a fresh scheduler lock', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-fresh-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockDir = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks');
+  await fs.mkdir(lockDir, { recursive: true });
+  await fs.writeFile(path.join(lockDir, 'scheduler.lock'), [
+    'task=fresh-check',
+    `pid=${process.pid}`,
+    `startedAt=${new Date().toISOString()}`,
+    '',
+  ].join('\n'), 'utf8');
+  const markerPath = path.join(tempRoot, 'fresh-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'fresh-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
+    '-RepoRoot', tempRoot,
+  ], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /skipped: scheduler lock exists/);
+  assert.equal(await readIfExists(markerPath), null);
+  assert.notEqual(await readIfExists(path.join(lockDir, 'scheduler.lock')), null);
+});
+
+test('pine-autoresearch-run.ps1 reclaims a stale dead scheduler lock', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-stale-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockDir = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks');
+  await fs.mkdir(lockDir, { recursive: true });
+  await fs.writeFile(path.join(lockDir, 'scheduler.lock'), [
+    'task=stale-check',
+    'pid=99999999',
+    `startedAt=${new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString()}`,
+    '',
+  ].join('\n'), 'utf8');
+  const markerPath = path.join(tempRoot, 'stale-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'stale-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
+    '-RepoRoot', tempRoot,
+  ], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /scheduler lock stale; reclaiming/);
+  assert.equal((await readIfExists(markerPath))?.trim(), 'ran');
+  assert.equal(await readIfExists(path.join(lockDir, 'scheduler.lock')), null);
+});
+
+test('pine-autoresearch-run.ps1 removes its lock after a nonzero command', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-fail-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockPath = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks', 'scheduler.lock');
+  const markerPath = path.join(tempRoot, 'nonzero-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'fail-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'; exit 7`,
+    '-RepoRoot', tempRoot,
+  ], { cwd: repoRoot });
+
+  assert.notEqual(result.code, 0);
+  assert.equal((await readIfExists(markerPath))?.trim(), 'ran');
+  assert.equal(await readIfExists(lockPath), null);
+});
+
+test('autoresearchLockPath points at state/autoresearch.lock.json', () => {
+  const result = autoresearchCli.autoresearchLockPath({ researchRoot: 'pine/autoresearch/matrix-a' });
+
+  assert.equal(result, path.join('pine/autoresearch/matrix-a', 'state', 'autoresearch.lock.json'));
+});
+
+test('shouldUseAutoresearchLock only wraps state-mutating commands', () => {
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('cycle'), true);
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('promote'), true);
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('autopromote'), true);
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('digest'), false);
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('holdout'), false);
+});
+
+test('formatAutoresearchLockSkip preserves reclaim_in_progress reason', () => {
+  const result = autoresearchCli.formatAutoresearchLockSkip('cycle', {
+    reason: 'reclaim_in_progress',
+    currentOwner: { command: 'autopromote', profile: 'matrix-a' },
+  });
+
+  assert.equal(result, '[autoresearch] cycle=skipped reason=reclaim_in_progress owner=autopromote profile=matrix-a');
 });
 
 test('decideAutoresearchOutcome recommends promote when all gates pass', () => {
@@ -236,6 +500,248 @@ test('decideAutoresearchOutcome accepts return-basis optimizer metrics with raw 
 
   assert.equal(result.recommendation, 'hold');
   assert.match(result.failedGates.join(','), /roi/);
+});
+
+test('shouldQueuePromotionManifest returns true for changed promote manifests', () => {
+  const manifest = {
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { config: { useTrailingStop: true }, configId: 'candidate-a' },
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+  };
+
+  assert.equal(shouldQueuePromotionManifest(manifest), true);
+});
+
+test('shouldQueuePromotionManifest returns false for hold or unchanged fingerprints', () => {
+  const holdManifest = {
+    matrixDecision: { recommendation: 'hold' },
+    challenger: { config: { useTrailingStop: true } },
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+  };
+  const unchangedManifest = {
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { config: { useTrailingStop: true } },
+    candidateFingerprint: 'same-fp',
+    championFingerprint: 'same-fp',
+  };
+
+  assert.equal(shouldQueuePromotionManifest(holdManifest), false);
+  assert.equal(shouldQueuePromotionManifest(unchangedManifest), false);
+});
+
+test('shouldQueuePromotionManifest returns false when challenger config or candidate fingerprint is missing', () => {
+  const missingChallengerConfig = {
+    matrixDecision: { recommendation: 'promote' },
+    challenger: {},
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+  };
+  const missingCandidateFingerprint = {
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { config: { useTrailingStop: true } },
+    championFingerprint: 'champion-fp',
+  };
+
+  assert.equal(shouldQueuePromotionManifest(missingChallengerConfig), false);
+  assert.equal(shouldQueuePromotionManifest(missingCandidateFingerprint), false);
+});
+test('decideQueuedPromotionAction promotes valid queued manifest', () => {
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+    championFingerprintAtDecision: 'champion-fp',
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    config: { useTrailingStop: false },
+    configFingerprint: 'champion-fp',
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.deepEqual(result, {
+    recommendation: 'promote',
+    status: 'promoted',
+    reason: 'Queued promotion guards passed',
+  });
+});
+
+test('decideQueuedPromotionAction marks stale when champion changed since queued decision', () => {
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+    championFingerprintAtDecision: 'champion-fp-at-decision',
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    config: { useTrailingStop: false },
+    configFingerprint: 'champion-fp-current',
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.status, 'stale');
+  assert.equal(result.reason, 'Current champion changed since queued decision');
+});
+
+test('decideQueuedPromotionAction holds stale when queued champion fingerprint is missing', () => {
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    config: { useTrailingStop: false },
+    configFingerprint: 'champion-fp-current',
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  for (const championFingerprintAtDecision of [undefined, null, '']) {
+    const queuedItem = {
+      itemId: 'run-a:candidate-fp',
+      runId: 'run-a',
+      championFingerprintAtDecision,
+    };
+
+    const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+    assert.equal(result.recommendation, 'hold');
+    assert.equal(result.status, 'stale');
+    assert.equal(result.reason, 'Queued champion fingerprint missing at decision');
+    assert.equal(canForceQueuedPromotion(result), false);
+  }
+});
+
+test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+    championFingerprintAtDecision: 'champion-fp',
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    config: { useTrailingStop: false },
+    configFingerprint: 'champion-fp',
+  };
+  const autoAction = { recommendation: 'hold', summary: 'Auto-promote hold: failed cooldown gate(s).' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason, 'Auto-promote hold: failed cooldown gate(s).');
+  assert.equal(canForceQueuedPromotion(result), true);
+});
+
+test('resolveAutopromoteQueueStatus maps promoted false results to a queue status', () => {
+  assert.equal(resolveAutopromoteQueueStatus({ promoted: true, reason: 'autopromoted' }), 'promoted');
+  assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'Champion already matches candidate-a' }), 'stale');
+  assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'promotion_noop' }), 'blocked');
+});
+
+test('canForceQueuedPromotion only allows blocked queue actions', () => {
+  assert.equal(canForceQueuedPromotion({ status: 'blocked' }), true);
+  assert.equal(canForceQueuedPromotion({ status: 'stale' }), false);
+  assert.equal(canForceQueuedPromotion({ status: 'failed' }), false);
+});
+
+test('decideQueuedPromotionAction fails when queued manifest is missing or runId mismatches', () => {
+  const queuedItem = { itemId: 'run-a:candidate-fp', runId: 'run-a' };
+  const missingManifest = decideQueuedPromotionAction({ queuedItem, manifest: null });
+  const mismatchedManifest = decideQueuedPromotionAction({
+    queuedItem,
+    manifest: {
+      runId: 'run-b',
+      matrixDecision: { recommendation: 'promote' },
+      challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+    },
+    championState: { config: { useTrailingStop: false } },
+    autoAction: { recommendation: 'promote' },
+  });
+
+  assert.equal(missingManifest.status, 'failed');
+  assert.equal(missingManifest.reason, 'Queued manifest missing for run-a:candidate-fp');
+  assert.equal(mismatchedManifest.status, 'failed');
+  assert.equal(mismatchedManifest.reason, 'Manifest runId run-b does not match queued runId run-a');
+});
+
+
+test('decideCycleStartAction skips when pending promotion exists and not forced', () => {
+  const pendingPromotion = {
+    itemId: 'run-123:candidate-fp',
+    runId: 'run-123',
+  };
+
+  const result = decideCycleStartAction({ pendingPromotion });
+
+  assert.equal(result.recommendation, 'skip');
+  assert.equal(result.reason, 'pending_promotion');
+  assert.equal(result.pendingPromotion, pendingPromotion);
+  assert.match(result.summary, /Skip cycle: pending promotion run-123:candidate-fp from run run-123/);
+});
+
+test('decideCycleStartAction allows forced cycle with pending promotion', () => {
+  const pendingPromotion = {
+    itemId: 'run-123:candidate-fp',
+    runId: 'run-123',
+  };
+
+  const result = decideCycleStartAction({ pendingPromotion, forceCycle: true });
+
+  assert.equal(result.recommendation, 'run');
+  assert.equal(result.reason, 'forced');
+  assert.equal(result.pendingPromotion, pendingPromotion);
+  assert.equal(result.summary, undefined);
+});
+
+test('decideCycleStartAction runs when no pending promotion exists', () => {
+  const result = decideCycleStartAction();
+
+  assert.equal(result.recommendation, 'run');
+  assert.equal(result.reason, 'no_pending_promotion');
+  assert.equal(result.pendingPromotion, null);
+  assert.equal(result.summary, undefined);
+});
+
+test('buildPromotionQueueItem accepts a promote manifest from autoresearch output', () => {
+  const manifest = {
+    runId: 'run-a',
+    generatedAt: '2026-04-30T00:00:00.000Z',
+    manifestPath: 'research/manifests/run-a.json',
+    matrixDecision: { recommendation: 'promote' },
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+    champion: { configId: 'champion-a' },
+  };
+
+  assert.equal(shouldQueuePromotionManifest(manifest), true);
+
+  const queueItem = buildPromotionQueueItem({
+    manifest: { ...manifest, manifestPath: 'research/manifests/run-a.json' },
+    createdAt: manifest.generatedAt,
+  });
+
+  assert.equal(queueItem.itemId, 'run-a:candidate-fp');
+  assert.equal(queueItem.manifestPath, 'research/manifests/run-a.json');
+  assert.equal(queueItem.createdAt, '2026-04-30T00:00:00.000Z');
 });
 
 test('decideAutoresearchOutcome holds when expectancy regresses despite a higher win rate', () => {

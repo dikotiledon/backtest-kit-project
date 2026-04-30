@@ -41,6 +41,13 @@ function Register-Task($Name, $ScheduleArgs, $ScriptPath) {
   if ($LASTEXITCODE -ne 0) {
     throw "Failed to create task $taskName"
   }
+
+  try {
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 12)
+    Set-ScheduledTask -TaskName $taskName -Settings $settings | Out-Null
+  } catch {
+    Write-Warning "Could not set MultipleInstances=IgnoreNew for ${taskName}: $($_.Exception.Message)"
+  }
 }
 
 if (-not $DisableMicro) {

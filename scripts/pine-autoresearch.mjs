@@ -42,6 +42,10 @@ import {
 } from './lib/pine-autoresearch.mjs';
 import { stagePinnedDatasetForLab } from './lib/pine-dataset.mjs';
 import {
+  acquireAutoresearchLock,
+  releaseAutoresearchLock,
+} from './lib/pine-autoresearch-lock.mjs';
+import {
   buildNoveltySignature,
   nextTrackState,
   normalizeResearchTracks,
@@ -124,6 +128,28 @@ async function appendAutopromoteQueueStatus(queuePath, queuedItem, result = {}) 
     reason: result.reason || 'promotion_noop',
     appliedConfigId: result.appliedConfigId ?? null,
   });
+}
+
+async function withAutoresearchLock(config, { command, profile, staleMs = 12 * 60 * 60 * 1000 }, fn) {
+  const lockPath = autoresearchLockPath(config);
+  const lock = await acquireAutoresearchLock({ lockPath, command, profile, staleMs });
+  if (!lock.acquired) {
+    return { skipped: true, reason: lock.reason || 'locked', currentOwner: lock.currentOwner };
+  }
+
+  try {
+    return await fn();
+  } finally {
+    await releaseAutoresearchLock({ lockPath, token: lock.owner.token });
+  }
+}
+
+export function autoresearchLockPath(config) {
+  return path.join(config.researchRoot, 'state', 'autoresearch.lock.json');
+}
+
+export function shouldUseAutoresearchLock(command) {
+  return ['cycle', 'promote', 'autopromote'].includes(command);
 }
 
 export function mergeSchedulerTabuFingerprints({ schedulerState = {}, recentRejectedFingerprints = [], tabuLimit = 128 } = {}) {
@@ -1538,7 +1564,16 @@ async function main() {
   config.forceCycle = args['force-cycle'] === true;
 
   if (command === 'cycle' || command === 'scout') {
-    const result = await runScout(config);
+    const selectedProfile = args.profile || config.selectedProfile;
+    const result = await withAutoresearchLock(
+      { ...config, selectedProfile },
+      { command: 'cycle', profile: selectedProfile },
+      () => runScout({ ...config, selectedProfile }),
+    );
+    if (result.skipped && result.currentOwner) {
+      console.log(`[autoresearch] cycle=skipped reason=locked owner=${result.currentOwner?.command || 'unknown'} profile=${result.currentOwner?.profile || 'n/a'}`);
+      return;
+    }
     if (result.skipped) {
       console.log(`[autoresearch] cycle=skipped reason=${result.reason} pending=${result.pendingPromotion?.itemId || 'n/a'}`);
       return;
@@ -1569,7 +1604,16 @@ async function main() {
   }
 
   if (command === 'promote') {
-    const result = await runPromote(config, args, 'manual');
+    const selectedProfile = args.profile || config.selectedProfile;
+    const result = await withAutoresearchLock(
+      { ...config, selectedProfile },
+      { command: 'promote', profile: selectedProfile },
+      () => runPromote(config, args, 'manual'),
+    );
+    if (result.skipped && result.currentOwner) {
+      console.log(`[autoresearch] promote=skipped reason=locked owner=${result.currentOwner?.command || 'unknown'} profile=${result.currentOwner?.profile || 'n/a'}`);
+      return;
+    }
     if (!result.promoted) {
       console.log(`[autoresearch] promote=noop ${result.reason}`);
       return;
@@ -1580,7 +1624,16 @@ async function main() {
   }
 
   if (command === 'autopromote') {
-    const result = await runAutopromote(config, args);
+    const selectedProfile = args.profile || config.selectedProfile;
+    const result = await withAutoresearchLock(
+      { ...config, selectedProfile },
+      { command: 'autopromote', profile: selectedProfile },
+      () => runAutopromote(config, args),
+    );
+    if (result.skipped && result.currentOwner) {
+      console.log(`[autoresearch] autopromote=skipped reason=locked owner=${result.currentOwner?.command || 'unknown'} profile=${result.currentOwner?.profile || 'n/a'}`);
+      return;
+    }
     if (!result.promoted) {
       console.log(`[autoresearch] autopromote=noop ${result.reason}`);
       return;

@@ -20,6 +20,7 @@ import {
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
 import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs';
+import * as autoresearchCli from '../scripts/pine-autoresearch.mjs';
 import {
   buildScoutOrchestrationState,
   buildScoutRegimeAnalysisArtifact,
@@ -147,6 +148,20 @@ test('resolvePromotionManifestPath returns null without explicit target', () => 
   const result = resolvePromotionManifestPath({ config: { researchRoot: 'D:\\tmp\\research' }, args: {} });
 
   assert.equal(result, null);
+});
+
+test('autoresearchLockPath points at state/autoresearch.lock.json', () => {
+  const result = autoresearchCli.autoresearchLockPath({ researchRoot: 'pine/autoresearch/matrix-a' });
+
+  assert.equal(result, path.join('pine/autoresearch/matrix-a', 'state', 'autoresearch.lock.json'));
+});
+
+test('shouldUseAutoresearchLock only wraps state-mutating commands', () => {
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('cycle'), true);
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('promote'), true);
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('autopromote'), true);
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('digest'), false);
+  assert.equal(autoresearchCli.shouldUseAutoresearchLock('holdout'), false);
 });
 
 test('decideAutoresearchOutcome recommends promote when all gates pass', () => {

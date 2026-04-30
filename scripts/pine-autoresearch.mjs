@@ -360,6 +360,22 @@ export function shouldQueuePromotionManifest(manifest) {
     && manifest.candidateFingerprint !== manifest.championFingerprint;
 }
 
+export function decideCycleStartAction({ pendingPromotion = null, forceCycle = false } = {}) {
+  if (pendingPromotion && !forceCycle) {
+    return {
+      recommendation: 'skip',
+      reason: 'pending_promotion',
+      pendingPromotion,
+      summary: `Skip cycle: pending promotion ${pendingPromotion.itemId} from run ${pendingPromotion.runId}`,
+    };
+  }
+  return {
+    recommendation: 'run',
+    reason: pendingPromotion ? 'forced' : 'no_pending_promotion',
+    pendingPromotion,
+  };
+}
+
 function championPath(config) {
   return path.join(config.researchRoot, 'champion.json');
 }
@@ -922,6 +938,16 @@ async function evaluateMatrix(config, runId, championState, challengerSummary) {
 
 async function runScout(config) {
   await ensureDirs(config);
+  const queue = await readPromotionQueue(promotionQueueFilePath(config));
+  const pendingPromotion = selectNextPendingPromotion(queue);
+  const cycleStartAction = decideCycleStartAction({ pendingPromotion, forceCycle: config.forceCycle === true });
+  if (cycleStartAction.recommendation === 'skip') {
+    return {
+      skipped: true,
+      reason: cycleStartAction.reason,
+      pendingPromotion,
+    };
+  }
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
   const historyEventsBefore = await loadHistoryEvents(config);
@@ -1396,9 +1422,14 @@ async function main() {
     maxConfigs: args['max-configs'],
     minTrades: args['min-trades'],
   });
+  config.forceCycle = args['force-cycle'] === true;
 
   if (command === 'cycle' || command === 'scout') {
     const result = await runScout(config);
+    if (result.skipped) {
+      console.log(`[autoresearch] cycle=skipped reason=${result.reason} pending=${result.pendingPromotion?.itemId || 'n/a'}`);
+      return;
+    }
     console.log(`\n[autoresearch] manifest=${result.manifestPath}`);
     console.log(`[autoresearch] scout=${result.scoutPath}`);
     console.log(`[autoresearch] recommendation=${result.manifest.matrixDecision.recommendation}`);

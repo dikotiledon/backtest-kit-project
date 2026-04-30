@@ -23,6 +23,7 @@ import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs
 import {
   buildScoutOrchestrationState,
   buildScoutRegimeAnalysisArtifact,
+  decideCycleStartAction,
   loadConfig,
   mergeSchedulerTabuFingerprints,
   resolveTrackSelectionState,
@@ -284,6 +285,43 @@ test('shouldQueuePromotionManifest returns false when challenger config or candi
 
   assert.equal(shouldQueuePromotionManifest(missingChallengerConfig), false);
   assert.equal(shouldQueuePromotionManifest(missingCandidateFingerprint), false);
+});
+
+test('decideCycleStartAction skips when pending promotion exists and not forced', () => {
+  const pendingPromotion = {
+    itemId: 'run-123:candidate-fp',
+    runId: 'run-123',
+  };
+
+  const result = decideCycleStartAction({ pendingPromotion });
+
+  assert.equal(result.recommendation, 'skip');
+  assert.equal(result.reason, 'pending_promotion');
+  assert.equal(result.pendingPromotion, pendingPromotion);
+  assert.match(result.summary, /Skip cycle: pending promotion run-123:candidate-fp from run run-123/);
+});
+
+test('decideCycleStartAction allows forced cycle with pending promotion', () => {
+  const pendingPromotion = {
+    itemId: 'run-123:candidate-fp',
+    runId: 'run-123',
+  };
+
+  const result = decideCycleStartAction({ pendingPromotion, forceCycle: true });
+
+  assert.equal(result.recommendation, 'run');
+  assert.equal(result.reason, 'forced');
+  assert.equal(result.pendingPromotion, pendingPromotion);
+  assert.equal(result.summary, undefined);
+});
+
+test('decideCycleStartAction runs when no pending promotion exists', () => {
+  const result = decideCycleStartAction();
+
+  assert.equal(result.recommendation, 'run');
+  assert.equal(result.reason, 'no_pending_promotion');
+  assert.equal(result.pendingPromotion, null);
+  assert.equal(result.summary, undefined);
 });
 
 test('buildPromotionQueueItem accepts a promote manifest from autoresearch output', () => {

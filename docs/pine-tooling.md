@@ -68,7 +68,7 @@ Cache rules:
 
 - reads local library source files
 - runs `node_modules/@backtest-kit/cli/build/index.mjs`
-- writes generated dump files next to the input `.pine`
+- writes generated dump files under `<pine-dir>/dump/`, where `<pine-dir>` is the directory containing the flattened file
 
 ### Example
 

@@ -78,18 +78,34 @@ export async function readPromotionQueue(queuePath) {
     raw = await fs.readFile(queuePath, 'utf8');
   } catch (error) {
     if (isMissingError(error)) {
-      return { events: [], items: [], pending: [] };
+      return { events: [], items: [], pending: [], errors: [], orphanStatuses: [] };
     }
 
     throw error;
   }
 
-  const events = raw
-    .split(/\r?\n/)
-    .filter(Boolean)
-    .map((line) => JSON.parse(line));
+  const events = [];
+  const errors = [];
+  const lines = raw.split('\n');
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index].replace(/\r$/, '');
+    if (!line || !line.trim()) {
+      continue;
+    }
+
+    try {
+      events.push(JSON.parse(line));
+    } catch (error) {
+      errors.push({
+        lineNumber: index + 1,
+        reason: error?.message ?? String(error),
+      });
+    }
+  }
 
   const itemsById = new Map();
+  const orphanStatuses = [];
 
   for (const event of events) {
     if (event?.type === 'pending' && event.item?.itemId) {
@@ -99,15 +115,25 @@ export async function readPromotionQueue(queuePath) {
       continue;
     }
 
-    if (event?.type === 'status' && event.itemId && itemsById.has(event.itemId)) {
-      const current = itemsById.get(event.itemId);
-      itemsById.set(event.itemId, {
-        ...current,
-        status: event.status ?? current.status,
-        statusAt: event.at ?? current.statusAt ?? null,
-        reason: event.reason ?? null,
-        appliedConfigId: event.appliedConfigId ?? current.appliedConfigId ?? null,
-      });
+    if (event?.type === 'status' && event.itemId) {
+      if (itemsById.has(event.itemId)) {
+        const current = itemsById.get(event.itemId);
+        itemsById.set(event.itemId, {
+          ...current,
+          status: event.status ?? current.status,
+          statusAt: event.at ?? current.statusAt ?? null,
+          reason: event.reason ?? null,
+          appliedConfigId: event.appliedConfigId ?? current.appliedConfigId ?? null,
+        });
+      } else {
+        orphanStatuses.push({
+          itemId: event.itemId,
+          status: event.status ?? null,
+          reason: event.reason ?? null,
+          appliedConfigId: event.appliedConfigId ?? null,
+          at: event.at ?? null,
+        });
+      }
     }
   }
 
@@ -124,6 +150,8 @@ export async function readPromotionQueue(queuePath) {
     events,
     items,
     pending: items.filter((item) => item.status === 'pending'),
+    errors,
+    orphanStatuses,
   };
 }
 

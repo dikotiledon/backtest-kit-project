@@ -52,7 +52,7 @@ test('readPromotionQueue returns empty queue when file is missing', async () => 
 
   const queue = await readPromotionQueue(queuePath);
 
-  assert.deepEqual(queue, { events: [], items: [], pending: [] });
+  assert.deepEqual(queue, { events: [], items: [], pending: [], errors: [], orphanStatuses: [] });
 });
 
 test('readPromotionQueue reduces pending and status events', async () => {
@@ -88,6 +88,95 @@ test('readPromotionQueue reduces pending and status events', async () => {
   assert.equal(queue.items[0].reason, 'cooldown');
   assert.equal(queue.items[0].statusAt, '2026-04-30T00:02:00.000Z');
   assert.equal(queue.pending.length, 0);
+});
+
+test('readPromotionQueue skips malformed lines and records parse errors', async () => {
+  const dir = await makeTempDir();
+  const queuePath = path.join(dir, 'queue.jsonl');
+
+  await fs.writeFile(
+    queuePath,
+    [
+      JSON.stringify({
+        type: 'pending',
+        item: {
+          itemId: 'run-a:fp-a',
+          runId: 'run-a',
+          manifestPath: 'manifests/run-a.json',
+          candidateFingerprint: 'fp-a',
+          championFingerprintAtDecision: 'champ-a',
+          candidateConfigId: 'candidate-a',
+          createdAt: '2026-04-30T00:00:00.000Z',
+        },
+        at: '2026-04-30T00:00:00.000Z',
+      }),
+      '{broken json',
+      '',
+      JSON.stringify({
+        type: 'status',
+        itemId: 'run-a:fp-a',
+        status: 'blocked',
+        reason: 'cooldown',
+        at: '2026-04-30T00:02:00.000Z',
+      }),
+    ].join('\n'),
+    'utf8',
+  );
+
+  const queue = await readPromotionQueue(queuePath);
+
+  assert.equal(queue.events.length, 2);
+  assert.equal(queue.items.length, 1);
+  assert.equal(queue.items[0].status, 'blocked');
+  assert.equal(queue.errors.length, 1);
+  assert.equal(queue.errors[0].lineNumber, 2);
+  assert.match(queue.errors[0].reason, /Unexpected token|JSON/);
+  assert.deepEqual(queue.orphanStatuses, []);
+});
+
+test('readPromotionQueue surfaces status events before pending as orphan statuses', async () => {
+  const dir = await makeTempDir();
+  const queuePath = path.join(dir, 'queue.jsonl');
+
+  await fs.writeFile(
+    queuePath,
+    [
+      JSON.stringify({
+        type: 'status',
+        itemId: 'run-a:fp-a',
+        status: 'blocked',
+        reason: 'cooldown',
+        at: '2026-04-30T00:01:00.000Z',
+      }),
+      JSON.stringify({
+        type: 'pending',
+        item: {
+          itemId: 'run-a:fp-a',
+          runId: 'run-a',
+          manifestPath: 'manifests/run-a.json',
+          candidateFingerprint: 'fp-a',
+          championFingerprintAtDecision: 'champ-a',
+          candidateConfigId: 'candidate-a',
+          createdAt: '2026-04-30T00:00:00.000Z',
+        },
+        at: '2026-04-30T00:00:00.000Z',
+      }),
+    ].join('\n'),
+    'utf8',
+  );
+
+  const queue = await readPromotionQueue(queuePath);
+
+  assert.equal(queue.items.length, 1);
+  assert.equal(queue.items[0].status, 'pending');
+  assert.equal(queue.orphanStatuses.length, 1);
+  assert.deepEqual(queue.orphanStatuses[0], {
+    itemId: 'run-a:fp-a',
+    status: 'blocked',
+    reason: 'cooldown',
+    appliedConfigId: null,
+    at: '2026-04-30T00:01:00.000Z',
+  });
 });
 
 test('duplicate pending events are idempotent by itemId during reduction', async () => {

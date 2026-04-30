@@ -118,7 +118,7 @@ Reduced item fields:
 
 Replay rules:
 - parse errors stay in `errors[]`
-- unknown status before pending becomes `orphanStatuses[]`
+- status event before pending becomes `orphanStatuses[]`
 - duplicate pending by `itemId` is ignored after first insert
 - oldest pending wins in `selectNextPendingPromotion()`
 

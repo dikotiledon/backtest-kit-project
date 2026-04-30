@@ -91,6 +91,19 @@ function round(value, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+export function decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction } = {}) {
+  if (!queuedItem) return { recommendation: 'hold', status: 'blocked', reason: 'No pending promotion item' };
+  if (!manifest) return { recommendation: 'hold', status: 'failed', reason: `Queued manifest missing for ${queuedItem.itemId}` };
+  if (manifest.runId !== queuedItem.runId) return { recommendation: 'hold', status: 'failed', reason: `Manifest runId ${manifest.runId} does not match queued runId ${queuedItem.runId}` };
+  if (manifest.matrixDecision?.recommendation !== 'promote') return { recommendation: 'hold', status: 'stale', reason: `Queued manifest recommendation is ${manifest.matrixDecision?.recommendation || 'unknown'}` };
+  if (!manifest.challenger?.config) return { recommendation: 'hold', status: 'failed', reason: 'Queued manifest has no challenger config' };
+  if (sameConfig(championState?.config, manifest.challenger.config)) return { recommendation: 'hold', status: 'stale', reason: `Champion already matches ${manifest.challenger.configId}` };
+  const currentChampionFingerprint = championState?.configFingerprint || configFingerprint(championState?.config || {});
+  if (queuedItem.championFingerprintAtDecision && currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Current champion changed since queued decision' };
+  if (autoAction?.recommendation !== 'promote') return { recommendation: 'hold', status: 'blocked', reason: autoAction?.summary || 'Autopromote gates did not pass' };
+  return { recommendation: 'promote', status: 'promoted', reason: 'Queued promotion guards passed' };
+}
+
 export function mergeSchedulerTabuFingerprints({ schedulerState = {}, recentRejectedFingerprints = [], tabuLimit = 128 } = {}) {
   const limit = Number.isFinite(tabuLimit) ? Math.max(0, tabuLimit) : 128;
   const current = Array.isArray(schedulerState.tabuRejectedFingerprints)
@@ -583,6 +596,11 @@ async function readLatestManifest(config) {
   } catch {
     return null;
   }
+}
+
+async function readManifestByPath(manifestPath) {
+  if (!manifestPath) return null;
+  return readJson(manifestPath);
 }
 
 async function listRunDirectories(rootDir, prefix = null) {
@@ -1320,10 +1338,10 @@ async function runBlindHoldout(config) {
   return { holdoutPath, payload };
 }
 
-async function runPromote(config, args, mode = 'manual') {
+async function runPromote(config, args, mode = 'manual', manifestOverride = null) {
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
-  const latest = await readLatestManifest(config);
+  const latest = manifestOverride ?? await readLatestManifest(config);
   if (!latest) {
     throw new Error('No latest manifest to promote');
   }
@@ -1383,28 +1401,78 @@ async function runPromote(config, args, mode = 'manual') {
 async function runAutopromote(config, args) {
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
-  const latest = await readLatestManifest(config);
-  if (!latest) {
-    throw new Error('No latest manifest for auto-promotion');
+  const queuePath = promotionQueueFilePath(config);
+  const queue = await readPromotionQueue(queuePath);
+  const queuedItem = selectNextPendingPromotion(queue);
+  if (!queuedItem) {
+    return { promoted: false, reason: 'No pending promotion queue item', gates: {} };
+  }
+
+  let queuedManifest = null;
+  try {
+    queuedManifest = await readManifestByPath(queuedItem.manifestPath);
+  } catch (error) {
+    const manifestReadReason = `manifest_read_failed:${error?.code || error?.message || String(error)}`;
+    await appendPromotionQueueEvent(queuePath, {
+      type: 'status',
+      itemId: queuedItem.itemId,
+      status: 'failed',
+      reason: manifestReadReason,
+    });
+    return { promoted: false, reason: manifestReadReason, gates: {} };
+  }
+
+  if (!queuedManifest) {
+    const manifestReadReason = 'manifest_read_failed:missing_path';
+    await appendPromotionQueueEvent(queuePath, {
+      type: 'status',
+      itemId: queuedItem.itemId,
+      status: 'failed',
+      reason: manifestReadReason,
+    });
+    return { promoted: false, reason: manifestReadReason, gates: {} };
   }
 
   const historyEvents = await loadHistoryEvents(config);
   const action = decideAutoPromotionAction({
-    latestManifest: latest,
+    latestManifest: queuedManifest,
     historyEvents,
     championState,
     policy: config.autoPromotion,
   });
+  const queuedAction = decideQueuedPromotionAction({
+    queuedItem,
+    manifest: queuedManifest,
+    championState,
+    autoAction: action,
+  });
 
-  if (action.recommendation !== 'promote' && !args.force) {
+  if (queuedAction.recommendation !== 'promote' && !args.force) {
+    await appendPromotionQueueEvent(queuePath, {
+      type: 'status',
+      itemId: queuedItem.itemId,
+      status: queuedAction.status,
+      reason: queuedAction.reason,
+    });
     return {
       promoted: false,
-      reason: action.summary,
+      reason: queuedAction.reason,
       gates: action.gates,
+      failedGates: action.failedGates,
     };
   }
 
-  return runPromote(config, { ...args, force: true }, 'auto');
+  const result = await runPromote(config, { ...args, force: true }, 'auto', queuedManifest);
+  if (result.promoted) {
+    await appendPromotionQueueEvent(queuePath, {
+      type: 'status',
+      itemId: queuedItem.itemId,
+      status: 'promoted',
+      reason: 'autopromoted',
+      appliedConfigId: result.appliedConfigId,
+    });
+  }
+  return result;
 }
 
 async function main() {

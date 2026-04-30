@@ -24,6 +24,7 @@ import {
   buildScoutOrchestrationState,
   buildScoutRegimeAnalysisArtifact,
   decideCycleStartAction,
+  decideQueuedPromotionAction,
   loadConfig,
   mergeSchedulerTabuFingerprints,
   resolveTrackSelectionState,
@@ -286,6 +287,98 @@ test('shouldQueuePromotionManifest returns false when challenger config or candi
   assert.equal(shouldQueuePromotionManifest(missingChallengerConfig), false);
   assert.equal(shouldQueuePromotionManifest(missingCandidateFingerprint), false);
 });
+test('decideQueuedPromotionAction promotes valid queued manifest', () => {
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+    championFingerprintAtDecision: 'champion-fp',
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    config: { useTrailingStop: false },
+    configFingerprint: 'champion-fp',
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.deepEqual(result, {
+    recommendation: 'promote',
+    status: 'promoted',
+    reason: 'Queued promotion guards passed',
+  });
+});
+
+test('decideQueuedPromotionAction marks stale when champion changed since queued decision', () => {
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+    championFingerprintAtDecision: 'champion-fp-at-decision',
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    config: { useTrailingStop: false },
+    configFingerprint: 'champion-fp-current',
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.status, 'stale');
+  assert.equal(result.reason, 'Current champion changed since queued decision');
+});
+
+test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    config: { useTrailingStop: false },
+  };
+  const autoAction = { recommendation: 'hold', summary: 'Auto-promote hold: failed cooldown gate(s).' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.status, 'blocked');
+  assert.equal(result.reason, 'Auto-promote hold: failed cooldown gate(s).');
+});
+
+test('decideQueuedPromotionAction fails when queued manifest is missing or runId mismatches', () => {
+  const queuedItem = { itemId: 'run-a:candidate-fp', runId: 'run-a' };
+  const missingManifest = decideQueuedPromotionAction({ queuedItem, manifest: null });
+  const mismatchedManifest = decideQueuedPromotionAction({
+    queuedItem,
+    manifest: {
+      runId: 'run-b',
+      matrixDecision: { recommendation: 'promote' },
+      challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+    },
+    championState: { config: { useTrailingStop: false } },
+    autoAction: { recommendation: 'promote' },
+  });
+
+  assert.equal(missingManifest.status, 'failed');
+  assert.equal(missingManifest.reason, 'Queued manifest missing for run-a:candidate-fp');
+  assert.equal(mismatchedManifest.status, 'failed');
+  assert.equal(mismatchedManifest.reason, 'Manifest runId run-b does not match queued runId run-a');
+});
+
 
 test('decideCycleStartAction skips when pending promotion exists and not forced', () => {
   const pendingPromotion = {

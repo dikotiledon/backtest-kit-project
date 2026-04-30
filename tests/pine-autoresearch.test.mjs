@@ -164,6 +164,15 @@ test('shouldUseAutoresearchLock only wraps state-mutating commands', () => {
   assert.equal(autoresearchCli.shouldUseAutoresearchLock('holdout'), false);
 });
 
+test('formatAutoresearchLockSkip preserves reclaim_in_progress reason', () => {
+  const result = autoresearchCli.formatAutoresearchLockSkip('cycle', {
+    reason: 'reclaim_in_progress',
+    currentOwner: { command: 'autopromote', profile: 'matrix-a' },
+  });
+
+  assert.equal(result, '[autoresearch] cycle=skipped reason=reclaim_in_progress owner=autopromote profile=matrix-a');
+});
+
 test('decideAutoresearchOutcome recommends promote when all gates pass', () => {
   const incumbent = makeResult({
     configId: 'incumbent',

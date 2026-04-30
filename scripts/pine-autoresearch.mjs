@@ -152,6 +152,15 @@ export function shouldUseAutoresearchLock(command) {
   return ['cycle', 'promote', 'autopromote'].includes(command);
 }
 
+export function formatAutoresearchLockSkip(command, result = {}) {
+  const reason = result.reason || 'locked';
+  const owner = result.currentOwner;
+  const ownerSuffix = owner
+    ? ` owner=${owner.command || 'unknown'} profile=${owner.profile || 'n/a'}`
+    : '';
+  return `[autoresearch] ${command}=skipped reason=${reason}${ownerSuffix}`;
+}
+
 export function mergeSchedulerTabuFingerprints({ schedulerState = {}, recentRejectedFingerprints = [], tabuLimit = 128 } = {}) {
   const limit = Number.isFinite(tabuLimit) ? Math.max(0, tabuLimit) : 128;
   const current = Array.isArray(schedulerState.tabuRejectedFingerprints)
@@ -1571,7 +1580,7 @@ async function main() {
       () => runScout({ ...config, selectedProfile }),
     );
     if (result.skipped && result.currentOwner) {
-      console.log(`[autoresearch] cycle=skipped reason=locked owner=${result.currentOwner?.command || 'unknown'} profile=${result.currentOwner?.profile || 'n/a'}`);
+      console.log(formatAutoresearchLockSkip('cycle', result));
       return;
     }
     if (result.skipped) {
@@ -1611,7 +1620,7 @@ async function main() {
       () => runPromote(config, args, 'manual'),
     );
     if (result.skipped && result.currentOwner) {
-      console.log(`[autoresearch] promote=skipped reason=locked owner=${result.currentOwner?.command || 'unknown'} profile=${result.currentOwner?.profile || 'n/a'}`);
+      console.log(formatAutoresearchLockSkip('promote', result));
       return;
     }
     if (!result.promoted) {
@@ -1631,7 +1640,7 @@ async function main() {
       () => runAutopromote(config, args),
     );
     if (result.skipped && result.currentOwner) {
-      console.log(`[autoresearch] autopromote=skipped reason=locked owner=${result.currentOwner?.command || 'unknown'} profile=${result.currentOwner?.profile || 'n/a'}`);
+      console.log(formatAutoresearchLockSkip('autopromote', result));
       return;
     }
     if (!result.promoted) {

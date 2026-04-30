@@ -3,6 +3,13 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { analyzeJsonlFile } from './lib/pine-optimizer.mjs';
+import {
+  appendPromotionQueueEvent,
+  buildPromotionQueueItem,
+  promotionQueuePath,
+  readPromotionQueue,
+  selectNextPendingPromotion,
+} from './lib/pine-promotion-queue.mjs';
 import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
 import { buildIncumbentSearchBatch } from './lib/pine-search-policy.mjs';
 import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
@@ -340,6 +347,17 @@ function manifestsDir(config) {
 
 function latestManifestPath(config) {
   return path.join(config.researchRoot, 'latest.json');
+}
+
+function promotionQueueFilePath(config) {
+  return promotionQueuePath({ researchRoot: config.researchRoot });
+}
+
+export function shouldQueuePromotionManifest(manifest) {
+  return manifest?.matrixDecision?.recommendation === 'promote'
+    && Boolean(manifest?.challenger?.config)
+    && Boolean(manifest?.candidateFingerprint)
+    && manifest.candidateFingerprint !== manifest.championFingerprint;
 }
 
 function championPath(config) {
@@ -1057,6 +1075,19 @@ async function runScout(config) {
 
   await writeJson(manifestPath, manifest);
   await writeJson(latestManifestPath(trackedConfig), { ...manifest, manifestPath });
+
+  if (shouldQueuePromotionManifest(manifest)) {
+    const queueItem = buildPromotionQueueItem({
+      manifest: { ...manifest, manifestPath },
+      createdAt: manifest.generatedAt,
+    });
+    await appendPromotionQueueEvent(promotionQueueFilePath(trackedConfig), {
+      type: 'pending',
+      item: queueItem,
+      at: manifest.generatedAt,
+    });
+  }
+
   await appendJsonl(historyPath(trackedConfig), {
     timestamp: manifest.generatedAt,
     type: 'cycle',

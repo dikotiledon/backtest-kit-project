@@ -19,6 +19,7 @@ import {
   selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
+import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs';
 import {
   buildScoutOrchestrationState,
   buildScoutRegimeAnalysisArtifact,
@@ -26,6 +27,7 @@ import {
   mergeSchedulerTabuFingerprints,
   resolveTrackSelectionState,
   selectChangedMatrixCandidate,
+  shouldQueuePromotionManifest,
 } from '../scripts/pine-autoresearch.mjs';
 
 function makeResult({
@@ -236,6 +238,76 @@ test('decideAutoresearchOutcome accepts return-basis optimizer metrics with raw 
 
   assert.equal(result.recommendation, 'hold');
   assert.match(result.failedGates.join(','), /roi/);
+});
+
+test('shouldQueuePromotionManifest returns true for changed promote manifests', () => {
+  const manifest = {
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { config: { useTrailingStop: true }, configId: 'candidate-a' },
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+  };
+
+  assert.equal(shouldQueuePromotionManifest(manifest), true);
+});
+
+test('shouldQueuePromotionManifest returns false for hold or unchanged fingerprints', () => {
+  const holdManifest = {
+    matrixDecision: { recommendation: 'hold' },
+    challenger: { config: { useTrailingStop: true } },
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+  };
+  const unchangedManifest = {
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { config: { useTrailingStop: true } },
+    candidateFingerprint: 'same-fp',
+    championFingerprint: 'same-fp',
+  };
+
+  assert.equal(shouldQueuePromotionManifest(holdManifest), false);
+  assert.equal(shouldQueuePromotionManifest(unchangedManifest), false);
+});
+
+test('shouldQueuePromotionManifest returns false when challenger config or candidate fingerprint is missing', () => {
+  const missingChallengerConfig = {
+    matrixDecision: { recommendation: 'promote' },
+    challenger: {},
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+  };
+  const missingCandidateFingerprint = {
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { config: { useTrailingStop: true } },
+    championFingerprint: 'champion-fp',
+  };
+
+  assert.equal(shouldQueuePromotionManifest(missingChallengerConfig), false);
+  assert.equal(shouldQueuePromotionManifest(missingCandidateFingerprint), false);
+});
+
+test('buildPromotionQueueItem accepts a promote manifest from autoresearch output', () => {
+  const manifest = {
+    runId: 'run-a',
+    generatedAt: '2026-04-30T00:00:00.000Z',
+    manifestPath: 'research/manifests/run-a.json',
+    matrixDecision: { recommendation: 'promote' },
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+    champion: { configId: 'champion-a' },
+  };
+
+  assert.equal(shouldQueuePromotionManifest(manifest), true);
+
+  const queueItem = buildPromotionQueueItem({
+    manifest: { ...manifest, manifestPath: 'research/manifests/run-a.json' },
+    createdAt: manifest.generatedAt,
+  });
+
+  assert.equal(queueItem.itemId, 'run-a:candidate-fp');
+  assert.equal(queueItem.manifestPath, 'research/manifests/run-a.json');
+  assert.equal(queueItem.createdAt, '2026-04-30T00:00:00.000Z');
 });
 
 test('decideAutoresearchOutcome holds when expectancy regresses despite a higher win rate', () => {

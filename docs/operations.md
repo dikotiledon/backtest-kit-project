@@ -90,20 +90,21 @@ node scripts/pine-autoresearch.mjs autopromote --config config/pine-autoresearch
 Three guards exist:
 
 1. **Task Scheduler**
-   - installer sets `MultipleInstances=IgnoreNew`
+   - installer attempts to set `MultipleInstances=IgnoreNew` and warns if unavailable/fails
    - scheduler ignores a new trigger while the same task is already running
 
 2. **Wrapper scheduler lock**
    - file: `tmp/pine-autoresearch-locks/scheduler.lock`
    - common wrapper: `scripts/ops/pine-autoresearch-run.ps1`
    - blocks overlapping wrapper runs across micro/full/digest/autopromote
-   - stale reclaim happens after 12h if the recorded PID is dead
-   - reclaim uses a `.reclaim` guard file so only one process can recover the lock
+   - stale reclaim happens after 12h when `pid` + `startedAt` show the process is dead
+   - fresh/active locks skip reclaim
 
 3. **JS canonical lock**
    - file: `state/autoresearch.lock.json`
    - used by `cycle`, `promote`, and `autopromote`
    - owner fields: token, pid, command, profile, acquiredAt, staleAfterMs, cwd
+   - reclaim uses a `.reclaim` guard file so only one process can recover a stale lock at once
    - stale owners can be reclaimed only when the process is dead and the snapshot still matches
 
 Overlap behavior:

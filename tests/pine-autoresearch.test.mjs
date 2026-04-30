@@ -90,9 +90,19 @@ test('resolvePromotionManifestPath resolves run-id under manifests dir', () => {
   assert.equal(result, path.join(config.researchRoot, 'manifests', 'run-123.json'));
 });
 
-test('resolvePromotionManifestPath rejects unsafe run-id traversal', () => {
+test('resolvePromotionManifestPath rejects unsafe run-id patterns', () => {
   const config = { researchRoot: 'D:\\tmp\\research' };
-  for (const runId of ['../evil', 'foo\\bar']) {
+  const unsafeRunIds = [
+    '/absolute',
+    'foo/bar',
+    '..',
+    'a/../b',
+    '../evil',
+    'foo\\bar',
+    'foo/..\\bar',
+  ];
+
+  for (const runId of unsafeRunIds) {
     assert.throws(() => resolvePromotionManifestPath({ config, args: { 'run-id': runId } }), (error) => {
       assert.equal(error instanceof Error, true);
       assert.equal(error.message, `Invalid run-id for manifest lookup: ${runId}`);

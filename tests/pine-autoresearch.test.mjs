@@ -24,8 +24,10 @@ import {
   buildScoutOrchestrationState,
   buildScoutRegimeAnalysisArtifact,
   decideCycleStartAction,
+  canForceQueuedPromotion,
   decideQueuedPromotionAction,
   loadConfig,
+  resolveAutopromoteQueueStatus,
   mergeSchedulerTabuFingerprints,
   resolveTrackSelectionState,
   selectChangedMatrixCandidate,
@@ -361,6 +363,7 @@ test('decideQueuedPromotionAction holds stale when queued champion fingerprint i
     assert.equal(result.recommendation, 'hold');
     assert.equal(result.status, 'stale');
     assert.equal(result.reason, 'Queued champion fingerprint missing at decision');
+    assert.equal(canForceQueuedPromotion(result), false);
   }
 });
 
@@ -386,6 +389,19 @@ test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
   assert.equal(result.recommendation, 'hold');
   assert.equal(result.status, 'blocked');
   assert.equal(result.reason, 'Auto-promote hold: failed cooldown gate(s).');
+  assert.equal(canForceQueuedPromotion(result), true);
+});
+
+test('resolveAutopromoteQueueStatus maps promoted false results to a queue status', () => {
+  assert.equal(resolveAutopromoteQueueStatus({ promoted: true, reason: 'autopromoted' }), 'promoted');
+  assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'Champion already matches candidate-a' }), 'stale');
+  assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'promotion_noop' }), 'blocked');
+});
+
+test('canForceQueuedPromotion only allows blocked queue actions', () => {
+  assert.equal(canForceQueuedPromotion({ status: 'blocked' }), true);
+  assert.equal(canForceQueuedPromotion({ status: 'stale' }), false);
+  assert.equal(canForceQueuedPromotion({ status: 'failed' }), false);
 });
 
 test('decideQueuedPromotionAction fails when queued manifest is missing or runId mismatches', () => {

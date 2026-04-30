@@ -105,6 +105,27 @@ export function decideQueuedPromotionAction({ queuedItem, manifest, championStat
   return { recommendation: 'promote', status: 'promoted', reason: 'Queued promotion guards passed' };
 }
 
+export function canForceQueuedPromotion(queuedAction = null) {
+  return queuedAction?.status === 'blocked';
+}
+
+export function resolveAutopromoteQueueStatus(result = {}) {
+  if (result?.promoted) return 'promoted';
+  const reason = String(result?.reason || 'promotion_noop');
+  if (/already matches|already promoted/i.test(reason)) return 'stale';
+  return 'blocked';
+}
+
+async function appendAutopromoteQueueStatus(queuePath, queuedItem, result = {}) {
+  await appendPromotionQueueEvent(queuePath, {
+    type: 'status',
+    itemId: queuedItem.itemId,
+    status: resolveAutopromoteQueueStatus(result),
+    reason: result.reason || 'promotion_noop',
+    appliedConfigId: result.appliedConfigId ?? null,
+  });
+}
+
 export function mergeSchedulerTabuFingerprints({ schedulerState = {}, recentRejectedFingerprints = [], tabuLimit = 128 } = {}) {
   const limit = Number.isFinite(tabuLimit) ? Math.max(0, tabuLimit) : 128;
   const current = Array.isArray(schedulerState.tabuRejectedFingerprints)
@@ -1448,7 +1469,8 @@ async function runAutopromote(config, args) {
     autoAction: action,
   });
 
-  if (queuedAction.recommendation !== 'promote' && !args.force) {
+  const forceableQueuedAction = args.force && canForceQueuedPromotion(queuedAction);
+  if (queuedAction.recommendation !== 'promote' && !forceableQueuedAction) {
     await appendPromotionQueueEvent(queuePath, {
       type: 'status',
       itemId: queuedItem.itemId,
@@ -1464,15 +1486,10 @@ async function runAutopromote(config, args) {
   }
 
   const result = await runPromote(config, { ...args, force: true }, 'auto', queuedManifest);
-  if (result.promoted) {
-    await appendPromotionQueueEvent(queuePath, {
-      type: 'status',
-      itemId: queuedItem.itemId,
-      status: 'promoted',
-      reason: 'autopromoted',
-      appliedConfigId: result.appliedConfigId,
-    });
-  }
+  await appendAutopromoteQueueStatus(queuePath, queuedItem, result.promoted ? {
+    ...result,
+    reason: result.reason || 'autopromoted',
+  } : result);
   return result;
 }
 

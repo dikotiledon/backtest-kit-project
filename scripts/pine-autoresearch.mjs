@@ -99,7 +99,8 @@ export function decideQueuedPromotionAction({ queuedItem, manifest, championStat
   if (!manifest.challenger?.config) return { recommendation: 'hold', status: 'failed', reason: 'Queued manifest has no challenger config' };
   if (sameConfig(championState?.config, manifest.challenger.config)) return { recommendation: 'hold', status: 'stale', reason: `Champion already matches ${manifest.challenger.configId}` };
   const currentChampionFingerprint = championState?.configFingerprint || configFingerprint(championState?.config || {});
-  if (queuedItem.championFingerprintAtDecision && currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Current champion changed since queued decision' };
+  if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Queued champion fingerprint missing at decision' };
+  if (currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Current champion changed since queued decision' };
   if (autoAction?.recommendation !== 'promote') return { recommendation: 'hold', status: 'blocked', reason: autoAction?.summary || 'Autopromote gates did not pass' };
   return { recommendation: 'promote', status: 'promoted', reason: 'Queued promotion guards passed' };
 }

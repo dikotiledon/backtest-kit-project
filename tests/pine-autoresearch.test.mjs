@@ -337,10 +337,38 @@ test('decideQueuedPromotionAction marks stale when champion changed since queued
   assert.equal(result.reason, 'Current champion changed since queued decision');
 });
 
+test('decideQueuedPromotionAction holds stale when queued champion fingerprint is missing', () => {
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    config: { useTrailingStop: false },
+    configFingerprint: 'champion-fp-current',
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  for (const championFingerprintAtDecision of [undefined, null, '']) {
+    const queuedItem = {
+      itemId: 'run-a:candidate-fp',
+      runId: 'run-a',
+      championFingerprintAtDecision,
+    };
+
+    const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+    assert.equal(result.recommendation, 'hold');
+    assert.equal(result.status, 'stale');
+    assert.equal(result.reason, 'Queued champion fingerprint missing at decision');
+  }
+});
+
 test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
   const queuedItem = {
     itemId: 'run-a:candidate-fp',
     runId: 'run-a',
+    championFingerprintAtDecision: 'champion-fp',
   };
   const manifest = {
     runId: 'run-a',
@@ -349,6 +377,7 @@ test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
   };
   const championState = {
     config: { useTrailingStop: false },
+    configFingerprint: 'champion-fp',
   };
   const autoAction = { recommendation: 'hold', summary: 'Auto-promote hold: failed cooldown gate(s).' };
 

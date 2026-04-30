@@ -37,6 +37,7 @@ If a historical doc conflicts with code or tests, trust code/tests first.
 
 ### Existing focused docs
 - [backtest_strategy_structure.md](./backtest_strategy_structure.md)
+- [backtest_actions.md](./backtest_actions.md)
 - [backtest_pinets_usage.md](./backtest_pinets_usage.md)
 - [backtest_logging_jsonl.md](./backtest_logging_jsonl.md)
 - [backtest_graph_pattern.md](./backtest_graph_pattern.md)

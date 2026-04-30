@@ -17,6 +17,7 @@ The upstream CLI and runtime live in `@backtest-kit/cli` and related packages. T
 |---|---|
 | `content/` | Strategy entry points and research strategy files |
 | `math/` | Pine scripts and generated Pine artifacts |
+| `pine/` | Local Pine research workspace: autoresearch, datasets, sweeps, scripts, and test Pine files |
 | `modules/` | Optional runtime hooks loaded by CLI mode |
 | `report/` | Strategy research reports and comparisons |
 | `scripts/` | Local automation and data tooling |

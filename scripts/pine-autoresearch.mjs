@@ -380,10 +380,29 @@ function manifestsDir(config) {
   return path.join(config.researchRoot, 'manifests');
 }
 
+function hasUnsafeManifestRunId(runId) {
+  const value = String(runId);
+  return value.includes('/') || value.includes('\\') || value.includes('..');
+}
+
 export function resolvePromotionManifestPath({ config, args = {} } = {}) {
   if (args.manifest) return args.manifest;
-  if (args['run-id']) return path.join(manifestsDir(config), `${args['run-id']}.json`);
+  if (args['run-id']) {
+    const runId = String(args['run-id']);
+    if (hasUnsafeManifestRunId(runId)) {
+      throw new Error(`Invalid run-id for manifest lookup: ${runId}`);
+    }
+    return path.join(manifestsDir(config), `${runId}.json`);
+  }
   return null;
+}
+
+export function selectPromotionManifestSource({ latest = null, explicitManifestPath = null, manifestOverride = null } = {}) {
+  if (manifestOverride) return manifestOverride;
+  if (explicitManifestPath && latest && !latest.manifestPath) {
+    return { ...latest, manifestPath: explicitManifestPath };
+  }
+  return latest;
 }
 
 function latestManifestPath(config) {
@@ -1370,12 +1389,10 @@ async function runPromote(config, args, mode = 'manual', manifestOverride = null
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
   const explicitManifestPath = resolvePromotionManifestPath({ config, args });
-  const latest = manifestOverride || (explicitManifestPath ? await readManifestByPath(explicitManifestPath) : await readLatestManifest(config));
+  const loadedLatest = manifestOverride || (explicitManifestPath ? await readManifestByPath(explicitManifestPath) : await readLatestManifest(config));
+  const latest = selectPromotionManifestSource({ latest: loadedLatest, explicitManifestPath, manifestOverride });
   if (!latest) {
     throw new Error('No latest manifest to promote');
-  }
-  if (explicitManifestPath && latest && !latest.manifestPath) {
-    latest.manifestPath = explicitManifestPath;
   }
 
   const decision = latest.matrixDecision || latest.decision;

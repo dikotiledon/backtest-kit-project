@@ -32,6 +32,7 @@ import {
   resolvePromotionManifestPath,
   resolveTrackSelectionState,
   selectChangedMatrixCandidate,
+  selectPromotionManifestSource,
   shouldQueuePromotionManifest,
 } from '../scripts/pine-autoresearch.mjs';
 
@@ -87,6 +88,49 @@ test('resolvePromotionManifestPath resolves run-id under manifests dir', () => {
   });
 
   assert.equal(result, path.join(config.researchRoot, 'manifests', 'run-123.json'));
+});
+
+test('resolvePromotionManifestPath rejects unsafe run-id traversal', () => {
+  const config = { researchRoot: 'D:\\tmp\\research' };
+  for (const runId of ['../evil', 'foo\\bar']) {
+    assert.throws(() => resolvePromotionManifestPath({ config, args: { 'run-id': runId } }), (error) => {
+      assert.equal(error instanceof Error, true);
+      assert.equal(error.message, `Invalid run-id for manifest lookup: ${runId}`);
+      return true;
+    });
+  }
+});
+
+test('selectPromotionManifestSource preserves manifestOverride reference', () => {
+  const manifestOverride = {
+    runId: 'run-override',
+    challenger: { configId: 'challenger', config: { a: 1 } },
+    matrixDecision: { recommendation: 'promote' },
+  };
+  const selected = selectPromotionManifestSource({
+    latest: { runId: 'run-loaded', challenger: { configId: 'loaded', config: { a: 2 } }, matrixDecision: { recommendation: 'promote' } },
+    explicitManifestPath: 'D:\\tmp\\research\\manifests\\run-override.json',
+    manifestOverride,
+  });
+
+  assert.equal(selected, manifestOverride);
+  assert.equal(manifestOverride.manifestPath, undefined);
+});
+
+test('selectPromotionManifestSource backfills manifestPath for explicit manifest loads', () => {
+  const latest = {
+    runId: 'run-loaded',
+    challenger: { configId: 'loaded', config: { a: 2 } },
+    matrixDecision: { recommendation: 'promote' },
+  };
+  const selected = selectPromotionManifestSource({
+    latest,
+    explicitManifestPath: 'D:\\tmp\\research\\manifests\\run-loaded.json',
+  });
+
+  assert.notEqual(selected, latest);
+  assert.equal(selected.manifestPath, 'D:\\tmp\\research\\manifests\\run-loaded.json');
+  assert.equal(latest.manifestPath, undefined);
 });
 
 test('resolvePromotionManifestPath returns null without explicit target', () => {

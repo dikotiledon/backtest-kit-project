@@ -440,6 +440,12 @@ export function selectPromotionManifestSource({ latest = null, explicitManifestP
   return latest;
 }
 
+export function withManifestPath(manifest, manifestPath) {
+  if (!manifest || !manifestPath) return manifest;
+  if (manifest.manifestPath === manifestPath) return manifest;
+  return { ...manifest, manifestPath };
+}
+
 function latestManifestPath(config) {
   return path.join(config.researchRoot, 'latest.json');
 }
@@ -1517,16 +1523,17 @@ async function runAutopromote(config, args) {
     return { promoted: false, reason: manifestReadReason, gates: {} };
   }
 
+  const queuedManifestWithPath = withManifestPath(queuedManifest, queuedItem.manifestPath);
   const historyEvents = await loadHistoryEvents(config);
   const action = decideAutoPromotionAction({
-    latestManifest: queuedManifest,
+    latestManifest: queuedManifestWithPath,
     historyEvents,
     championState,
     policy: config.autoPromotion,
   });
   const queuedAction = decideQueuedPromotionAction({
     queuedItem,
-    manifest: queuedManifest,
+    manifest: queuedManifestWithPath,
     championState,
     autoAction: action,
   });
@@ -1547,7 +1554,7 @@ async function runAutopromote(config, args) {
     };
   }
 
-  const result = await runPromote(config, { ...args, force: true }, 'auto', queuedManifest);
+  const result = await runPromote(config, { ...args, force: true }, 'auto', queuedManifestWithPath);
   await appendAutopromoteQueueStatus(queuePath, queuedItem, result.promoted ? {
     ...result,
     reason: result.reason || 'autopromoted',

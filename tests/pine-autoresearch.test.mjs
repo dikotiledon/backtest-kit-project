@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -35,7 +37,52 @@ import {
   selectChangedMatrixCandidate,
   selectPromotionManifestSource,
   shouldQueuePromotionManifest,
+  withManifestPath,
 } from '../scripts/pine-autoresearch.mjs';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+function psSingleQuote(value) {
+  return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+async function runPwsh(command, { cwd = repoRoot } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], {
+      cwd,
+      shell: false,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (error) => resolve({ code: -1, stdout, stderr: `${stderr}${error.message ? `\n${error.message}` : ''}`.trim() }));
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function runPwshFile(scriptPath, args = [], { cwd = repoRoot } = {}) {
+  return new Promise((resolve) => {
+    const child = spawn('pwsh', ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', scriptPath, ...args], {
+      cwd,
+      shell: false,
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (error) => resolve({ code: -1, stdout, stderr: `${stderr}${error.message ? `\n${error.message}` : ''}`.trim() }));
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function readIfExists(filePath) {
+  try {
+    return await fs.readFile(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+}
 
 function makeResult({
   configId,
@@ -128,6 +175,20 @@ test('selectPromotionManifestSource preserves manifestOverride reference', () =>
   assert.equal(manifestOverride.manifestPath, undefined);
 });
 
+test('withManifestPath copies manifest and preserves exact queued path', () => {
+  const manifest = {
+    runId: 'run-queued',
+    challenger: { configId: 'challenger', config: { a: 1 } },
+    matrixDecision: { recommendation: 'promote' },
+  };
+
+  const selected = withManifestPath(manifest, 'pine/autoresearch/m/manifests/run-queued.json');
+
+  assert.notEqual(selected, manifest);
+  assert.equal(manifest.manifestPath, undefined);
+  assert.equal(selected.manifestPath, 'pine/autoresearch/m/manifests/run-queued.json');
+});
+
 test('selectPromotionManifestSource backfills manifestPath for explicit manifest loads', () => {
   const latest = {
     runId: 'run-loaded',
@@ -148,6 +209,95 @@ test('resolvePromotionManifestPath returns null without explicit target', () => 
   const result = resolvePromotionManifestPath({ config: { researchRoot: 'D:\\tmp\\research' }, args: {} });
 
   assert.equal(result, null);
+});
+
+test('pine-autoresearch-run.ps1 parses cleanly', async () => {
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const command = `$null = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuote(scriptPath)}, [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Host $_.Message }; exit 1 }`;
+  const result = await runPwsh(command);
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+});
+
+test('pine-autoresearch-run.ps1 dry-run skips lock acquisition', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-dry-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const markerPath = path.join(tempRoot, 'marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'dry-run-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
+    '-RepoRoot', tempRoot,
+    '-DryRun',
+  ], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /\[dry-run\]/);
+  assert.equal(await readIfExists(path.join(tempRoot, 'tmp', 'pine-autoresearch-locks', 'scheduler.lock')), null);
+  assert.equal(await readIfExists(markerPath), null);
+});
+
+test('pine-autoresearch-run.ps1 skips a fresh scheduler lock', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-fresh-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockDir = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks');
+  await fs.mkdir(lockDir, { recursive: true });
+  await fs.writeFile(path.join(lockDir, 'scheduler.lock'), [
+    'task=fresh-check',
+    `pid=${process.pid}`,
+    `startedAt=${new Date().toISOString()}`,
+    '',
+  ].join('\n'), 'utf8');
+  const markerPath = path.join(tempRoot, 'fresh-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'fresh-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
+    '-RepoRoot', tempRoot,
+  ], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /skipped: scheduler lock exists/);
+  assert.equal(await readIfExists(markerPath), null);
+  assert.notEqual(await readIfExists(path.join(lockDir, 'scheduler.lock')), null);
+});
+
+test('pine-autoresearch-run.ps1 reclaims a stale dead scheduler lock', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-stale-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockDir = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks');
+  await fs.mkdir(lockDir, { recursive: true });
+  await fs.writeFile(path.join(lockDir, 'scheduler.lock'), [
+    'task=stale-check',
+    'pid=99999999',
+    `startedAt=${new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString()}`,
+    '',
+  ].join('\n'), 'utf8');
+  const markerPath = path.join(tempRoot, 'stale-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'stale-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
+    '-RepoRoot', tempRoot,
+  ], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /scheduler lock stale; reclaiming/);
+  assert.equal((await readIfExists(markerPath))?.trim(), 'ran');
+  assert.equal(await readIfExists(path.join(lockDir, 'scheduler.lock')), null);
+});
+
+test('pine-autoresearch-run.ps1 removes its lock after a nonzero command', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-fail-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockPath = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks', 'scheduler.lock');
+  const markerPath = path.join(tempRoot, 'nonzero-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'fail-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'; exit 7`,
+    '-RepoRoot', tempRoot,
+  ], { cwd: repoRoot });
+
+  assert.notEqual(result.code, 0);
+  assert.equal((await readIfExists(markerPath))?.trim(), 'ran');
+  assert.equal(await readIfExists(lockPath), null);
 });
 
 test('autoresearchLockPath points at state/autoresearch.lock.json', () => {

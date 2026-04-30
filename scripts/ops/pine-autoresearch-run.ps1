@@ -19,8 +19,121 @@ if (-not $RepoRoot) {
 $timestamp = Get-Date -Format 'yyyy-MM-ddTHH-mm-ss'
 $logDir = Join-Path $RepoRoot 'tmp\pine-autoresearch-logs'
 $logPath = Join-Path $logDir ("$TaskName-$timestamp.log")
+$lockStaleAfter = [TimeSpan]::FromHours(12)
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+
+function Test-ProcessAlive {
+  param([int]$ProcessId)
+
+  if ($ProcessId -le 0) {
+    return $false
+  }
+
+  try {
+    Get-Process -Id $ProcessId -ErrorAction Stop | Out-Null
+    return $true
+  } catch {
+    return $false
+  }
+}
+
+function Get-SchedulerLockPayload {
+  param([string]$LockPath)
+
+  try {
+    $raw = Get-Content -LiteralPath $LockPath -Raw -ErrorAction Stop
+  } catch {
+    return $null
+  }
+
+  if ([string]::IsNullOrWhiteSpace($raw)) {
+    return $null
+  }
+
+  try {
+    return ConvertFrom-StringData -StringData $raw
+  } catch {
+    return $null
+  }
+}
+
+function Test-SchedulerLockStale {
+  param(
+    [string]$LockPath,
+    [hashtable]$Payload,
+    [TimeSpan]$StaleAfter
+  )
+
+  try {
+    $lockInfo = Get-Item -LiteralPath $LockPath -ErrorAction Stop
+  } catch {
+    return $false
+  }
+
+  if ($Payload -and $Payload.ContainsKey('pid') -and $Payload.ContainsKey('startedAt')) {
+    $startedAt = $null
+    $pidValue = $null
+    try {
+      $startedAt = [DateTimeOffset]::Parse($Payload.startedAt, [System.Globalization.CultureInfo]::InvariantCulture, [System.Globalization.DateTimeStyles]::RoundtripKind)
+    } catch {
+      $startedAt = $null
+    }
+
+    try {
+      $pidValue = [int]$Payload.pid
+    } catch {
+      $pidValue = $null
+    }
+
+    if ($startedAt -and $pidValue) {
+      $age = (Get-Date).ToUniversalTime() - $startedAt.UtcDateTime
+      $pidAlive = Test-ProcessAlive -ProcessId $pidValue
+      return ($age -ge $StaleAfter) -and (-not $pidAlive)
+    }
+  }
+
+  $fileAge = (Get-Date) - $lockInfo.LastWriteTime
+  return $fileAge -ge $StaleAfter
+}
+
+function Acquire-SchedulerLock {
+  param(
+    [string]$LockFile,
+    [string]$TaskName,
+    [TimeSpan]$StaleAfter
+  )
+
+  $reclaimed = $false
+
+  for ($attempt = 0; $attempt -lt 2; $attempt++) {
+    try {
+      return [System.IO.File]::Open($LockFile, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
+    } catch [System.IO.IOException] {
+      if ($_.Exception.HResult -ne -2147024816) {
+        throw
+      }
+
+      if (-not (Test-Path -LiteralPath $LockFile)) {
+        continue
+      }
+
+      $payload = Get-SchedulerLockPayload -LockPath $LockFile
+      $canReclaim = Test-SchedulerLockStale -LockPath $LockFile -Payload $payload -StaleAfter $StaleAfter
+      if (-not $canReclaim -or $reclaimed) {
+        Write-Host "[$TaskName] skipped: scheduler lock exists at $LockFile"
+        return $null
+      }
+
+      Write-Host "[$TaskName] scheduler lock stale; reclaiming $LockFile"
+      Remove-Item -Force $LockFile -ErrorAction SilentlyContinue
+      $reclaimed = $true
+    }
+  }
+
+  Write-Host "[$TaskName] skipped: scheduler lock exists at $LockFile"
+  return $null
+}
 
 if ($DryRun) {
   Write-Host "[dry-run] repo=$RepoRoot"
@@ -38,15 +151,9 @@ $mutex = $null
 $hasLock = $false
 $locationPushed = $false
 try {
-  try {
-    $lockStream = [System.IO.File]::Open($lockFile, [System.IO.FileMode]::CreateNew, [System.IO.FileAccess]::Write, [System.IO.FileShare]::None)
-  } catch [System.IO.IOException] {
-    if ($_.Exception.HResult -eq -2147024816) {
-      Write-Host "[$TaskName] skipped: scheduler lock exists at $lockFile"
-      return
-    }
-
-    throw
+  $lockStream = Acquire-SchedulerLock -LockFile $lockFile -TaskName $TaskName -StaleAfter $lockStaleAfter
+  if (-not $lockStream) {
+    return
   }
 
   try {

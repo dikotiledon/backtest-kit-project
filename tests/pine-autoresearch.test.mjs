@@ -29,6 +29,7 @@ import {
   loadConfig,
   resolveAutopromoteQueueStatus,
   mergeSchedulerTabuFingerprints,
+  resolvePromotionManifestPath,
   resolveTrackSelectionState,
   selectChangedMatrixCandidate,
   shouldQueuePromotionManifest,
@@ -63,6 +64,35 @@ function makeResult({
 test('sameConfig compares deep config content, not object identity', () => {
   assert.equal(sameConfig({ a: 1, nested: { b: true } }, { nested: { b: true }, a: 1 }), true);
   assert.equal(sameConfig({ a: 1 }, { a: 2 }), false);
+});
+
+test('resolvePromotionManifestPath prefers explicit manifest over run-id', () => {
+  const config = { researchRoot: 'D:\\tmp\\research' };
+  const result = resolvePromotionManifestPath({
+    config,
+    args: {
+      manifest: 'D:\\override\\manifest.json',
+      'run-id': 'run-123',
+    },
+  });
+
+  assert.equal(result, 'D:\\override\\manifest.json');
+});
+
+test('resolvePromotionManifestPath resolves run-id under manifests dir', () => {
+  const config = { researchRoot: 'D:\\tmp\\research' };
+  const result = resolvePromotionManifestPath({
+    config,
+    args: { 'run-id': 'run-123' },
+  });
+
+  assert.equal(result, path.join(config.researchRoot, 'manifests', 'run-123.json'));
+});
+
+test('resolvePromotionManifestPath returns null without explicit target', () => {
+  const result = resolvePromotionManifestPath({ config: { researchRoot: 'D:\\tmp\\research' }, args: {} });
+
+  assert.equal(result, null);
 });
 
 test('decideAutoresearchOutcome recommends promote when all gates pass', () => {

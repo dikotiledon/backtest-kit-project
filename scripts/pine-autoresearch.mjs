@@ -380,6 +380,12 @@ function manifestsDir(config) {
   return path.join(config.researchRoot, 'manifests');
 }
 
+export function resolvePromotionManifestPath({ config, args = {} } = {}) {
+  if (args.manifest) return args.manifest;
+  if (args['run-id']) return path.join(manifestsDir(config), `${args['run-id']}.json`);
+  return null;
+}
+
 function latestManifestPath(config) {
   return path.join(config.researchRoot, 'latest.json');
 }
@@ -1363,9 +1369,13 @@ async function runBlindHoldout(config) {
 async function runPromote(config, args, mode = 'manual', manifestOverride = null) {
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
-  const latest = manifestOverride ?? await readLatestManifest(config);
+  const explicitManifestPath = resolvePromotionManifestPath({ config, args });
+  const latest = manifestOverride || (explicitManifestPath ? await readManifestByPath(explicitManifestPath) : await readLatestManifest(config));
   if (!latest) {
     throw new Error('No latest manifest to promote');
+  }
+  if (explicitManifestPath && latest && !latest.manifestPath) {
+    latest.manifestPath = explicitManifestPath;
   }
 
   const decision = latest.matrixDecision || latest.decision;

@@ -27,6 +27,37 @@ function isMissingError(error) {
   return error && (error.code === 'ENOENT' || error.code === 'ENOTDIR');
 }
 
+function getOwnerSnapshot(owner) {
+  if (!owner || typeof owner !== 'object') {
+    return null;
+  }
+
+  return {
+    token: owner.token,
+    pid: owner.pid,
+    acquiredAt: owner.acquiredAt,
+    command: owner.command,
+    profile: owner.profile,
+  };
+}
+
+function sameOwnerSnapshot(left, right) {
+  const leftSnapshot = getOwnerSnapshot(left);
+  const rightSnapshot = getOwnerSnapshot(right);
+
+  if (!leftSnapshot || !rightSnapshot) {
+    return false;
+  }
+
+  return (
+    leftSnapshot.token === rightSnapshot.token
+    && leftSnapshot.pid === rightSnapshot.pid
+    && leftSnapshot.acquiredAt === rightSnapshot.acquiredAt
+    && leftSnapshot.command === rightSnapshot.command
+    && leftSnapshot.profile === rightSnapshot.profile
+  );
+}
+
 export function defaultIsPidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) {
     return false;
@@ -100,6 +131,8 @@ export async function acquireAutoresearchLock({
   now = new Date(),
   pid,
   isPidAlive = defaultIsPidAlive,
+  readLock = readAutoresearchLock,
+  unlinkLock = fs.unlink,
 }) {
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
 
@@ -115,14 +148,23 @@ export async function acquireAutoresearchLock({
         throw error;
       }
 
-      const currentOwner = await readAutoresearchLock(lockPath);
+      const currentOwner = await readLock(lockPath);
       if (!isLockStale({ owner: currentOwner, now, isPidAlive })) {
         return { acquired: false, reason: 'locked', currentOwner };
       }
 
+      const latestOwner = await readLock(lockPath);
+      if (!sameOwnerSnapshot(latestOwner, currentOwner)) {
+        if (latestOwner && !isLockStale({ owner: latestOwner, now, isPidAlive })) {
+          return { acquired: false, reason: 'locked', currentOwner: latestOwner };
+        }
+
+        continue;
+      }
+
       reclaimed = true;
       try {
-        await fs.unlink(lockPath);
+        await unlinkLock(lockPath);
       } catch (unlinkError) {
         if (!isMissingError(unlinkError)) {
           throw unlinkError;
@@ -139,8 +181,8 @@ export async function acquireAutoresearchLock({
   return { acquired: false, reason: 'reclaim_failed', currentOwner };
 }
 
-export async function releaseAutoresearchLock({ lockPath, token }) {
-  const currentOwner = await readAutoresearchLock(lockPath);
+export async function releaseAutoresearchLock({ lockPath, token, readLock = readAutoresearchLock, unlinkLock = fs.unlink }) {
+  const currentOwner = await readLock(lockPath);
   if (!currentOwner) {
     return { released: false, reason: 'missing' };
   }
@@ -149,8 +191,17 @@ export async function releaseAutoresearchLock({ lockPath, token }) {
     return { released: false, reason: 'token_mismatch', currentOwner };
   }
 
+  const latestOwner = await readLock(lockPath);
+  if (!latestOwner) {
+    return { released: false, reason: 'missing' };
+  }
+
+  if (latestOwner.token !== token) {
+    return { released: false, reason: 'token_mismatch', currentOwner: latestOwner };
+  }
+
   try {
-    await fs.unlink(lockPath);
+    await unlinkLock(lockPath);
   } catch (error) {
     if (!isMissingError(error)) {
       throw error;

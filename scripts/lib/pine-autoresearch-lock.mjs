@@ -123,6 +123,18 @@ async function writeLock(lockPath, owner) {
   }
 }
 
+async function openExclusiveHandle(filePath) {
+  try {
+    return await fs.open(filePath, 'wx');
+  } catch (error) {
+    if (error?.code === 'EEXIST') {
+      return null;
+    }
+
+    throw error;
+  }
+}
+
 export async function acquireAutoresearchLock({
   lockPath,
   command,
@@ -137,48 +149,66 @@ export async function acquireAutoresearchLock({
   await fs.mkdir(path.dirname(lockPath), { recursive: true });
 
   const owner = buildOwner({ command, profile, staleMs, now, pid });
-  let reclaimed = false;
 
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    try {
-      await writeLock(lockPath, owner);
-      return { acquired: true, reclaimed, owner };
-    } catch (error) {
-      if (error?.code !== 'EEXIST') {
-        throw error;
-      }
-
-      const currentOwner = await readLock(lockPath);
-      if (!isLockStale({ owner: currentOwner, now, isPidAlive })) {
-        return { acquired: false, reason: 'locked', currentOwner };
-      }
-
-      const latestOwner = await readLock(lockPath);
-      if (!sameOwnerSnapshot(latestOwner, currentOwner)) {
-        if (latestOwner && !isLockStale({ owner: latestOwner, now, isPidAlive })) {
-          return { acquired: false, reason: 'locked', currentOwner: latestOwner };
-        }
-
-        continue;
-      }
-
-      reclaimed = true;
-      try {
-        await unlinkLock(lockPath);
-      } catch (unlinkError) {
-        if (!isMissingError(unlinkError)) {
-          throw unlinkError;
-        }
-      }
+  try {
+    await writeLock(lockPath, owner);
+    return { acquired: true, reclaimed: false, owner };
+  } catch (error) {
+    if (error?.code !== 'EEXIST') {
+      throw error;
     }
   }
 
-  const currentOwner = await readAutoresearchLock(lockPath);
+  const currentOwner = await readLock(lockPath);
   if (!isLockStale({ owner: currentOwner, now, isPidAlive })) {
     return { acquired: false, reason: 'locked', currentOwner };
   }
 
-  return { acquired: false, reason: 'reclaim_failed', currentOwner };
+  const reclaimPath = `${lockPath}.reclaim`;
+  const reclaimHandle = await openExclusiveHandle(reclaimPath);
+
+  if (!reclaimHandle) {
+    return { acquired: false, reason: 'reclaim_in_progress', currentOwner };
+  }
+
+  try {
+    const guardedOwner = await readLock(lockPath);
+    if (guardedOwner && (!sameOwnerSnapshot(guardedOwner, currentOwner) || !isLockStale({ owner: guardedOwner, now, isPidAlive }))) {
+      return { acquired: false, reason: 'locked', currentOwner: guardedOwner };
+    }
+
+    try {
+      await unlinkLock(lockPath);
+    } catch (unlinkError) {
+      if (!isMissingError(unlinkError)) {
+        throw unlinkError;
+      }
+    }
+
+    try {
+      await writeLock(lockPath, owner);
+      return { acquired: true, reclaimed: true, owner };
+    } catch (writeError) {
+      if (writeError?.code === 'EEXIST') {
+        const winnerOwner = await readLock(lockPath);
+        return { acquired: false, reason: 'locked', currentOwner: winnerOwner };
+      }
+
+      throw writeError;
+    }
+  } finally {
+    try {
+      await reclaimHandle.close();
+    } finally {
+      try {
+        await fs.unlink(reclaimPath);
+      } catch (cleanupError) {
+        if (!isMissingError(cleanupError)) {
+          throw cleanupError;
+        }
+      }
+    }
+  }
 }
 
 export async function releaseAutoresearchLock({ lockPath, token, readLock = readAutoresearchLock, unlinkLock = fs.unlink }) {

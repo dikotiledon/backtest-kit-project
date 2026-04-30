@@ -140,6 +140,87 @@ test('acquireAutoresearchLock skips deleting when stale snapshot changes', async
   assert.deepEqual(calls, []);
 });
 
+test('acquireAutoresearchLock serializes concurrent stale reclaim attempts behind guard', async () => {
+  const dir = await makeTempDir();
+  const lockPath = path.join(dir, 'autoresearch.lock.json');
+  const staleOwner = {
+    token: 'stale-token',
+    pid: 1,
+    command: 'cycle',
+    profile: 'full',
+    acquiredAt: '2026-04-30T00:00:00.000Z',
+    staleAfterMs: 60_000,
+  };
+
+  await fs.writeFile(lockPath, JSON.stringify(staleOwner, null, 2));
+
+  let resolveFirstUnlinkEntered;
+  const firstUnlinkEntered = new Promise((resolve) => {
+    resolveFirstUnlinkEntered = resolve;
+  });
+
+  let resolveFirstUnlink;
+  const allowFirstUnlink = new Promise((resolve) => {
+    resolveFirstUnlink = resolve;
+  });
+
+  let unlinkCalls = 0;
+  const unlinkLock = async (targetPath) => {
+    unlinkCalls += 1;
+    assert.equal(targetPath, lockPath);
+
+    if (unlinkCalls === 1) {
+      resolveFirstUnlinkEntered();
+      await allowFirstUnlink;
+    }
+
+    try {
+      await fs.unlink(targetPath);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  };
+
+  const firstAcquire = acquireAutoresearchLock({
+    lockPath,
+    command: 'autopromote',
+    staleMs: 60_000,
+    now: '2026-04-30T00:02:00.000Z',
+    pid: 300,
+    isPidAlive: () => false,
+    unlinkLock,
+  });
+
+  await firstUnlinkEntered;
+
+  const second = await acquireAutoresearchLock({
+    lockPath,
+    command: 'cycle',
+    staleMs: 60_000,
+    now: '2026-04-30T00:02:00.000Z',
+    pid: 301,
+    isPidAlive: () => false,
+    unlinkLock,
+  });
+
+  assert.equal(second.acquired, false);
+  assert.equal(second.reason, 'reclaim_in_progress');
+  assert.equal(unlinkCalls, 1);
+  assert.equal((await readAutoresearchLock(lockPath)).token, 'stale-token');
+
+  resolveFirstUnlink();
+
+  const first = await firstAcquire;
+  assert.equal(first.acquired, true);
+  assert.equal(first.reclaimed, true);
+  assert.equal(unlinkCalls, 1);
+
+  const saved = await readAutoresearchLock(lockPath);
+  assert.equal(saved.token, first.owner.token);
+});
+
 test('releaseAutoresearchLock only removes lock owned by token', async () => {
   const dir = await makeTempDir();
   const lockPath = path.join(dir, 'autoresearch.lock.json');

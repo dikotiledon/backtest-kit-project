@@ -81,3 +81,17 @@ test('buildLlmResearchContext hard caps oversized champion and allowlist', () =>
   assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 1000);
   assert.match(result.prompt, /truncated|overflow/i);
 });
+
+
+test('buildLlmResearchContext honors tiny caps', () => {
+  const result = buildLlmResearchContext({
+    champion: {},
+    allowlist: {},
+    memory: {},
+    maxPromptBytes: 1,
+  });
+
+  assert.equal(result.truncated, true);
+  assert.equal(result.overflow, true);
+  assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 1);
+});

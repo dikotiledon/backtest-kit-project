@@ -130,7 +130,7 @@ export function buildLlmResearchContext({
   }
 
   return {
-    prompt: '{}',
+    prompt: '',
     truncated: true,
     overflow: true,
   };

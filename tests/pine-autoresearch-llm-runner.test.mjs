@@ -85,6 +85,29 @@ test('scheduled openclaw provider is hard rejected', async () => {
   }
 });
 
+test('scheduled openclaw rejects even with pending review blockers', async () => {
+  const { dir, configPath, allowlistPath } = await fixture();
+  const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');
+
+  try {
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'matrix-a',
+      allowlistPath,
+      provider: { mode: 'openclaw' },
+      memory: { maxPromptBytes: 4096 },
+    }), 'utf8');
+
+    await seedReviewBlocker(reviewQueuePath, 'pending_review');
+
+    const result = await runLlmAutoresearch({ configPath, repoRoot: dir, command: 'run', scheduled: true });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'openclaw_rejected_in_scheduled_mode');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 async function seedReviewBlocker(queuePath, status = 'pending_review') {
   const item = buildReviewQueueItem({
     parentChampionFingerprint: 'champ',

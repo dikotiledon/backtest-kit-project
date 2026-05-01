@@ -442,30 +442,6 @@ export async function runLlmAutoresearch({
     return runDigestOnly({ config, allowlist, memory, paths, scheduled, reviewSummary });
   }
 
-  if (shouldBlockProposalPath(command, reviewSummary)) {
-    const status = await writeProviderStatus(paths, buildStatus({
-      ok: false,
-      reason: 'pending_review_block',
-      command,
-      scheduled,
-      matrixId: paths.matrixId,
-      providerMode: config?.provider?.mode,
-      details: reviewSummary,
-    }));
-
-    return {
-      ok: false,
-      reason: 'pending_review_block',
-      status,
-      reviewSummary,
-    };
-  }
-
-  const memory = pruneResearchMemory(
-    await loadMemory(paths.memory),
-    config.memory ?? {},
-  );
-
   const baseProvider = config.provider ?? {};
   if (scheduled && baseProvider.mode === 'openclaw') {
     const status = await writeProviderStatus(paths, buildStatus({
@@ -487,6 +463,30 @@ export async function runLlmAutoresearch({
       reviewSummary,
     };
   }
+
+  if (shouldBlockProposalPath(command, reviewSummary)) {
+    const status = await writeProviderStatus(paths, buildStatus({
+      ok: false,
+      reason: 'pending_review_block',
+      command,
+      scheduled,
+      matrixId: paths.matrixId,
+      providerMode: baseProvider.mode,
+      details: reviewSummary,
+    }));
+
+    return {
+      ok: false,
+      reason: 'pending_review_block',
+      status,
+      reviewSummary,
+    };
+  }
+
+  const memory = pruneResearchMemory(
+    await loadMemory(paths.memory),
+    config.memory ?? {},
+  );
 
   const context = buildLlmResearchContext({
     champion: config.champion ?? {},

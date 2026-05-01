@@ -75,6 +75,14 @@ test('validateCandidate rejects wrong int type', () => {
   }), /expected int/);
 });
 
+test('validateCandidate rejects non-finite float', () => {
+  assert.throws(() => validateCandidate({
+    candidate: { patch: { minPredSum: Infinity } },
+    allowlist,
+    champion,
+  }), /expected float/);
+});
+
 test('validateCandidate rejects too many params', () => {
   assert.throws(() => validateCandidate({
     candidate: { patch: { minPredSum: 1.8, divRsiLen: 15, riskRewardRatio: 2.1 } },

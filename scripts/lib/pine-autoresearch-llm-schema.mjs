@@ -112,7 +112,7 @@ export function validateCandidate({
         fail(`expected int for ${key}`);
       }
     } else if (spec.type === 'float') {
-      if (typeof value !== 'number' || Number.isNaN(value)) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) {
         fail(`expected float for ${key}`);
       }
     } else if (spec.type === 'bool') {

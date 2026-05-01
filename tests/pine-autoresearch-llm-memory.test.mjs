@@ -16,6 +16,24 @@ test('pruneResearchMemory respects count caps', () => {
   assert.equal(pruned.rejectedFingerprints.length, 50);
 });
 
+test('maxHotMemoryBytes trims additional hot memory when JSON exceeds cap', () => {
+  const memory = {
+    recentCandidates: [{ candidateId: 'c1', notes: 'x'.repeat(300) }],
+    topWinners: [{ candidateId: 'w1', notes: 'y'.repeat(300) }],
+    rejectedFingerprints: ['r1'],
+  };
+
+  const pruned = pruneResearchMemory(memory, {
+    recentCandidates: 20,
+    topWinners: 10,
+    tabuFingerprints: 50,
+    maxHotMemoryBytes: 120,
+  });
+
+  assert.ok(JSON.stringify(pruned).length <= 120);
+  assert.ok(pruned.recentCandidates.length < memory.recentCandidates.length || pruned.topWinners.length < memory.topWinners.length || pruned.rejectedFingerprints.length < memory.rejectedFingerprints.length);
+});
+
 test('updateResearchMemory records candidate summary and pendingReviewCount', () => {
   const updated = updateResearchMemory({}, {
     candidateSummary: { candidateId: 'champ:cand', candidateFingerprint: 'fp1', score: 1.23 },

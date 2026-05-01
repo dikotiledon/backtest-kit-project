@@ -14,6 +14,18 @@ async function tempDir() {
   return mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-llm-ledger-'));
 }
 
+test('readLlmLedger returns empty events and errors for missing file', async () => {
+  const dir = await tempDir();
+  const ledgerPath = path.join(dir, 'missing', 'llm-ledger.jsonl');
+
+  try {
+    const ledger = await readLlmLedger(ledgerPath);
+    assert.deepEqual(ledger, { events: [], errors: [] });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('appendLlmLedgerEvent appends JSONL and readLlmLedger returns events', async () => {
   const dir = await tempDir();
   const ledgerPath = path.join(dir, 'state', 'llm-ledger.jsonl');

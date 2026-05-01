@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -14,6 +14,33 @@ import { readLlmLedger } from '../scripts/lib/pine-autoresearch-llm-ledger.mjs';
 async function tempDir() {
   return mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-llm-reservation-'));
 }
+
+test('readActiveReservations returns empty array for missing file', async () => {
+  const dir = await tempDir();
+  const activeReservationsPath = path.join(dir, 'missing', 'llm-active-reservations.json');
+
+  try {
+    assert.deepEqual(await readActiveReservations(activeReservationsPath), []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('readActiveReservations returns empty array for malformed or non-array file', async () => {
+  const dir = await tempDir();
+  const malformedPath = path.join(dir, 'malformed.json');
+  const nonArrayPath = path.join(dir, 'non-array.json');
+
+  try {
+    await writeFile(malformedPath, '{not json}', 'utf8');
+    await writeFile(nonArrayPath, '{"ok":true}', 'utf8');
+
+    assert.deepEqual(await readActiveReservations(malformedPath), []);
+    assert.deepEqual(await readActiveReservations(nonArrayPath), []);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test('reserveCandidate writes reserved before execution and blocks duplicates', async () => {
   const dir = await tempDir();

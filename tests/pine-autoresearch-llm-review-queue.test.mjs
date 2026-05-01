@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -26,6 +26,22 @@ test('buildReviewQueueItem uses parent:candidate itemId and pending status', () 
 
   assert.equal(item.itemId, 'champ:cand');
   assert.equal(item.status, 'pending_review');
+});
+
+test('readReviewQueue skips malformed JSONL lines and records errors', async () => {
+  const dir = await tempDir();
+  const queuePath = path.join(dir, 'llm-manual-review-queue.jsonl');
+
+  try {
+    await writeFile(queuePath, '{bad json}\n{"item": {"itemId":"champ:cand","candidateId":"champ:cand","status":"pending_review"}}\n', 'utf8');
+
+    const queue = await readReviewQueue(queuePath);
+    assert.equal(queue.items.length, 1);
+    assert.equal(queue.errors.length, 1);
+    assert.equal(queue.errors[0].lineNumber, 1);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('pending and accepted_for_manual_promotion block scheduled research', () => {

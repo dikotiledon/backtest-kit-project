@@ -1,6 +1,8 @@
 import { readFile as defaultReadFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 
+import { proposeOpenAiCandidate } from './pine-autoresearch-llm-openai-provider.mjs';
+
 function defaultExecCommand(command, { input = '', timeoutMs } = {}) {
   return new Promise((resolve) => {
     const child = spawn(command, {
@@ -73,7 +75,7 @@ function buildCliFailureStderr(result) {
   return parts.join('; ') || 'cli command failed';
 }
 
-export async function proposeCandidate({ provider, scheduled, prompt, readFile, execCommand } = {}) {
+export async function proposeCandidate({ provider, scheduled, prompt, allowlist, allowGuarded = false, readFile, execCommand, proposeOpenAi } = {}) {
   if (!provider || provider.mode === 'disabled') {
     return { ok: false, reason: 'proposal_unavailable' };
   }
@@ -117,6 +119,19 @@ export async function proposeCandidate({ provider, scheduled, prompt, readFile, 
       }
 
       return { ok: true, raw: String(result.stdout ?? '').trim(), source: 'cli' };
+    } catch (error) {
+      return { ok: false, reason: 'proposal_failed', stderr: String(error?.message ?? error ?? '') };
+    }
+  }
+
+  if (provider.mode === 'openai-chat-completions' || provider.mode === 'openai-responses') {
+    if (!allowlist) {
+      return { ok: false, reason: 'proposal_unavailable', stderr: 'allowlist required for API provider' };
+    }
+
+    const proposer = proposeOpenAi ?? proposeOpenAiCandidate;
+    try {
+      return await proposer({ mode: provider.mode, provider, allowlist, allowGuarded, prompt });
     } catch (error) {
       return { ok: false, reason: 'proposal_failed', stderr: String(error?.message ?? error ?? '') };
     }

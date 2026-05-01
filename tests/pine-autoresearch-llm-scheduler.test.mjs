@@ -55,7 +55,13 @@ test('LLM task installer dry-run previews only LLM tasks', async () => {
     await fs.mkdir(configDir, { recursive: true });
     await fs.writeFile(path.join(configDir, 'pine-autoresearch-llm.default.json'), JSON.stringify({
       matrixId: 'pine-fusion-v4-core-15m-locked-window',
-      provider: { mode: 'disabled' },
+      scheduled: { enabled: true },
+      provider: {
+        mode: 'openai-responses',
+        apiBaseUrl: 'https://api.openai.com/v1',
+        apiKeyEnv: 'OPENAI_API_KEY',
+        model: 'gpt-test',
+      },
     }), 'utf8');
 
     const result = await runPwshFile(path.join(repoRoot, 'scripts/ops/install-pine-autoresearch-llm-tasks.ps1'), ['-RepoRoot', tempRoot, '-Enable', '-DryRun'], repoRoot);
@@ -75,6 +81,26 @@ test('LLM task installer dry-run previews only LLM tasks', async () => {
 });
 
 
+test('LLM task installer rejects openclaw provider in scheduled dry-run mode', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-install-openclaw-'));
+  try {
+    const configDir = path.join(tempRoot, 'config');
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, 'pine-autoresearch-llm.default.json'), JSON.stringify({
+      matrixId: 'pine-fusion-v4-core-15m-locked-window',
+      scheduled: { enabled: true },
+      provider: { mode: 'openclaw' },
+    }), 'utf8');
+
+    const result = await runPwshFile(path.join(repoRoot, 'scripts/ops/install-pine-autoresearch-llm-tasks.ps1'), ['-RepoRoot', tempRoot, '-DryRun'], repoRoot);
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr + '\n' + result.stdout, /scheduled mode|openclaw/i);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('LLM task installer refuses real task registration without explicit enablement', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-install-refuse-'));
   try {
@@ -83,7 +109,7 @@ test('LLM task installer refuses real task registration without explicit enablem
     await fs.writeFile(path.join(configDir, 'pine-autoresearch-llm.default.json'), JSON.stringify({
       matrixId: 'pine-fusion-v4-core-15m-locked-window',
       scheduled: { enabled: false },
-      provider: { mode: 'disabled' },
+      provider: { mode: 'openai-responses', apiKeyEnv: 'OPENAI_API_KEY' },
     }), 'utf8');
 
     const result = await runPwshFile(path.join(repoRoot, 'scripts/ops/install-pine-autoresearch-llm-tasks.ps1'), ['-RepoRoot', tempRoot], repoRoot);

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 import { runLlmAutoresearch } from '../scripts/lib/pine-autoresearch-llm-runner.mjs';
 import { readLlmLedger } from '../scripts/lib/pine-autoresearch-llm-ledger.mjs';
-import { appendReviewQueueEvent, buildReviewQueueItem } from '../scripts/lib/pine-autoresearch-llm-review-queue.mjs';
+import { appendReviewQueueEvent, buildReviewQueueItem, readReviewQueue } from '../scripts/lib/pine-autoresearch-llm-review-queue.mjs';
 
 async function fixture() {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-runner-'));
@@ -35,6 +35,38 @@ async function fixture() {
       tabuFingerprints: 50,
     },
     candidate: { maxChangedParams: 2 },
+  }), 'utf8');
+
+  return { dir, configPath, allowlistPath };
+}
+
+async function openAiFixture() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-runner-openai-'));
+  const configPath = path.join(dir, 'llm.json');
+  const allowlistPath = path.join(dir, 'allowlist.json');
+
+  await fs.writeFile(allowlistPath, JSON.stringify({
+    version: 1,
+    freezeArchitecture: true,
+    maxChangedParams: 1,
+    parameters: [
+      { key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1, mutability: 'tunable', family: 'signal' },
+    ],
+  }), 'utf8');
+
+  await fs.writeFile(configPath, JSON.stringify({
+    matrixId: 'matrix-a',
+    allowlistPath,
+    provider: { mode: 'openai-responses', model: 'gpt-test' },
+    champion: { minPredSum: 1.7 },
+    memory: {
+      maxPromptBytes: 4096,
+      maxHotMemoryBytes: 262144,
+      recentCandidates: 20,
+      topWinners: 10,
+      tabuFingerprints: 50,
+    },
+    candidate: { maxChangedParams: 1 },
   }), 'utf8');
 
   return { dir, configPath, allowlistPath };
@@ -306,6 +338,89 @@ test('file provider validates, reserves before execution, and finalizes one cand
 
     const ledger = await readLlmLedger(ledgerPath);
     assert.deepEqual(ledger.events.map((event) => event.type), ['reserved', 'completed']);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('openai responses provider flow stays no-network and enqueues review', async () => {
+  const { dir, configPath } = await openAiFixture();
+  const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');
+  const ledgerPath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-ledger.jsonl');
+
+  try {
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async (options) => {
+        assert.equal(options.mode, 'openai-responses');
+        assert.equal(options.provider.model, 'gpt-test');
+        assert.match(options.prompt, /minPredSum/i);
+        return {
+          ok: true,
+          raw: '{"params":{"minPredSum":1.8},"rationale":"API candidate"}',
+          source: 'openai-responses',
+        };
+      },
+      executeCandidate: async () => {
+        const ledger = await readLlmLedger(ledgerPath);
+        assert.deepEqual(ledger.events.map((event) => event.type), ['reserved']);
+        return { ok: true, runId: 'run-a', promotable: true, metricsDelta: { score: 1 } };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, 'candidate_enqueued_for_review');
+    assert.equal(result.manifestPath !== null, true);
+    await fs.stat(result.manifestPath);
+
+    const manifest = JSON.parse(await fs.readFile(result.manifestPath, 'utf8'));
+    assert.equal(manifest.provider.mode, 'openai-responses');
+    assert.equal(manifest.candidate.params.minPredSum, 1.8);
+
+    const reviewItems = (await readReviewQueue(reviewQueuePath)).items;
+    assert.equal(reviewItems.length, 1);
+    assert.equal(reviewItems[0].status, 'pending_review');
+    assert.equal(reviewItems[0].candidate.params.minPredSum, 1.8);
+
+    const ledger = await readLlmLedger(ledgerPath);
+    assert.deepEqual(ledger.events.map((event) => event.type), ['reserved', 'completed']);
+
+    await assert.rejects(
+      () => fs.stat(path.join(dir, 'pine/autoresearch/matrix-a/state/promotion-queue.jsonl')),
+      /ENOENT/,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('openai malformed text is rejected by local validation', async () => {
+  const { dir, configPath } = await openAiFixture();
+
+  try {
+    let executeCalled = false;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async () => ({
+        ok: true,
+        raw: 'Here is a candidate:\n{"params":{"unknownParam":999}}',
+        source: 'openai-responses',
+      }),
+      executeCandidate: async () => {
+        executeCalled = true;
+        return { ok: true, runId: 'run-b', promotable: true, metricsDelta: { score: 1 } };
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'candidate_invalid');
+    assert.equal(executeCalled, false);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

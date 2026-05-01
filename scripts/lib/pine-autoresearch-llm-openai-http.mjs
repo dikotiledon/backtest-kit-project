@@ -23,21 +23,26 @@ function redact(value, secret) {
   return secret ? text.split(secret).join('[redacted]') : text;
 }
 
+function normalizeTimeoutMs(timeoutMs) {
+  return Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : 90000;
+}
+
 export async function postOpenAiJson({ url, apiKey, headers = {}, body, timeoutMs = 90000, fetchImpl = globalThis.fetch } = {}) {
   if (typeof fetchImpl !== 'function') {
     return { ok: false, reason: 'fetch_unavailable', stderr: 'global fetch unavailable' };
   }
 
+  const normalizedTimeoutMs = normalizeTimeoutMs(timeoutMs);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const timer = setTimeout(() => controller.abort(), normalizedTimeoutMs);
 
   try {
     const response = await fetchImpl(url, {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
-        authorization: `Bearer ${apiKey}`,
         ...headers,
+        authorization: `Bearer ${apiKey}`,
+        'content-type': 'application/json',
       },
       body: JSON.stringify(body),
       signal: controller.signal,
@@ -53,7 +58,7 @@ export async function postOpenAiJson({ url, apiKey, headers = {}, body, timeoutM
     return { ok: true, status: response.status ?? 200, json };
   } catch (error) {
     const message = error?.name === 'AbortError'
-      ? `request timed out after ${timeoutMs}ms`
+      ? `request timed out after ${normalizedTimeoutMs}ms`
       : String(error?.message ?? error ?? 'request failed');
     return { ok: false, reason: error?.name === 'AbortError' ? 'request_timeout' : 'request_failed', stderr: redact(message, apiKey) };
   } finally {

@@ -66,10 +66,11 @@ function Register-Task($TaskName, $ScheduleArgs, $TaskKind) {
   }
 }
 
-if ([string]$config.provider.mode -eq 'openclaw') {
-  Write-Warning '[refuse] provider=openclaw; skipping BacktestKit-Pine-LLM-Run'
-} else {
-  Register-Task 'BacktestKit-Pine-LLM-Run' @('/SC', 'MINUTE', '/MO', '30', '/ST', '00:00') 'run'
+$SchedulableProviderModes = @('cli', 'openai-chat-completions', 'openai-responses')
+$providerMode = [string]$config.provider.mode
+if (-not ($SchedulableProviderModes -contains $providerMode)) {
+  throw "refusing to install LLM autoresearch tasks: provider mode '$providerMode' is not schedulable; supported modes: $($SchedulableProviderModes -join ', ')"
 }
 
+Register-Task 'BacktestKit-Pine-LLM-Run' @('/SC', 'MINUTE', '/MO', '30', '/ST', '00:00') 'run'
 Register-Task 'BacktestKit-Pine-LLM-Digest' @('/SC', 'HOURLY', '/MO', '6', '/ST', '00:10') 'digest'

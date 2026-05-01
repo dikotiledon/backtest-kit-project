@@ -67,8 +67,12 @@ export async function proposeCandidate({ provider, scheduled, prompt, readFile, 
     }
 
     const reader = readFile ?? defaultReadFile;
-    const raw = await reader(provider.candidateFile, 'utf8');
-    return { ok: true, raw, source: 'file' };
+    try {
+      const raw = await reader(provider.candidateFile, 'utf8');
+      return { ok: true, raw, source: 'file' };
+    } catch (error) {
+      return { ok: false, reason: 'proposal_failed', stderr: String(error?.message ?? error ?? '') };
+    }
   }
 
   if (provider.mode === 'cli') {
@@ -77,16 +81,20 @@ export async function proposeCandidate({ provider, scheduled, prompt, readFile, 
     }
 
     const runner = execCommand ?? defaultExecCommand;
-    const result = await runner(provider.cliCommand, {
-      input: prompt,
-      timeoutMs: provider.timeoutMs ?? 90000,
-    });
+    try {
+      const result = await runner(provider.cliCommand, {
+        input: prompt,
+        timeoutMs: provider.timeoutMs ?? 90000,
+      });
 
-    if (!result || result.code !== 0) {
-      return { ok: false, reason: 'proposal_failed', stderr: String(result?.stderr ?? '') };
+      if (!result || result.code !== 0) {
+        return { ok: false, reason: 'proposal_failed', stderr: String(result?.stderr ?? '') };
+      }
+
+      return { ok: true, raw: String(result.stdout ?? '').trim(), source: 'cli' };
+    } catch (error) {
+      return { ok: false, reason: 'proposal_failed', stderr: String(error?.message ?? error ?? '') };
     }
-
-    return { ok: true, raw: String(result.stdout ?? '').trim(), source: 'cli' };
   }
 
   return { ok: false, reason: `unknown_provider_mode:${provider.mode}` };

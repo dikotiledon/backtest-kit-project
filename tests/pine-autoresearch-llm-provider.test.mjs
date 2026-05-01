@@ -30,6 +30,21 @@ test('file provider returns file content from injected readFile', async () => {
   assert.deepEqual(result, { ok: true, raw: '{"minPredSum":1.8}', source: 'file' });
 });
 
+test('file provider readFile rejection returns proposal_failed', async () => {
+  const result = await proposeCandidate({
+    provider: { mode: 'file', candidateFile: 'candidate.json' },
+    scheduled: false,
+    prompt: 'p',
+    readFile: async () => {
+      throw new Error('read boom');
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'proposal_failed');
+  assert.match(result.stderr, /read boom/);
+});
+
 test('cli provider requires command and uses injected execCommand', async () => {
   const missing = await proposeCandidate({ provider: { mode: 'cli' }, scheduled: false, prompt: 'p' });
   assert.deepEqual(missing, { ok: false, reason: 'proposal_unavailable' });
@@ -46,4 +61,19 @@ test('cli provider requires command and uses injected execCommand', async () => 
   });
 
   assert.deepEqual(result, { ok: true, raw: 'candidate raw', source: 'cli' });
+});
+
+test('cli provider execCommand rejection returns proposal_failed', async () => {
+  const result = await proposeCandidate({
+    provider: { mode: 'cli', cliCommand: 'run-cli' },
+    scheduled: false,
+    prompt: 'input prompt',
+    execCommand: async () => {
+      throw new Error('exec boom');
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'proposal_failed');
+  assert.match(result.stderr, /exec boom/);
 });

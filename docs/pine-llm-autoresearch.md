@@ -20,7 +20,7 @@ Set the API key outside the repo:
 setx OPENAI_API_KEY "sk-..."
 ```
 
-Use config:
+Example config:
 
 ```json
 {
@@ -41,7 +41,7 @@ The request uses `POST /v1/responses` with `text.format.type=json_schema`, `stre
 
 ## OpenAI Chat Completions provider
 
-Use config:
+Example config:
 
 ```json
 {
@@ -65,11 +65,13 @@ The request uses `POST /v1/chat/completions` with `response_format.type=json_sch
 ```bash
 npm run pine:autoresearch:llm -- --scheduled
 npm run pine:autoresearch:llm:propose
-npm run pine:autoresearch:llm:validate -- --candidate <candidate.json>
+npm run pine:autoresearch:llm:validate
 npm run pine:autoresearch:llm:digest
 npm run pine:ops:install-llm-tasks -- -DryRun
 npm run pine:ops:remove-llm-tasks -- -WhatIf
 ```
+
+`validate` loads lane config and allowlist, ensures lane directories, and writes a `validated` provider status. It does not parse or validate a candidate file, and it does not run proposal or evaluation.
 
 PowerShell smoke commands:
 

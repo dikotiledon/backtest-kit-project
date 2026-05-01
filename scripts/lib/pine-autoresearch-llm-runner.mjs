@@ -147,6 +147,18 @@ function buildCandidateIdentity({ championFingerprint, validation }) {
   return { candidateId, candidateFingerprint, parentChampionFingerprint };
 }
 
+function normalizeApiCandidate(candidate) {
+  if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) {
+    return candidate;
+  }
+
+  if (!candidate.patch && candidate.params && typeof candidate.params === 'object' && !Array.isArray(candidate.params)) {
+    return { ...candidate, patch: candidate.params };
+  }
+
+  return candidate;
+}
+
 async function defaultExecuteCandidate({ candidateId, candidateFingerprint }) {
   return {
     ok: true,
@@ -230,7 +242,7 @@ async function runProposalOnly({
     const ledger = await readLlmLedger(paths.ledger);
     const memory = await loadMemory(paths.memory);
     const validation = validateCandidate({
-      candidate: parsed,
+      candidate: normalizeApiCandidate(parsed),
       allowlist: resolveEffectiveAllowlist(allowlist, config?.candidate),
       champion: config?.champion ?? {},
       recentFingerprints: buildRecentFingerprintSet({ ledger, memory }),
@@ -388,6 +400,7 @@ export async function runLlmAutoresearch({
   command = 'run',
   scheduled = false,
   executeCandidate,
+  proposeOpenAi,
 } = {}) {
   const resolvedConfigPath = configPath
     ? (path.isAbsolute(configPath) ? configPath : path.resolve(repoRoot, configPath))
@@ -512,6 +525,7 @@ export async function runLlmAutoresearch({
     prompt: context.prompt,
     allowlist,
     allowGuarded: Boolean(config?.candidate?.allowGuarded),
+    proposeOpenAi,
   });
 
   if (command !== 'run') {
@@ -547,7 +561,7 @@ export async function runLlmAutoresearch({
   try {
     parsed = parseCandidateJson(proposal.raw);
     validation = validateCandidate({
-      candidate: parsed,
+      candidate: normalizeApiCandidate(parsed),
       allowlist: resolveEffectiveAllowlist(allowlist, config.candidate),
       champion: config.champion ?? {},
       recentFingerprints: buildRecentFingerprintSet({ ledger: await readLlmLedger(paths.ledger), memory }),
@@ -735,9 +749,11 @@ export async function runLlmAutoresearch({
     },
   }));
 
+  const resultReason = execution.promotable ? 'candidate_enqueued_for_review' : 'completed';
+
   return {
     ok: true,
-    reason: 'completed',
+    reason: resultReason,
     status,
     reviewSummary,
     candidateId: identity.candidateId,

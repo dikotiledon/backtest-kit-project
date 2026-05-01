@@ -64,6 +64,38 @@ async function fixture() {
   return { dir, configPath };
 }
 
+async function openAiFixture() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-e2e-openai-'));
+  const allowlistPath = path.join(dir, 'allowlist.json');
+  const configPath = path.join(dir, 'llm.json');
+
+  await fs.writeFile(allowlistPath, JSON.stringify({
+    version: 1,
+    freezeArchitecture: true,
+    maxChangedParams: 1,
+    parameters: [
+      { key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1, mutability: 'tunable', family: 'signal' },
+    ],
+  }), 'utf8');
+
+  await fs.writeFile(configPath, JSON.stringify({
+    matrixId: 'matrix-a',
+    allowlistPath,
+    provider: { mode: 'openai-responses', model: 'gpt-test' },
+    champion: { minPredSum: 1.7 },
+    memory: {
+      maxPromptBytes: 4096,
+      maxHotMemoryBytes: 262144,
+      recentCandidates: 20,
+      topWinners: 10,
+      tabuFingerprints: 50,
+    },
+    candidate: { maxChangedParams: 1 },
+  }), 'utf8');
+
+  return { dir, configPath };
+}
+
 test('end-to-end file candidate creates manifest and review queue without promotion queue', async () => {
   const { dir, configPath } = await fixture();
 
@@ -96,6 +128,35 @@ test('end-to-end file candidate creates manifest and review queue without promot
       () => fs.stat(path.join(dir, 'pine/autoresearch/matrix-a/state/promotion-queue.jsonl')),
       /ENOENT/,
     );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('end-to-end openai provider rejects malformed text before execution', async () => {
+  const { dir, configPath } = await openAiFixture();
+
+  try {
+    let executeCalled = false;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async () => ({
+        ok: true,
+        raw: 'Here is a candidate:\n{"params":{"unknownParam":999}}',
+        source: 'openai-responses',
+      }),
+      executeCandidate: async () => {
+        executeCalled = true;
+        return { ok: true, runId: 'run-openai', promotable: true, metricsDelta: { score: 1 } };
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'candidate_invalid');
+    assert.equal(executeCalled, false);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

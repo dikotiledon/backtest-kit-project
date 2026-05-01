@@ -44,6 +44,10 @@ export function parseCandidateJson(raw) {
   }
 
   if (!isPlainObject(parsed.patch)) {
+    if (isPlainObject(parsed.params)) {
+      return { ...parsed, patch: parsed.params };
+    }
+
     throw new Error('Expected plain patch object');
   }
 

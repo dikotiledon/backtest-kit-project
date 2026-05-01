@@ -197,11 +197,13 @@ function summarizePendingReview(queue) {
   return {
     unresolvedCount: unresolved.length,
     unresolvedIds: unresolved.map((item) => item.itemId),
+    hasBlockers: unresolved.length > 0,
+    blockerStatuses: [...new Set(unresolved.map((item) => item.status).filter(Boolean))],
   };
 }
 
-function shouldBlockScheduledRun(config, scheduled, unresolvedCount) {
-  return Boolean(scheduled && unresolvedCount > 0 && config?.review?.blockScheduledWhenUnresolved !== false);
+function shouldBlockProposalPath(command, reviewSummary) {
+  return ['run', 'propose', 'enqueue'].includes(command) && Boolean(reviewSummary?.hasBlockers);
 }
 
 async function runProposalOnly({
@@ -420,11 +422,6 @@ export async function runLlmAutoresearch({
   const reviewQueue = await readReviewQueue(paths.reviewQueue);
   const reviewSummary = summarizePendingReview(reviewQueue);
 
-  const memory = pruneResearchMemory(
-    await loadMemory(paths.memory),
-    config.memory ?? {},
-  );
-
   if (command === 'review-status') {
     return runReviewStatusOnly({ config, paths, scheduled, reviewSummary });
   }
@@ -438,8 +435,36 @@ export async function runLlmAutoresearch({
   }
 
   if (command === 'digest') {
+    const memory = pruneResearchMemory(
+      await loadMemory(paths.memory),
+      config.memory ?? {},
+    );
     return runDigestOnly({ config, allowlist, memory, paths, scheduled, reviewSummary });
   }
+
+  if (shouldBlockProposalPath(command, reviewSummary)) {
+    const status = await writeProviderStatus(paths, buildStatus({
+      ok: false,
+      reason: 'pending_review_block',
+      command,
+      scheduled,
+      matrixId: paths.matrixId,
+      providerMode: config?.provider?.mode,
+      details: reviewSummary,
+    }));
+
+    return {
+      ok: false,
+      reason: 'pending_review_block',
+      status,
+      reviewSummary,
+    };
+  }
+
+  const memory = pruneResearchMemory(
+    await loadMemory(paths.memory),
+    config.memory ?? {},
+  );
 
   const baseProvider = config.provider ?? {};
   if (scheduled && baseProvider.mode === 'openclaw') {
@@ -458,29 +483,6 @@ export async function runLlmAutoresearch({
     return {
       ok: false,
       reason: 'openclaw_rejected_in_scheduled_mode',
-      status,
-      reviewSummary,
-    };
-  }
-
-  if (shouldBlockScheduledRun(config, scheduled, reviewSummary.unresolvedCount)) {
-    const status = await writeProviderStatus(paths, buildStatus({
-      ok: true,
-      reason: 'review_queue_blocked',
-      command,
-      scheduled,
-      matrixId: paths.matrixId,
-      providerMode: baseProvider.mode,
-      details: reviewSummary,
-    }));
-
-    await writeJson(paths.memory, updateResearchMemory(memory, {
-      pendingReviewCount: reviewSummary.unresolvedCount,
-    }, config.memory ?? {}));
-
-    return {
-      ok: true,
-      reason: 'review_queue_blocked',
       status,
       reviewSummary,
     };

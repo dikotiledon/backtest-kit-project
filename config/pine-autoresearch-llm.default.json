@@ -13,7 +13,16 @@
   "provider": {
     "mode": "disabled",
     "cliCommand": null,
-    "timeoutMs": 90000
+    "candidateFile": null,
+    "timeoutMs": 90000,
+    "apiBaseUrl": "https://api.openai.com/v1",
+    "apiKeyEnv": "OPENAI_API_KEY",
+    "model": null,
+    "temperature": 0.2,
+    "topP": 1,
+    "maxOutputTokens": 1200,
+    "organizationEnv": null,
+    "projectEnv": null
   },
   "candidate": {
     "maxChangedParams": 4,

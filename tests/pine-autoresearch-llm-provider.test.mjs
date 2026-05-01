@@ -103,3 +103,36 @@ test('cli provider rejects missing code', async () => {
   assert.equal(result.reason, 'proposal_failed');
   assert.match(result.stderr, /missing exit code/i);
 });
+
+test('openai API providers dispatch through injected openai proposer', async () => {
+  const calls = [];
+  const result = await proposeCandidate({
+    provider: { mode: 'openai-responses', model: 'gpt-test' },
+    allowlist: { version: 1, parameters: {} },
+    scheduled: true,
+    prompt: 'input prompt',
+    proposeOpenAi: async (options) => {
+      calls.push(options);
+      return { ok: true, raw: '{\"params\":{},\"rationale\":\"x\"}', source: 'openai-responses' };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].mode, 'openai-responses');
+  assert.equal(calls[0].provider.model, 'gpt-test');
+  assert.equal(calls[0].prompt, 'input prompt');
+  assert.deepEqual(result, { ok: true, raw: '{\"params\":{},\"rationale\":\"x\"}', source: 'openai-responses' });
+});
+
+test('openai API providers require allowlist before request construction', async () => {
+  const result = await proposeCandidate({
+    provider: { mode: 'openai-chat-completions', model: 'gpt-test' },
+    scheduled: false,
+    prompt: 'input prompt',
+    proposeOpenAi: async () => {
+      throw new Error('should not call API without allowlist');
+    },
+  });
+
+  assert.deepEqual(result, { ok: false, reason: 'proposal_unavailable', stderr: 'allowlist required for API provider' });
+});

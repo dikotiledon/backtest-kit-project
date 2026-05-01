@@ -510,6 +510,8 @@ export async function runLlmAutoresearch({
     },
     scheduled,
     prompt: context.prompt,
+    allowlist,
+    allowGuarded: Boolean(config?.candidate?.allowGuarded),
   });
 
   if (command !== 'run') {

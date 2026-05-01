@@ -77,3 +77,29 @@ test('cli provider execCommand rejection returns proposal_failed', async () => {
   assert.equal(result.reason, 'proposal_failed');
   assert.match(result.stderr, /exec boom/);
 });
+
+test('cli provider rejects null code with signal', async () => {
+  const result = await proposeCandidate({
+    provider: { mode: 'cli', cliCommand: 'run-cli' },
+    scheduled: false,
+    prompt: 'input prompt',
+    execCommand: async () => ({ code: null, stdout: 'candidate raw', stderr: '', signal: 'SIGTERM' }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'proposal_failed');
+  assert.match(result.stderr, /SIGTERM/);
+});
+
+test('cli provider rejects missing code', async () => {
+  const result = await proposeCandidate({
+    provider: { mode: 'cli', cliCommand: 'run-cli' },
+    scheduled: false,
+    prompt: 'input prompt',
+    execCommand: async () => ({ stdout: 'candidate raw' }),
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'proposal_failed');
+  assert.match(result.stderr, /missing exit code/i);
+});

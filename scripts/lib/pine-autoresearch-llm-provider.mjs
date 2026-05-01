@@ -31,13 +31,13 @@ function defaultExecCommand(command, { input = '', timeoutMs } = {}) {
     child.on('error', (error) => {
       settled = true;
       if (timer) clearTimeout(timer);
-      resolve({ code: 1, stdout, stderr: String(error?.message ?? error ?? '') });
+      resolve({ code: undefined, signal: undefined, stdout, stderr: String(error?.message ?? error ?? '') });
     });
 
-    child.on('close', (code) => {
+    child.on('close', (code, signal) => {
       settled = true;
       if (timer) clearTimeout(timer);
-      resolve({ code: code ?? 0, stdout, stderr });
+      resolve({ code, signal, stdout, stderr });
     });
 
     if (input !== undefined && input !== null) {
@@ -46,6 +46,31 @@ function defaultExecCommand(command, { input = '', timeoutMs } = {}) {
       child.stdin.end();
     }
   });
+}
+
+function buildCliFailureStderr(result) {
+  const parts = [];
+
+  if (!result) {
+    parts.push('missing result');
+    return parts.join('; ');
+  }
+
+  if (result.signal) {
+    parts.push(`signal ${String(result.signal)}`);
+  }
+
+  if (result.code === null || result.code === undefined) {
+    parts.push('missing exit code');
+  } else if (result.code !== 0) {
+    parts.push(`exit code ${String(result.code)}`);
+  }
+
+  if (result.stderr) {
+    parts.push(String(result.stderr));
+  }
+
+  return parts.join('; ') || 'cli command failed';
 }
 
 export async function proposeCandidate({ provider, scheduled, prompt, readFile, execCommand } = {}) {
@@ -87,8 +112,8 @@ export async function proposeCandidate({ provider, scheduled, prompt, readFile, 
         timeoutMs: provider.timeoutMs ?? 90000,
       });
 
-      if (!result || result.code !== 0) {
-        return { ok: false, reason: 'proposal_failed', stderr: String(result?.stderr ?? '') };
+      if (!result || result.code !== 0 || result.signal) {
+        return { ok: false, reason: 'proposal_failed', stderr: buildCliFailureStderr(result) };
       }
 
       return { ok: true, raw: String(result.stdout ?? '').trim(), source: 'cli' };

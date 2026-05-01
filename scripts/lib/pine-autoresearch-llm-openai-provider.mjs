@@ -65,17 +65,17 @@ export function extractResponsesText(json) {
   if (json?.status && json.status !== 'completed') {
     return { ok: false, reason: `response_status:${json.status}`, stderr: String(json?.incomplete_details?.reason ?? json?.error?.message ?? '') };
   }
-  if (typeof json?.output_text === 'string' && json.output_text.trim()) return { ok: true, raw: json.output_text.trim() };
-
   const parts = [];
+  if (typeof json?.output_text === 'string' && json.output_text.trim()) parts.push(json.output_text);
   for (const item of Array.isArray(json?.output) ? json.output : []) {
     for (const content of Array.isArray(item?.content) ? item.content : []) {
       if ((content?.type === 'output_text' || content?.type === 'text') && typeof content.text === 'string') parts.push(content.text);
     }
   }
-  const raw = parts.join('\n').trim();
-  if (!raw) return { ok: false, reason: 'missing_output_text' };
-  return { ok: true, raw };
+  const textParts = parts.map((part) => String(part).trim()).filter(Boolean);
+  if (textParts.length === 0) return { ok: false, reason: 'missing_output_text' };
+  if (textParts.length !== 1) return { ok: false, reason: 'multiple_output_text' };
+  return { ok: true, raw: textParts[0] };
 }
 
 export async function proposeOpenAiCandidate({ mode, provider = {}, allowlist, allowGuarded = false, prompt, env = process.env, postJson = postOpenAiJson } = {}) {
@@ -85,6 +85,9 @@ export async function proposeOpenAiCandidate({ mode, provider = {}, allowlist, a
   if (!auth.ok) return auth;
 
   const apiBaseUrl = trimTrailingSlash(provider.apiBaseUrl);
+  if (mode !== 'openai-chat-completions' && mode !== 'openai-responses') {
+    return { ok: false, reason: 'proposal_unavailable', stderr: `unsupported provider mode:${String(mode)}` };
+  }
   const isChat = mode === 'openai-chat-completions';
   const url = `${apiBaseUrl}${isChat ? '/chat/completions' : '/responses'}`;
   const body = isChat

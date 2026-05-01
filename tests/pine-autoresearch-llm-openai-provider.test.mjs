@@ -68,17 +68,43 @@ test('extractChatCompletionsText extracts first message content and rejects bad 
   );
 });
 
-test('extractResponsesText supports output_text and output message content', () => {
+test('extractResponsesText accepts exactly one text payload', () => {
   assert.deepEqual(extractResponsesText({ status: 'completed', output_text: '{"params":{}}' }), {
     ok: true,
     raw: '{"params":{}}',
   });
 
-  const nested = extractResponsesText({
-    status: 'completed',
-    output: [{ type: 'message', content: [{ type: 'output_text', text: '{"params":{"minPredSum":1.8}}' }] }],
-  });
-  assert.deepEqual(nested, { ok: true, raw: '{"params":{"minPredSum":1.8}}' });
+  assert.deepEqual(
+    extractResponsesText({
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: '{"params":{"minPredSum":1.8}}' }] }],
+    }),
+    { ok: true, raw: '{"params":{"minPredSum":1.8}}' },
+  );
+
+  assert.deepEqual(
+    extractResponsesText({ status: 'completed', output: [{ type: 'message', content: [] }] }),
+    { ok: false, reason: 'missing_output_text' },
+  );
+
+  assert.deepEqual(
+    extractResponsesText({
+      status: 'completed',
+      output: [{ type: 'message', content: [{ type: 'output_text', text: '{"a":1}' }, { type: 'output_text', text: '{"b":2}' }] }],
+    }),
+    { ok: false, reason: 'multiple_output_text' },
+  );
+
+  assert.deepEqual(
+    extractResponsesText({
+      status: 'completed',
+      output: [
+        { type: 'message', content: [{ type: 'output_text', text: '{"a":1}' }] },
+        { type: 'message', content: [{ type: 'output_text', text: '{"b":2}' }] },
+      ],
+    }),
+    { ok: false, reason: 'multiple_output_text' },
+  );
 
   assert.deepEqual(extractResponsesText({ status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' } }), {
     ok: false,
@@ -90,7 +116,7 @@ test('extractResponsesText supports output_text and output message content', () 
 test('proposeOpenAiCandidate posts chat completions request and returns raw candidate text', async () => {
   const result = await proposeOpenAiCandidate({
     mode: 'openai-chat-completions',
-    provider: { apiBaseUrl: 'https://api.openai.test/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
+    provider: { apiBaseUrl: 'https://api.openai.test/v1/', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
     allowlist,
     prompt: 'candidate prompt',
     env: { OPENAI_API_KEY: 'sk-test-secret' },
@@ -112,7 +138,7 @@ test('proposeOpenAiCandidate posts chat completions request and returns raw cand
 test('proposeOpenAiCandidate posts responses request and returns raw candidate text', async () => {
   const result = await proposeOpenAiCandidate({
     mode: 'openai-responses',
-    provider: { apiBaseUrl: 'https://api.openai.test/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
+    provider: { apiBaseUrl: 'https://api.openai.test/v1/', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
     allowlist,
     prompt: 'candidate prompt',
     env: { OPENAI_API_KEY: 'sk-test-secret' },
@@ -130,43 +156,68 @@ test('proposeOpenAiCandidate posts responses request and returns raw candidate t
   });
 });
 
-test('proposeOpenAiCandidate propagates postJson failure for responses mode', async () => {
-  const result = await proposeOpenAiCandidate({
-    mode: 'openai-responses',
-    provider: { apiBaseUrl: 'https://api.openai.test/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
+test('proposeOpenAiCandidate fails safely on unsupported mode and missing mode', async () => {
+  assert.deepEqual(await proposeOpenAiCandidate({
+    mode: 'openai-something-else',
+    provider: { model: 'gpt-test', apiKeyEnv: 'OPENAI_API_KEY' },
     allowlist,
-    prompt: 'candidate prompt',
+    prompt: 'p',
     env: { OPENAI_API_KEY: 'sk-test-secret' },
-    postJson: async () => ({ ok: false, reason: 'http_500', stderr: 'server failed' }),
+  }), {
+    ok: false,
+    reason: 'proposal_unavailable',
+    stderr: 'unsupported provider mode:openai-something-else',
   });
 
-  assert.deepEqual(result, { ok: false, reason: 'http_500', stderr: 'server failed' });
+  assert.deepEqual(await proposeOpenAiCandidate({
+    provider: { model: 'gpt-test', apiKeyEnv: 'OPENAI_API_KEY' },
+    allowlist,
+    prompt: 'p',
+    env: { OPENAI_API_KEY: 'sk-test-secret' },
+  }), {
+    ok: false,
+    reason: 'proposal_unavailable',
+    stderr: 'unsupported provider mode:undefined',
+  });
 });
 
-test('proposeOpenAiCandidate fails safely when responses payload lacks extractable text', async () => {
+test('proposeOpenAiCandidate propagates postJson failure safely', async () => {
+  let called = 0;
   const result = await proposeOpenAiCandidate({
     mode: 'openai-responses',
-    provider: { apiBaseUrl: 'https://api.openai.test/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
+    provider: { model: 'gpt-test', apiKeyEnv: 'OPENAI_API_KEY' },
     allowlist,
-    prompt: 'candidate prompt',
+    prompt: 'p',
     env: { OPENAI_API_KEY: 'sk-test-secret' },
-    postJson: async () => ({ ok: true, json: { status: 'completed', output: [] } }),
+    postJson: async () => {
+      called += 1;
+      return { ok: false, reason: 'network_error', stderr: 'timeout' };
+    },
   });
 
-  assert.deepEqual(result, { ok: false, reason: 'missing_output_text', stderr: '' });
+  assert.equal(called, 1);
+  assert.deepEqual(result, { ok: false, reason: 'network_error', stderr: 'timeout' });
 });
 
-test('proposeOpenAiCandidate fails safely when chat completions payload has no choices', async () => {
+test('proposeOpenAiCandidate propagates extractor failure on malformed responses payload', async () => {
   const result = await proposeOpenAiCandidate({
-    mode: 'openai-chat-completions',
-    provider: { apiBaseUrl: 'https://api.openai.test/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
+    mode: 'openai-responses',
+    provider: { model: 'gpt-test', apiKeyEnv: 'OPENAI_API_KEY' },
     allowlist,
-    prompt: 'candidate prompt',
+    prompt: 'p',
     env: { OPENAI_API_KEY: 'sk-test-secret' },
-    postJson: async () => ({ ok: true, json: { choices: [] } }),
+    postJson: async () => ({
+      ok: true,
+      json: {
+        status: 'completed',
+        output: [
+          { type: 'message', content: [{ type: 'output_text', text: '{"a":1}' }, { type: 'output_text', text: '{"b":2}' }] },
+        ],
+      },
+    }),
   });
 
-  assert.deepEqual(result, { ok: false, reason: 'missing_choice', stderr: '' });
+  assert.deepEqual(result, { ok: false, reason: 'multiple_output_text', stderr: '' });
 });
 
 test('proposeOpenAiCandidate fails safely when model or API key is missing', async () => {

@@ -130,6 +130,45 @@ test('proposeOpenAiCandidate posts responses request and returns raw candidate t
   });
 });
 
+test('proposeOpenAiCandidate propagates postJson failure for responses mode', async () => {
+  const result = await proposeOpenAiCandidate({
+    mode: 'openai-responses',
+    provider: { apiBaseUrl: 'https://api.openai.test/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
+    allowlist,
+    prompt: 'candidate prompt',
+    env: { OPENAI_API_KEY: 'sk-test-secret' },
+    postJson: async () => ({ ok: false, reason: 'http_500', stderr: 'server failed' }),
+  });
+
+  assert.deepEqual(result, { ok: false, reason: 'http_500', stderr: 'server failed' });
+});
+
+test('proposeOpenAiCandidate fails safely when responses payload lacks extractable text', async () => {
+  const result = await proposeOpenAiCandidate({
+    mode: 'openai-responses',
+    provider: { apiBaseUrl: 'https://api.openai.test/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
+    allowlist,
+    prompt: 'candidate prompt',
+    env: { OPENAI_API_KEY: 'sk-test-secret' },
+    postJson: async () => ({ ok: true, json: { status: 'completed', output: [] } }),
+  });
+
+  assert.deepEqual(result, { ok: false, reason: 'missing_output_text', stderr: '' });
+});
+
+test('proposeOpenAiCandidate fails safely when chat completions payload has no choices', async () => {
+  const result = await proposeOpenAiCandidate({
+    mode: 'openai-chat-completions',
+    provider: { apiBaseUrl: 'https://api.openai.test/v1', apiKeyEnv: 'OPENAI_API_KEY', model: 'gpt-test' },
+    allowlist,
+    prompt: 'candidate prompt',
+    env: { OPENAI_API_KEY: 'sk-test-secret' },
+    postJson: async () => ({ ok: true, json: { choices: [] } }),
+  });
+
+  assert.deepEqual(result, { ok: false, reason: 'missing_choice', stderr: '' });
+});
+
 test('proposeOpenAiCandidate fails safely when model or API key is missing', async () => {
   assert.deepEqual(await proposeOpenAiCandidate({ mode: 'openai-responses', provider: {}, allowlist, prompt: 'p', env: {} }), {
     ok: false,

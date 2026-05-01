@@ -1,6 +1,7 @@
 param(
   [string]$RepoRoot,
   [string]$ConfigPath = './config/pine-autoresearch-llm.default.json',
+  [switch]$Enable,
   [switch]$DryRun,
   [switch]$WhatIf
 )
@@ -26,13 +27,22 @@ if (-not $pwshPath) {
   $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
 }
 $runScript = Join-Path $PSScriptRoot 'pine-autoresearch-llm-run.ps1'
+$cliScript = Join-Path $RepoRoot 'scripts\pine-autoresearch-llm.mjs'
+$scheduledEnabled = $false
+if ($null -ne $config.scheduled -and $null -ne $config.scheduled.enabled) {
+  $scheduledEnabled = [bool]$config.scheduled.enabled
+}
 
-function Register-Task($TaskName, $ScheduleArgs, $ScriptPath) {
+if (-not $Enable -and -not $scheduledEnabled) {
+  throw 'refusing to install LLM autoresearch tasks: pass -Enable or set scheduled.enabled=true in the config'
+}
+
+function Register-Task($TaskName, $ScheduleArgs, $TaskKind) {
   $taskName = $TaskName
-  $taskCommand = if ($ScriptPath.EndsWith('.ps1')) {
-    "`"$pwshPath`" -NoProfile -File `"$ScriptPath`" -RepoRoot `"$RepoRoot`" -ConfigPath `"./config/pine-autoresearch-llm.default.json`""
+  $taskCommand = if ($TaskKind -eq 'run') {
+    "`"$pwshPath`" -NoProfile -File `"$runScript`" -RepoRoot `"$RepoRoot`" -ConfigPath `"$ConfigPath`""
   } else {
-    "`"$pwshPath`" -NoProfile -Command `"node ./scripts/pine-autoresearch-llm.mjs digest --config ./config/pine-autoresearch-llm.default.json`""
+    "`"$pwshPath`" -NoProfile -Command `"Set-Location -LiteralPath '$RepoRoot'; node '$cliScript' digest --config '$ConfigPath'`""
   }
   $args = @('/Create', '/F', '/TN', $taskName, '/TR', $taskCommand) + $ScheduleArgs
   $preview = 'schtasks ' + ($args -join ' ')
@@ -59,7 +69,7 @@ function Register-Task($TaskName, $ScheduleArgs, $ScriptPath) {
 if ([string]$config.provider.mode -eq 'openclaw') {
   Write-Warning '[refuse] provider=openclaw; skipping BacktestKit-Pine-LLM-Run'
 } else {
-  Register-Task 'BacktestKit-Pine-LLM-Run' @('/SC', 'MINUTE', '/MO', '30', '/ST', '00:00') $runScript
+  Register-Task 'BacktestKit-Pine-LLM-Run' @('/SC', 'MINUTE', '/MO', '30', '/ST', '00:00') 'run'
 }
 
-Register-Task 'BacktestKit-Pine-LLM-Digest' @('/SC', 'HOURLY', '/MO', '6', '/ST', '00:10') 'node ./scripts/pine-autoresearch-llm.mjs digest --config ./config/pine-autoresearch-llm.default.json'
+Register-Task 'BacktestKit-Pine-LLM-Digest' @('/SC', 'HOURLY', '/MO', '6', '/ST', '00:10') 'digest'

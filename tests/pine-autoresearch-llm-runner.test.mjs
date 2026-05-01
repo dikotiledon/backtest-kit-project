@@ -59,6 +59,30 @@ test('scheduled disabled provider exits soft-success and writes provider status'
   }
 });
 
+
+test('scheduled disabled provider soft-succeeds even with pending review blockers', async () => {
+  const { dir, configPath } = await fixture();
+  const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');
+
+  try {
+    await seedReviewBlocker(reviewQueuePath, 'pending_review');
+
+    const result = await runLlmAutoresearch({ configPath, repoRoot: dir, command: 'run', scheduled: true });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, 'proposal_unavailable');
+
+    const status = JSON.parse(await fs.readFile(
+      path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-provider-status.json'),
+      'utf8',
+    ));
+    assert.equal(status.reason, 'proposal_unavailable');
+    assert.equal(status.details.reviewSummary.hasBlockers, true);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('scheduled openclaw provider is hard rejected', async () => {
   const { dir, configPath, allowlistPath } = await fixture();
 

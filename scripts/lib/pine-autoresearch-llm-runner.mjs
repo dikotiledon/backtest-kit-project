@@ -449,6 +449,27 @@ export async function runLlmAutoresearch({
     };
   }
 
+  if (scheduled && (!baseProvider.mode || baseProvider.mode === 'disabled')) {
+    const status = await writeProviderStatus(paths, buildStatus({
+      ok: true,
+      reason: 'proposal_unavailable',
+      command,
+      scheduled,
+      matrixId: paths.matrixId,
+      providerMode: baseProvider.mode ?? 'disabled',
+      details: {
+        reviewSummary,
+      },
+    }));
+
+    return {
+      ok: true,
+      reason: 'proposal_unavailable',
+      status,
+      reviewSummary,
+    };
+  }
+
   if (shouldBlockProposalPath(command, reviewSummary)) {
     const status = await writeProviderStatus(paths, buildStatus({
       ok: false,

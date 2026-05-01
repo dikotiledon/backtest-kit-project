@@ -58,13 +58,38 @@ test('LLM task installer dry-run previews only LLM tasks', async () => {
       provider: { mode: 'disabled' },
     }), 'utf8');
 
-    const result = await runPwshFile(path.join(repoRoot, 'scripts/ops/install-pine-autoresearch-llm-tasks.ps1'), ['-RepoRoot', tempRoot, '-DryRun'], repoRoot);
+    const result = await runPwshFile(path.join(repoRoot, 'scripts/ops/install-pine-autoresearch-llm-tasks.ps1'), ['-RepoRoot', tempRoot, '-Enable', '-DryRun'], repoRoot);
 
     assert.equal(result.code, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /\[dry-run\].*BacktestKit-Pine-LLM-Run/);
     assert.match(result.stdout, /\[dry-run\].*BacktestKit-Pine-LLM-Digest/);
+    assert.match(result.stdout, /-ConfigPath \"[^\"]*pine-autoresearch-llm\.default\.json\"/);
+    assert.match(result.stdout, /Set-Location -LiteralPath/);
+    assert.match(result.stdout, /digest --config/);
+    assert.doesNotMatch(result.stdout, /node \.\/scripts\/pine-autoresearch-llm\.mjs digest --config \.\/config/);
     assert.doesNotMatch(result.stdout, /BacktestKit-Pine-Autoresearch-Micro/);
     assert.doesNotMatch(result.stdout, /BacktestKit-Pine-Autoresearch-Full/);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
+
+test('LLM task installer refuses real task registration without explicit enablement', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-install-refuse-'));
+  try {
+    const configDir = path.join(tempRoot, 'config');
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, 'pine-autoresearch-llm.default.json'), JSON.stringify({
+      matrixId: 'pine-fusion-v4-core-15m-locked-window',
+      scheduled: { enabled: false },
+      provider: { mode: 'disabled' },
+    }), 'utf8');
+
+    const result = await runPwshFile(path.join(repoRoot, 'scripts/ops/install-pine-autoresearch-llm-tasks.ps1'), ['-RepoRoot', tempRoot], repoRoot);
+
+    assert.notEqual(result.code, 0);
+    assert.match(result.stderr + '\n' + result.stdout, /pass -Enable or set scheduled\.enabled=true/);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

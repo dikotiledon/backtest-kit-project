@@ -43,6 +43,31 @@ function Test-ProcessAlive {
   }
 }
 
+function Test-ProcessOwnsLock {
+  param(
+    [int]$ProcessId,
+    [DateTimeOffset]$StartedAt
+  )
+
+  if ($ProcessId -le 0) {
+    return $false
+  }
+
+  try {
+    $process = Get-Process -Id $ProcessId -ErrorAction Stop
+  } catch {
+    return $false
+  }
+
+  try {
+    $processStart = [DateTimeOffset]$process.StartTime.ToUniversalTime()
+    $delta = [Math]::Abs(($processStart.UtcDateTime - $StartedAt.UtcDateTime).TotalSeconds)
+    return $delta -le 5
+  } catch {
+    return $true
+  }
+}
+
 function Get-SchedulerLockPayload {
   param([string]$LockPath)
 
@@ -93,8 +118,8 @@ function Test-SchedulerLockStale {
 
     if ($startedAt -and $pidValue) {
       $age = (Get-Date).ToUniversalTime() - $startedAt.UtcDateTime
-      $pidAlive = Test-ProcessAlive -ProcessId $pidValue
-      return ($age -ge $StaleAfter) -and (-not $pidAlive)
+      $ownerAlive = Test-ProcessOwnsLock -ProcessId $pidValue -StartedAt $startedAt
+      return ($age -ge $StaleAfter) -and (-not $ownerAlive)
     }
   }
 
@@ -126,17 +151,23 @@ function Acquire-SchedulerLock {
       $payload = Get-SchedulerLockPayload -LockPath $LockFile
       $canReclaim = Test-SchedulerLockStale -LockPath $LockFile -Payload $payload -StaleAfter $StaleAfter
       if (-not $canReclaim -or $reclaimed) {
-        Write-Host "[$TaskName] skipped: scheduler lock exists at $LockFile"
+        $message = "[$TaskName] skipped: scheduler lock exists at $LockFile"
+        Write-Host $message
+        Add-Content -LiteralPath $logPath -Value $message
         return $null
       }
 
-      Write-Host "[$TaskName] scheduler lock stale; reclaiming $LockFile"
+      $message = "[$TaskName] scheduler lock stale; reclaiming $LockFile"
+      Write-Host $message
+      Add-Content -LiteralPath $logPath -Value $message
       Remove-Item -Force $LockFile -ErrorAction SilentlyContinue
       $reclaimed = $true
     }
   }
 
-  Write-Host "[$TaskName] skipped: scheduler lock exists at $LockFile"
+  $message = "[$TaskName] skipped: scheduler lock exists at $LockFile"
+  Write-Host $message
+  Add-Content -LiteralPath $logPath -Value $message
   return $null
 }
 

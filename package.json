@@ -19,6 +19,12 @@
     "pine:autoresearch:digest": "node ./scripts/pine-autoresearch.mjs digest --config ./config/pine-autoresearch.default.json",
     "pine:autoresearch:promote": "node ./scripts/pine-autoresearch.mjs promote --config ./config/pine-autoresearch.default.json",
     "pine:autoresearch:autopromote": "node ./scripts/pine-autoresearch.mjs autopromote --config ./config/pine-autoresearch.default.json",
+    "pine:autoresearch:llm": "node ./scripts/pine-autoresearch-llm.mjs run --config ./config/pine-autoresearch-llm.default.json",
+    "pine:autoresearch:llm:propose": "node ./scripts/pine-autoresearch-llm.mjs propose --config ./config/pine-autoresearch-llm.default.json",
+    "pine:autoresearch:llm:digest": "node ./scripts/pine-autoresearch-llm.mjs digest --config ./config/pine-autoresearch-llm.default.json",
+    "pine:autoresearch:llm:validate": "node ./scripts/pine-autoresearch-llm.mjs validate --config ./config/pine-autoresearch-llm.default.json",
+    "pine:ops:install-llm-tasks": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-llm-tasks.ps1",
+    "pine:ops:remove-llm-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-llm-tasks.ps1",
     "pine:ops:install-tasks": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-tasks.ps1",
     "pine:ops:remove-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-tasks.ps1"
   },

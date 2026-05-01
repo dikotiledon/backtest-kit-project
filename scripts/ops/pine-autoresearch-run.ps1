@@ -19,7 +19,12 @@ if (-not $RepoRoot) {
 $timestamp = Get-Date -Format 'yyyy-MM-ddTHH-mm-ss'
 $logDir = Join-Path $RepoRoot 'tmp\pine-autoresearch-logs'
 $logPath = Join-Path $logDir ("$TaskName-$timestamp.log")
+$commandScriptPath = Join-Path $logDir ("$TaskName-$timestamp-command.ps1")
 $lockStaleAfter = [TimeSpan]::FromHours(12)
+$pwshPath = (Get-Process -Id $PID).Path
+if (-not $pwshPath) {
+  $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
+}
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
@@ -35,6 +40,31 @@ function Test-ProcessAlive {
     return $true
   } catch {
     return $false
+  }
+}
+
+function Test-ProcessOwnsLock {
+  param(
+    [int]$ProcessId,
+    [DateTimeOffset]$StartedAt
+  )
+
+  if ($ProcessId -le 0) {
+    return $false
+  }
+
+  try {
+    $process = Get-Process -Id $ProcessId -ErrorAction Stop
+  } catch {
+    return $false
+  }
+
+  try {
+    $processStart = [DateTimeOffset]$process.StartTime.ToUniversalTime()
+    $delta = [Math]::Abs(($processStart.UtcDateTime - $StartedAt.UtcDateTime).TotalSeconds)
+    return $delta -le 5
+  } catch {
+    return $true
   }
 }
 
@@ -88,8 +118,8 @@ function Test-SchedulerLockStale {
 
     if ($startedAt -and $pidValue) {
       $age = (Get-Date).ToUniversalTime() - $startedAt.UtcDateTime
-      $pidAlive = Test-ProcessAlive -ProcessId $pidValue
-      return ($age -ge $StaleAfter) -and (-not $pidAlive)
+      $ownerAlive = Test-ProcessOwnsLock -ProcessId $pidValue -StartedAt $startedAt
+      return ($age -ge $StaleAfter) -and (-not $ownerAlive)
     }
   }
 
@@ -121,17 +151,23 @@ function Acquire-SchedulerLock {
       $payload = Get-SchedulerLockPayload -LockPath $LockFile
       $canReclaim = Test-SchedulerLockStale -LockPath $LockFile -Payload $payload -StaleAfter $StaleAfter
       if (-not $canReclaim -or $reclaimed) {
-        Write-Host "[$TaskName] skipped: scheduler lock exists at $LockFile"
+        $message = "[$TaskName] skipped: scheduler lock exists at $LockFile"
+        Write-Host $message
+        Add-Content -LiteralPath $logPath -Value $message
         return $null
       }
 
-      Write-Host "[$TaskName] scheduler lock stale; reclaiming $LockFile"
+      $message = "[$TaskName] scheduler lock stale; reclaiming $LockFile"
+      Write-Host $message
+      Add-Content -LiteralPath $logPath -Value $message
       Remove-Item -Force $LockFile -ErrorAction SilentlyContinue
       $reclaimed = $true
     }
   }
 
-  Write-Host "[$TaskName] skipped: scheduler lock exists at $LockFile"
+  $message = "[$TaskName] skipped: scheduler lock exists at $LockFile"
+  Write-Host $message
+  Add-Content -LiteralPath $logPath -Value $message
   return $null
 }
 
@@ -187,11 +223,31 @@ try {
     Write-Host "[$TaskName] log=$logPath"
     Write-Host "[$TaskName] lock=$LockName"
 
-    $output = & pwsh -NoProfile -Command $Command 2>&1
-    $output | Tee-Object -FilePath $logPath
+    Set-Content -LiteralPath $commandScriptPath -Value $Command -Encoding UTF8
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $pwshPath
+    [void]$processInfo.ArgumentList.Add('-NoProfile')
+    [void]$processInfo.ArgumentList.Add('-File')
+    [void]$processInfo.ArgumentList.Add($commandScriptPath)
+    $processInfo.WorkingDirectory = (Get-Location).Path
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
+    $processInfo.UseShellExecute = $false
 
-    if ($LASTEXITCODE -ne 0) {
-      throw "Task $TaskName failed with exit code $LASTEXITCODE"
+    $childProcess = [System.Diagnostics.Process]::Start($processInfo)
+    $stdout = $childProcess.StandardOutput.ReadToEnd()
+    $stderr = $childProcess.StandardError.ReadToEnd()
+    $childProcess.WaitForExit()
+    $childExitCode = $childProcess.ExitCode
+    $output = ($stdout, $stderr -join '')
+    if (-not [string]::IsNullOrEmpty($output)) {
+      $output | Tee-Object -FilePath $logPath
+    } else {
+      Set-Content -LiteralPath $logPath -Value '' -Encoding UTF8
+    }
+
+    if ($childExitCode -ne 0) {
+      throw "Task $TaskName failed with exit code $childExitCode"
     }
   } finally {
     if ($mutex) {

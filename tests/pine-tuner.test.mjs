@@ -1013,15 +1013,15 @@ test('buildIncumbentSearchBatch preserves incumbent architecture when freezeArch
   assert.equal(variant.config.useStopsTP, false);
 });
 
-test('pine test script defaults to the hardened fusion v4 profile', async () => {
+test('pine test script defaults to the current tuned fusion v4 profile', async () => {
   const source = await fs.readFile(new URL('../pine/test.pine', import.meta.url), 'utf8');
 
   assert.match(source, /Use Volatility Filter", defval=false/);
   assert.match(source, /Use Regime Filter", defval=false/);
   assert.match(source, /Use ADX Filter", defval=true/);
   assert.match(source, /useTrendXConf\s*=\s*input\.bool\(true,\s+title="Require Confirmation Trend \(x\)"/);
-  assert.match(source, /minPredSum\s*=\s*input\.float\(2(?:\.0)?,\s+title="Min Prediction Sum \(strength\)"/);
-  assert.match(source, /minBarsBetween\s*=\s*input\.int\(2,\s+title="Cooldown Bars Between Entries"/);
+  assert.match(source, /minPredSum\s*=\s*input\.float\(1\.8,\s+title="Min Prediction Sum \(strength\)"/);
+  assert.match(source, /minBarsBetween\s*=\s*input\.int\(1,\s+title="Cooldown Bars Between Entries"/);
   assert.match(source, /useSignalFusion\s*=\s*input\.bool\(true,\s+title="Use Signal Fusion"/);
   assert.match(source, /useAtrFlipConfirm\s*=\s*input\.bool\(true,\s+title="Use ATR Flip Confirm"/);
   assert.match(source, /use3LineConfirm\s*=\s*input\.bool\(false,\s+title="Use 3 Line Strike Confirm"/);

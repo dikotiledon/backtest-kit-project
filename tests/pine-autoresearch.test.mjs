@@ -276,6 +276,32 @@ test('pine-autoresearch-run.ps1 reclaims a stale dead scheduler lock', async () 
     '-TaskName', 'stale-check',
     '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
     '-RepoRoot', tempRoot,
+    '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Stale-${process.pid}`,
+  ], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, /scheduler lock stale; reclaiming/);
+  assert.equal((await readIfExists(markerPath))?.trim(), 'ran');
+  assert.equal(await readIfExists(path.join(lockDir, 'scheduler.lock')), null);
+});
+
+test('pine-autoresearch-run.ps1 reclaims stale scheduler lock when pid was reused by another process', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-reused-pid-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockDir = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks');
+  await fs.mkdir(lockDir, { recursive: true });
+  await fs.writeFile(path.join(lockDir, 'scheduler.lock'), [
+    'task=reused-pid-check',
+    'pid=' + process.pid,
+    'startedAt=' + new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString(),
+    '',
+  ].join('\n'), 'utf8');
+  const markerPath = path.join(tempRoot, 'reused-pid-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'reused-pid-check',
+    '-Command', 'Set-Content -LiteralPath ' + psSingleQuote(markerPath) + " -Value 'ran'",
+    '-RepoRoot', tempRoot,
+    '-LockName', 'Global\\BacktestKit-Pine-Autoresearch-Test-Reused-' + process.pid,
   ], { cwd: repoRoot });
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
@@ -293,6 +319,7 @@ test('pine-autoresearch-run.ps1 removes its lock after a nonzero command', async
     '-TaskName', 'fail-check',
     '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'; exit 7`,
     '-RepoRoot', tempRoot,
+    '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Fail-${process.pid}`,
   ], { cwd: repoRoot });
 
   assert.notEqual(result.code, 0);

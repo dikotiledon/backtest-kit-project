@@ -1,0 +1,130 @@
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+import { runLlmAutoresearch } from '../scripts/lib/pine-autoresearch-llm-runner.mjs';
+import { readReviewQueue } from '../scripts/lib/pine-autoresearch-llm-review-queue.mjs';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+async function runNode(args, cwd) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, args, { cwd, shell: false });
+    let stdout = '';
+    let stderr = '';
+
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (error) => resolve({ code: -1, stdout, stderr: `${stderr}${error?.message ? `\n${error.message}` : ''}`.trim() }));
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+async function fixture() {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-e2e-'));
+  const allowlistPath = path.join(dir, 'allowlist.json');
+  const candidateFile = path.join(dir, 'candidate.json');
+  const configPath = path.join(dir, 'llm.json');
+
+  await fs.writeFile(allowlistPath, JSON.stringify({
+    version: 1,
+    freezeArchitecture: true,
+    maxChangedParams: 1,
+    parameters: [
+      { key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1, mutability: 'tunable', family: 'signal' },
+    ],
+  }), 'utf8');
+
+  await fs.writeFile(candidateFile, JSON.stringify({
+    hypothesis: 'raise threshold',
+    patch: { minPredSum: 1.8 },
+    expectedEffect: 'fewer trades',
+    risk: 'count',
+  }), 'utf8');
+
+  await fs.writeFile(configPath, JSON.stringify({
+    matrixId: 'matrix-a',
+    allowlistPath,
+    provider: { mode: 'file', candidateFile },
+    champion: { minPredSum: 1.7 },
+    memory: {
+      maxPromptBytes: 4096,
+      maxHotMemoryBytes: 262144,
+      recentCandidates: 20,
+      topWinners: 10,
+      tabuFingerprints: 50,
+    },
+    candidate: { maxChangedParams: 1 },
+  }), 'utf8');
+
+  return { dir, configPath };
+}
+
+test('end-to-end file candidate creates manifest and review queue without promotion queue', async () => {
+  const { dir, configPath } = await fixture();
+
+  try {
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      executeCandidate: async () => ({ ok: true, runId: 'run-a', promotable: true, metricsDelta: { score: 1 } }),
+    });
+
+    assert.equal(result.ok, true);
+    assert.match(result.manifestPath, /manifests/);
+    await fs.stat(result.manifestPath);
+
+    const manifest = JSON.parse(await fs.readFile(result.manifestPath, 'utf8'));
+    assert.equal(manifest.lane, 'llm');
+    assert.equal(manifest.runId, 'run-a');
+    assert.equal(manifest.matrixId, 'matrix-a');
+    assert.equal(manifest.candidateId, `${manifest.parentChampionFingerprint}:${manifest.candidateFingerprint}`);
+    assert.deepEqual(manifest.metricsDelta, { score: 1 });
+    assert.equal(manifest.provider.mode, 'file');
+
+    const queue = await readReviewQueue(path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl'));
+    assert.equal(queue.items.length, 1);
+    assert.equal(queue.items[0].status, 'pending_review');
+
+    await assert.rejects(
+      () => fs.stat(path.join(dir, 'pine/autoresearch/matrix-a/state/promotion-queue.jsonl')),
+      /ENOENT/,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('digest command prints compact JSON summary', async () => {
+  const { dir, configPath } = await fixture();
+
+  try {
+    const runResult = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      executeCandidate: async () => ({ ok: true, runId: 'run-a', promotable: true, metricsDelta: { score: 1 } }),
+    });
+
+    assert.equal(runResult.ok, true);
+
+    const cli = await runNode([path.join(repoRoot, 'scripts/pine-autoresearch-llm.mjs'), 'digest', '--config', configPath, '--repo-root', dir], repoRoot);
+
+    assert.equal(cli.code, 0, cli.stderr || cli.stdout);
+    const digest = JSON.parse(cli.stdout.trim());
+    assert.equal(digest.matrixId, 'matrix-a');
+    assert.equal(digest.pendingReviewCount, 1);
+    assert.equal(digest.recentCandidateCount, 1);
+    assert.equal(digest.lastRunId, 'run-a');
+    assert.equal(digest.providerStatus.reason, 'completed');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

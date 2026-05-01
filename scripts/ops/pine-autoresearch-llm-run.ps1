@@ -16,7 +16,6 @@ if (-not [System.IO.Path]::IsPathRooted($ConfigPath)) {
 
 $timestamp = Get-Date -Format 'yyyy-MM-ddTHH-mm-ss'
 $logDir = Join-Path $RepoRoot 'tmp\pine-autoresearch-llm-logs'
-New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 function Test-ProcessAlive {
   param([int]$ProcessId)
@@ -165,6 +164,7 @@ if ($DryRun) {
 }
 
 New-Item -ItemType Directory -Force -Path $lockDir | Out-Null
+New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
 $lockStream = $null
 $mutex = $null

@@ -63,6 +63,7 @@ test('LLM dry-run does not create runtime dirs', async () => {
     assert.equal(result.code, 0, result.stderr || result.stdout);
     assert.match(result.stdout, /\[dry-run\].*provider=disabled/);
     await assert.rejects(() => fs.stat(path.join(tempRoot, 'pine', 'autoresearch-llm')), /ENOENT/);
+    await assert.rejects(() => fs.stat(path.join(tempRoot, 'tmp', 'pine-autoresearch-llm-logs')), /ENOENT/);
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true });
   }

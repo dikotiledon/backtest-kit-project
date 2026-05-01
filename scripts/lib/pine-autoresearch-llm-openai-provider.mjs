@@ -53,7 +53,11 @@ export function buildResponsesRequest({ provider = {}, prompt, allowlist, allowG
 }
 
 export function extractChatCompletionsText(json) {
-  const choice = Array.isArray(json?.choices) ? json.choices[0] : null;
+  const choices = Array.isArray(json?.choices) ? json.choices : null;
+  if (!choices || choices.length === 0) return { ok: false, reason: 'missing_choice' };
+  if (choices.length !== 1) return { ok: false, reason: 'multiple_choices' };
+
+  const choice = choices[0];
   if (!choice) return { ok: false, reason: 'missing_choice' };
   if (choice.finish_reason && choice.finish_reason !== 'stop') return { ok: false, reason: `finish_reason:${choice.finish_reason}` };
   const raw = choice.message?.content;

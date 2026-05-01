@@ -1,5 +1,12 @@
+function normalizeJsonSchemaType(type) {
+  if (type === 'float') return 'number';
+  if (type === 'int') return 'integer';
+  if (type === 'bool') return 'boolean';
+  return type;
+}
+
 function toJsonSchemaProperty(definition = {}) {
-  const type = definition.type;
+  const type = normalizeJsonSchemaType(definition.type);
   const property = {};
 
   if (type === 'number') property.type = 'number';
@@ -16,15 +23,38 @@ function toJsonSchemaProperty(definition = {}) {
   return property;
 }
 
+function isAllowedMutability(mutability, allowGuarded) {
+  if (mutability === 'forbidden') return false;
+  if (mutability === 'guarded') return Boolean(allowGuarded);
+  if (mutability === 'safe' || mutability === 'tunable' || mutability === 'schedulable') return true;
+  return false;
+}
+
+function normalizeAllowlistParameters(parameters) {
+  if (!parameters) return [];
+
+  if (Array.isArray(parameters)) {
+    return parameters
+      .filter((entry) => entry && typeof entry === 'object' && typeof entry.key === 'string' && entry.key)
+      .map((entry) => [entry.key, entry]);
+  }
+
+  if (typeof parameters === 'object') {
+    return Object.entries(parameters);
+  }
+
+  return [];
+}
+
 export function buildCandidateJsonSchema({ allowlist, allowGuarded = false } = {}) {
   const parameters = allowlist?.parameters;
-  if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) {
-    throw new Error('allowlist.parameters object required');
+  if (!parameters || (typeof parameters !== 'object' && !Array.isArray(parameters))) {
+    throw new Error('allowlist.parameters object or array required');
   }
 
   const paramProperties = {};
-  for (const [name, definition] of Object.entries(parameters).sort(([a], [b]) => a.localeCompare(b))) {
-    if (!allowGuarded && definition?.mutability === 'guarded') continue;
+  for (const [name, definition] of normalizeAllowlistParameters(parameters).sort(([a], [b]) => a.localeCompare(b))) {
+    if (!isAllowedMutability(definition?.mutability, allowGuarded)) continue;
     paramProperties[name] = toJsonSchemaProperty(definition);
   }
 

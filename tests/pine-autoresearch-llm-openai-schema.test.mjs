@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import { buildCandidateJsonSchema, buildStructuredOutputConfig } from '../scripts/lib/pine-autoresearch-llm-openai-schema.mjs';
@@ -18,6 +19,49 @@ const guardedOnlyAllowlist = {
     useVolatilityFilter: { type: 'boolean', mutability: 'guarded' },
   },
 };
+
+const defaultAllowlist = JSON.parse(
+  await readFile(new URL('../config/pine-autoresearch-llm-allowlist.default.json', import.meta.url), 'utf8'),
+);
+
+test('buildCandidateJsonSchema supports repo default array allowlist and excludes forbidden params', () => {
+  const schema = buildCandidateJsonSchema({ allowlist: defaultAllowlist });
+
+  assert.equal(schema.type, 'object');
+  assert.deepEqual(Object.keys(schema.properties.params.properties).sort(), [
+    'divRsiLen',
+    'minPredSum',
+    'riskRewardRatio',
+    'stopLossPct',
+  ]);
+  assert.deepEqual(schema.properties.params.properties.minPredSum, {
+    type: 'number',
+    minimum: 0,
+    maximum: 5,
+    multipleOf: 0.1,
+  });
+  assert.deepEqual(schema.properties.params.properties.divRsiLen, {
+    type: 'integer',
+    minimum: 5,
+    maximum: 50,
+    multipleOf: 1,
+  });
+  assert.deepEqual(schema.properties.params.properties.riskRewardRatio, {
+    type: 'number',
+    minimum: 0.5,
+    maximum: 5,
+    multipleOf: 0.1,
+  });
+  assert.deepEqual(schema.properties.params.properties.stopLossPct, {
+    type: 'number',
+    minimum: 0.1,
+    maximum: 10,
+    multipleOf: 0.1,
+  });
+  assert.equal(schema.properties.params.properties.useSignalFusion, undefined);
+  assert.equal(schema.properties.params.properties.useFusionV4, undefined);
+  assert.equal(schema.properties.params.properties.useTrailingStop, undefined);
+});
 
 test('buildCandidateJsonSchema creates one strict candidate object schema', () => {
   const schema = buildCandidateJsonSchema({ allowlist, allowGuarded: true });

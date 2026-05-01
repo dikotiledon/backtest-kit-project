@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 import {
@@ -15,6 +16,10 @@ const allowlist = {
     minPredSum: { type: 'number', min: 1.1, max: 3.5, step: 0.1, mutability: 'safe' },
   },
 };
+
+const defaultAllowlist = JSON.parse(
+  await readFile(new URL('../config/pine-autoresearch-llm-allowlist.default.json', import.meta.url), 'utf8'),
+);
 
 test('buildChatCompletionsRequest creates non-streaming structured JSON request', () => {
   const request = buildChatCompletionsRequest({
@@ -55,6 +60,20 @@ test('buildResponsesRequest creates non-streaming structured JSON request', () =
   assert.equal(request.text.format.strict, true);
 });
 
+test('buildChatCompletionsRequest supports repo default array allowlist', () => {
+  const request = buildChatCompletionsRequest({
+    provider: { model: 'gpt-test' },
+    prompt: 'candidate prompt',
+    allowlist: defaultAllowlist,
+  });
+
+  const params = request.response_format.json_schema.schema.properties.params.properties;
+  assert.deepEqual(Object.keys(params).sort(), ['divRsiLen', 'minPredSum', 'riskRewardRatio', 'stopLossPct']);
+  assert.equal(params.useSignalFusion, undefined);
+  assert.equal(params.useFusionV4, undefined);
+  assert.equal(params.useTrailingStop, undefined);
+});
+
 test('extractChatCompletionsText extracts first message content and rejects bad finish reasons', () => {
   const ok = extractChatCompletionsText({
     choices: [{ finish_reason: 'stop', message: { content: '{"params":{"minPredSum":1.8},"rationale":"x"}' } }],
@@ -62,9 +81,17 @@ test('extractChatCompletionsText extracts first message content and rejects bad 
   assert.deepEqual(ok, { ok: true, raw: '{"params":{"minPredSum":1.8},"rationale":"x"}' });
 
   assert.deepEqual(extractChatCompletionsText({ choices: [] }), { ok: false, reason: 'missing_choice' });
+  assert.deepEqual(extractChatCompletionsText({}), { ok: false, reason: 'missing_choice' });
   assert.deepEqual(
     extractChatCompletionsText({ choices: [{ finish_reason: 'length', message: { content: '{}' } }] }),
     { ok: false, reason: 'finish_reason:length' },
+  );
+  assert.deepEqual(
+    extractChatCompletionsText({ choices: [
+      { finish_reason: 'stop', message: { content: '{"a":1}' } },
+      { finish_reason: 'stop', message: { content: '{"b":2}' } },
+    ] }),
+    { ok: false, reason: 'multiple_choices' },
   );
 });
 

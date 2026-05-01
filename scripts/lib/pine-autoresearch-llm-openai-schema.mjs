@@ -16,7 +16,7 @@ function toJsonSchemaProperty(definition = {}) {
   return property;
 }
 
-export function buildCandidateJsonSchema({ allowlist, allowGuarded = true } = {}) {
+export function buildCandidateJsonSchema({ allowlist, allowGuarded = false } = {}) {
   const parameters = allowlist?.parameters;
   if (!parameters || typeof parameters !== 'object' || Array.isArray(parameters)) {
     throw new Error('allowlist.parameters object required');
@@ -26,6 +26,10 @@ export function buildCandidateJsonSchema({ allowlist, allowGuarded = true } = {}
   for (const [name, definition] of Object.entries(parameters).sort(([a], [b]) => a.localeCompare(b))) {
     if (!allowGuarded && definition?.mutability === 'guarded') continue;
     paramProperties[name] = toJsonSchemaProperty(definition);
+  }
+
+  if (Object.keys(paramProperties).length === 0) {
+    throw new Error('allowlist.parameters filtered to zero properties');
   }
 
   return {
@@ -48,7 +52,7 @@ export function buildCandidateJsonSchema({ allowlist, allowGuarded = true } = {}
   };
 }
 
-export function buildStructuredOutputConfig({ apiStyle, allowlist, allowGuarded = true } = {}) {
+export function buildStructuredOutputConfig({ apiStyle, allowlist, allowGuarded = false } = {}) {
   const schema = buildCandidateJsonSchema({ allowlist, allowGuarded });
   const name = 'pine_autoresearch_candidate';
 

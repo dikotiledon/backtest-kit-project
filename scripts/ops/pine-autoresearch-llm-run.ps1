@@ -148,8 +148,6 @@ $mutexName = "Global\BacktestKit-Pine-LLM-Autoresearch-$matrixId"
 $lockStaleAfter = [TimeSpan]::FromHours(12)
 $logPath = Join-Path $logDir ("$taskName-$timestamp.log")
 
-New-Item -ItemType Directory -Force -Path $lockDir | Out-Null
-
 if ([string]$config.provider.mode -eq 'openclaw') {
   Write-Error "[$taskName] refused: provider=openclaw"
   exit 1
@@ -159,11 +157,14 @@ if ($DryRun) {
   Write-Host "[dry-run] repo=$RepoRoot"
   Write-Host "[dry-run] config=$ConfigPath"
   Write-Host "[dry-run] matrixId=$matrixId"
+  Write-Host "[dry-run] provider=$($config.provider.mode)"
   Write-Host "[dry-run] lock=$lockFile"
   Write-Host "[dry-run] mutex=$mutexName"
   Write-Host "[dry-run] command=$command"
   exit 0
 }
+
+New-Item -ItemType Directory -Force -Path $lockDir | Out-Null
 
 $lockStream = $null
 $mutex = $null

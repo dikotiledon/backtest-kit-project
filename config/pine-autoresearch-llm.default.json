@@ -1,0 +1,35 @@
+{
+  "matrixId": "pine-fusion-v4-core-15m-locked-window",
+  "baseConfigPath": "./config/pine-autoresearch.default.json",
+  "allowlistPath": "./config/pine-autoresearch-llm-allowlist.default.json",
+  "stateRoot": "./pine/autoresearch-llm",
+  "scheduled": {
+    "enabled": false,
+    "slotMs": 900000,
+    "contextBudgetMs": 120000,
+    "executionBudgetMs": 720000,
+    "finalizeBudgetMs": 60000
+  },
+  "provider": {
+    "mode": "disabled",
+    "cliCommand": null,
+    "timeoutMs": 90000
+  },
+  "candidate": {
+    "maxChangedParams": 4,
+    "noveltyDistanceMin": 1,
+    "allowGuarded": false
+  },
+  "memory": {
+    "maxHotMemoryBytes": 262144,
+    "maxPromptBytes": 16384,
+    "recentCandidates": 20,
+    "tabuFingerprints": 200,
+    "topWinners": 10,
+    "archiveRetentionDays": 14,
+    "keepLatestRuns": 12
+  },
+  "review": {
+    "blockScheduledWhenUnresolved": true
+  }
+}

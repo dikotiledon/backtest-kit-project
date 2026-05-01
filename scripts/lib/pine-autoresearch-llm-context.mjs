@@ -29,7 +29,50 @@ function buildHardRules(maxPromptBytes) {
   ];
 }
 
-function buildPromptObject({ champion, allowlist, memory, maxPromptBytes }) {
+function serializePrompt(payload) {
+  return JSON.stringify(payload);
+}
+
+function promptByteLength(payload) {
+  return Buffer.byteLength(serializePrompt(payload), 'utf8');
+}
+
+function summarizeSection(value) {
+  const bytes = promptByteLength(value);
+
+  if (Array.isArray(value)) {
+    return {
+      truncated: true,
+      bytes,
+      kind: 'array',
+      items: value.length,
+    };
+  }
+
+  if (isPlainObject(value)) {
+    const keys = Object.keys(value);
+    const summary = {
+      truncated: true,
+      bytes,
+      kind: 'object',
+      keys: keys.slice(0, 6),
+    };
+
+    if (keys.length > 6) {
+      summary.moreKeys = keys.length - 6;
+    }
+
+    return summary;
+  }
+
+  return {
+    truncated: true,
+    bytes,
+    kind: value === null ? 'null' : typeof value,
+  };
+}
+
+function buildFullPrompt({ champion, allowlist, memory, maxPromptBytes }) {
   return {
     instructions: buildHardRules(maxPromptBytes),
     budget: {
@@ -41,12 +84,22 @@ function buildPromptObject({ champion, allowlist, memory, maxPromptBytes }) {
   };
 }
 
-function serializePrompt(payload) {
-  return JSON.stringify(payload);
+function buildOverflowPrompt({ champion, allowlist, memory, maxPromptBytes }) {
+  return {
+    instructions: buildHardRules(maxPromptBytes),
+    budget: {
+      maxPromptBytes: Number.isFinite(maxPromptBytes) && maxPromptBytes > 0 ? maxPromptBytes : 16384,
+    },
+    overflow: true,
+    truncated: true,
+    champion: summarizeSection(champion),
+    allowlist: summarizeSection(allowlist),
+    memory: summarizeSection(memory),
+  };
 }
 
-function promptByteLength(payload) {
-  return Buffer.byteLength(serializePrompt(payload), 'utf8');
+function buildEmergencyPrompt() {
+  return { overflow: true, truncated: true };
 }
 
 export function buildLlmResearchContext({
@@ -57,37 +110,28 @@ export function buildLlmResearchContext({
 } = {}) {
   const promptMemory = cloneMemory(memory);
   const cap = Number.isFinite(maxPromptBytes) && maxPromptBytes > 0 ? maxPromptBytes : 16384;
-  let promptObject = buildPromptObject({ champion, allowlist, memory: promptMemory, maxPromptBytes: cap });
-  let truncated = false;
 
-  const trimQueues = [
-    promptMemory.recentCandidates,
-    promptMemory.topWinners,
-    promptMemory.rejectedFingerprints,
-    promptMemory.activeHypotheses,
+  const candidates = [
+    { payload: buildFullPrompt({ champion, allowlist, memory: promptMemory, maxPromptBytes: cap }), truncated: false, overflow: false },
+    { payload: buildOverflowPrompt({ champion, allowlist, memory: promptMemory, maxPromptBytes: cap }), truncated: true, overflow: true },
+    { payload: buildEmergencyPrompt(), truncated: true, overflow: true },
+    { payload: {}, truncated: true, overflow: true },
   ];
 
-  while (promptByteLength(promptObject) > cap) {
-    let trimmed = false;
-
-    for (const queue of trimQueues) {
-      if (Array.isArray(queue) && queue.length > 0) {
-        queue.shift();
-        truncated = true;
-        trimmed = true;
-        break;
-      }
+  for (const candidate of candidates) {
+    const prompt = serializePrompt(candidate.payload);
+    if (Buffer.byteLength(prompt, 'utf8') <= cap) {
+      return {
+        prompt,
+        truncated: candidate.truncated,
+        overflow: candidate.overflow,
+      };
     }
-
-    if (!trimmed) {
-      break;
-    }
-
-    promptObject = buildPromptObject({ champion, allowlist, memory: promptMemory, maxPromptBytes: cap });
   }
 
   return {
-    prompt: serializePrompt(promptObject),
-    truncated,
+    prompt: '{}',
+    truncated: true,
+    overflow: true,
   };
 }

@@ -48,3 +48,36 @@ test('buildLlmResearchContext truncates recent memory under byte cap', () => {
   assert.equal(result.truncated, true);
   assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 2000);
 });
+
+test('buildLlmResearchContext hard caps oversized champion and allowlist', () => {
+  const result = buildLlmResearchContext({
+    champion: {
+      minPredSum: 1.7,
+      divRsiLen: 14,
+      payload: 'x'.repeat(5000),
+    },
+    allowlist: {
+      version: 1,
+      parameters: Array.from({ length: 40 }, (_, index) => ({
+        key: `p${index}`,
+        type: 'float',
+        min: 0,
+        max: 5,
+        step: 0.1,
+        mutability: 'tunable',
+        family: 'signal',
+        rationale: 'x'.repeat(80),
+      })),
+    },
+    memory: {
+      recentCandidates: [],
+      activeHypotheses: [],
+    },
+    maxPromptBytes: 1000,
+  });
+
+  assert.equal(result.truncated, true);
+  assert.equal(result.overflow, true);
+  assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 1000);
+  assert.match(result.prompt, /truncated|overflow/i);
+});

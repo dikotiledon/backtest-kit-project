@@ -19,7 +19,12 @@ if (-not $RepoRoot) {
 $timestamp = Get-Date -Format 'yyyy-MM-ddTHH-mm-ss'
 $logDir = Join-Path $RepoRoot 'tmp\pine-autoresearch-logs'
 $logPath = Join-Path $logDir ("$TaskName-$timestamp.log")
+$commandScriptPath = Join-Path $logDir ("$TaskName-$timestamp-command.ps1")
 $lockStaleAfter = [TimeSpan]::FromHours(12)
+$pwshPath = (Get-Process -Id $PID).Path
+if (-not $pwshPath) {
+  $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
+}
 
 New-Item -ItemType Directory -Force -Path $logDir | Out-Null
 
@@ -187,11 +192,31 @@ try {
     Write-Host "[$TaskName] log=$logPath"
     Write-Host "[$TaskName] lock=$LockName"
 
-    $output = & pwsh -NoProfile -Command $Command 2>&1
-    $output | Tee-Object -FilePath $logPath
+    Set-Content -LiteralPath $commandScriptPath -Value $Command -Encoding UTF8
+    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $processInfo.FileName = $pwshPath
+    [void]$processInfo.ArgumentList.Add('-NoProfile')
+    [void]$processInfo.ArgumentList.Add('-File')
+    [void]$processInfo.ArgumentList.Add($commandScriptPath)
+    $processInfo.WorkingDirectory = (Get-Location).Path
+    $processInfo.RedirectStandardOutput = $true
+    $processInfo.RedirectStandardError = $true
+    $processInfo.UseShellExecute = $false
 
-    if ($LASTEXITCODE -ne 0) {
-      throw "Task $TaskName failed with exit code $LASTEXITCODE"
+    $childProcess = [System.Diagnostics.Process]::Start($processInfo)
+    $stdout = $childProcess.StandardOutput.ReadToEnd()
+    $stderr = $childProcess.StandardError.ReadToEnd()
+    $childProcess.WaitForExit()
+    $childExitCode = $childProcess.ExitCode
+    $output = ($stdout, $stderr -join '')
+    if (-not [string]::IsNullOrEmpty($output)) {
+      $output | Tee-Object -FilePath $logPath
+    } else {
+      Set-Content -LiteralPath $logPath -Value '' -Encoding UTF8
+    }
+
+    if ($childExitCode -ne 0) {
+      throw "Task $TaskName failed with exit code $childExitCode"
     }
   } finally {
     if ($mutex) {

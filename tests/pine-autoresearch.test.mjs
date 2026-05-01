@@ -276,6 +276,7 @@ test('pine-autoresearch-run.ps1 reclaims a stale dead scheduler lock', async () 
     '-TaskName', 'stale-check',
     '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
     '-RepoRoot', tempRoot,
+    '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Stale-${process.pid}`,
   ], { cwd: repoRoot });
 
   assert.equal(result.code, 0, result.stderr || result.stdout);
@@ -293,6 +294,7 @@ test('pine-autoresearch-run.ps1 removes its lock after a nonzero command', async
     '-TaskName', 'fail-check',
     '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'; exit 7`,
     '-RepoRoot', tempRoot,
+    '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Fail-${process.pid}`,
   ], { cwd: repoRoot });
 
   assert.notEqual(result.code, 0);

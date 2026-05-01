@@ -57,6 +57,11 @@ async function main() {
   });
 
   if (result.ok) {
+    if (command === 'digest') {
+      console.log(JSON.stringify(result.digest ?? {}));
+      return;
+    }
+
     console.log(`[llm-autoresearch] ${result.reason}`);
     if (result.manifestPath) {
       console.log(`[llm-autoresearch] manifest=${result.manifestPath}`);

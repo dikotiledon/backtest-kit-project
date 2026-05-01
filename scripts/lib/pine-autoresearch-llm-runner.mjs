@@ -5,7 +5,7 @@ import { buildLlmLanePaths } from './pine-autoresearch-llm-paths.mjs';
 import { buildLlmResearchContext } from './pine-autoresearch-llm-context.mjs';
 import { proposeCandidate } from './pine-autoresearch-llm-provider.mjs';
 import { parseCandidateJson, validateCandidate, fingerprintCandidate } from './pine-autoresearch-llm-schema.mjs';
-import { readReviewQueue, unresolvedReviewItems } from './pine-autoresearch-llm-review-queue.mjs';
+import { appendReviewQueueEvent, buildReviewQueueItem, readReviewQueue, unresolvedReviewItems } from './pine-autoresearch-llm-review-queue.mjs';
 import { reserveCandidate, finalizeReservation } from './pine-autoresearch-llm-reservation.mjs';
 import { readLlmLedger, summarizeLlmLedgerFingerprints } from './pine-autoresearch-llm-ledger.mjs';
 import { pruneResearchMemory, updateResearchMemory } from './pine-autoresearch-llm-memory.mjs';
@@ -137,10 +137,14 @@ function buildRecentFingerprintSet({ ledger, memory }) {
   return fingerprints;
 }
 
-function buildCandidateIdentity({ matrixId, candidate, validation }) {
+function buildCandidateIdentity({ championFingerprint, validation }) {
   const candidateFingerprint = validation.fingerprint;
-  const candidateId = candidate?.candidateId || `${matrixId}:${candidateFingerprint}`;
-  return { candidateId, candidateFingerprint };
+  const parentChampionFingerprint = championFingerprint ?? null;
+  const candidateId = parentChampionFingerprint
+    ? `${parentChampionFingerprint}:${candidateFingerprint}`
+    : candidateFingerprint;
+
+  return { candidateId, candidateFingerprint, parentChampionFingerprint };
 }
 
 async function defaultExecuteCandidate({ candidateId, candidateFingerprint }) {
@@ -154,38 +158,21 @@ async function defaultExecuteCandidate({ candidateId, candidateFingerprint }) {
   };
 }
 
-async function writeManifest({ paths, candidate, validation, identity, command, scheduled, proposal, executeResult, config, allowlist, context }) {
+async function writeManifest({ paths, candidate, validation, identity, executeResult, config }) {
   const manifestPath = executeResult?.manifestPath
     ?? path.join(paths.manifests, `${timestampId()}-${identity.candidateFingerprint}.json`);
 
   const payload = {
-    at: isoNow(),
-    command,
-    scheduled: Boolean(scheduled),
+    lane: 'llm',
+    createdAt: isoNow(),
+    runId: executeResult?.runId ?? null,
     matrixId: paths.matrixId,
     candidateId: identity.candidateId,
     candidateFingerprint: identity.candidateFingerprint,
+    parentChampionFingerprint: identity.parentChampionFingerprint ?? null,
     candidate,
-    validation: {
-      changedKeys: validation.changedKeys,
-      canonicalPatch: validation.canonicalPatch,
-    },
-    proposal: proposal?.source ? { source: proposal.source } : null,
-    executeResult: executeResult ? {
-      ok: executeResult.ok !== false,
-      runId: executeResult.runId ?? null,
-      metricsDelta: executeResult.metricsDelta ?? null,
-    } : null,
-    config: {
-      provider: config?.provider?.mode ?? null,
-      memory: config?.memory ?? null,
-      candidate: config?.candidate ?? null,
-    },
-    allowlist,
-    context: {
-      truncated: context?.truncated ?? false,
-      overflow: context?.overflow ?? false,
-    },
+    provider: { mode: config?.provider?.mode ?? null },
+    metricsDelta: executeResult?.metricsDelta ?? null,
   };
 
   await writeJson(manifestPath, payload);
@@ -250,7 +237,7 @@ async function runProposalOnly({
       allowGuarded: Boolean(config?.candidate?.allowGuarded),
     });
 
-    const identity = buildCandidateIdentity({ matrixId: paths.matrixId, candidate: parsed, validation });
+    const identity = buildCandidateIdentity({ championFingerprint: fingerprintCandidate({ patch: config.champion ?? {} }), validation });
     const status = await writeProviderStatus(paths, buildStatus({
       ok: true,
       reason: 'proposal_ready',
@@ -303,37 +290,35 @@ async function runProposalOnly({
   }
 }
 
-async function runDigestOnly({ config, allowlist, memory, paths, scheduled, reviewSummary }) {
-  const context = buildLlmResearchContext({
-    champion: config?.champion ?? {},
-    allowlist,
-    memory,
-    maxPromptBytes: config?.memory?.maxPromptBytes,
-  });
+async function runDigestOnly({ memory, paths }) {
+  const reviewQueue = await readReviewQueue(paths.reviewQueue);
+  const reviewSummary = summarizePendingReview(reviewQueue);
+  const ledger = await readLlmLedger(paths.ledger);
+  const recentCandidates = Array.isArray(memory?.recentCandidates) ? memory.recentCandidates : [];
+  const providerStatus = await readJsonOrFallback(paths.providerStatus, null);
 
-  const status = await writeProviderStatus(paths, buildStatus({
-    ok: true,
-    reason: 'digest_ready',
-    command: 'digest',
-    scheduled,
-    matrixId: paths.matrixId,
-    providerMode: config?.provider?.mode,
-    details: {
-      reviewSummary,
-      promptBytes: Buffer.byteLength(context.prompt ?? '', 'utf8'),
-      truncated: context.truncated,
-      overflow: context.overflow,
-    },
-  }));
+  let lastRunId = null;
+  for (let index = ledger.events.length - 1; index >= 0; index -= 1) {
+    if (ledger.events[index]?.runId) {
+      lastRunId = ledger.events[index].runId;
+      break;
+    }
+  }
 
   return {
     ok: true,
     reason: 'digest_ready',
-    status,
+    digest: {
+      matrixId: paths.matrixId,
+      pendingReviewCount: reviewSummary.unresolvedCount,
+      recentCandidateCount: recentCandidates.length,
+      lastRunId,
+      providerStatus: providerStatus ? {
+        ok: providerStatus.ok ?? null,
+        reason: providerStatus.reason ?? null,
+      } : null,
+    },
     reviewSummary,
-    promptBytes: Buffer.byteLength(context.prompt ?? '', 'utf8'),
-    truncated: context.truncated,
-    overflow: context.overflow,
   };
 }
 
@@ -439,7 +424,7 @@ export async function runLlmAutoresearch({
       await loadMemory(paths.memory),
       config.memory ?? {},
     );
-    return runDigestOnly({ config, allowlist, memory, paths, scheduled, reviewSummary });
+    return runDigestOnly({ memory, paths });
   }
 
   const baseProvider = config.provider ?? {};
@@ -487,6 +472,8 @@ export async function runLlmAutoresearch({
     await loadMemory(paths.memory),
     config.memory ?? {},
   );
+
+  const championFingerprint = fingerprintCandidate({ patch: config.champion ?? {} });
 
   const context = buildLlmResearchContext({
     champion: config.champion ?? {},
@@ -566,11 +553,11 @@ export async function runLlmAutoresearch({
     };
   }
 
-  const identity = buildCandidateIdentity({ matrixId: paths.matrixId, candidate: parsed, validation });
+  const identity = buildCandidateIdentity({ championFingerprint, validation });
   const reservation = await reserveCandidate({ ledgerPath: paths.ledger }, {
     candidateId: identity.candidateId,
     candidateFingerprint: identity.candidateFingerprint,
-    parentChampionFingerprint: fingerprintCandidate({ patch: config.champion ?? {} }),
+    parentChampionFingerprint: identity.parentChampionFingerprint,
   });
 
   if (!reservation.reserved) {
@@ -660,13 +647,8 @@ export async function runLlmAutoresearch({
     candidate: parsed,
     validation,
     identity,
-    command,
-    scheduled,
-    proposal,
     executeResult: execution,
     config,
-    allowlist,
-    context,
   });
 
   await finalizeReservation({ ledgerPath: paths.ledger }, {
@@ -695,6 +677,23 @@ export async function runLlmAutoresearch({
   }, config.memory ?? {});
 
   await writeJson(paths.memory, nextMemory);
+
+  if (execution.promotable) {
+    await appendReviewQueueEvent(paths.reviewQueue, {
+      item: buildReviewQueueItem({
+        parentChampionFingerprint: identity.parentChampionFingerprint,
+        candidateFingerprint: identity.candidateFingerprint,
+        candidateId: identity.candidateId,
+        runId: execution.runId ?? null,
+        manifestPath,
+        candidate: parsed,
+        provider: { mode: baseProvider.mode ?? null },
+        metricsDelta: execution.metricsDelta ?? null,
+        promotable: true,
+        createdAt: isoNow(),
+      }),
+    });
+  }
 
   const status = await writeProviderStatus(paths, buildStatus({
     ok: true,

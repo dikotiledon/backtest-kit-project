@@ -359,7 +359,7 @@ baseStartShort = isNewSellSignal and isBearish and isEmaDowntrend and isSmaDownt
 // Edge controls to improve trade quality
 // Default profile: Fusion V4 hardened preset from locked 10k-bar XRPUSDT 15m benchmark (2026-04-21)
 useTrendXConf = input.bool(true,  title="Require Confirmation Trend (x)", group="Edge Controls")
-minPredSum    = input.float(2,  title="Min Prediction Sum (strength)", minval=0.0, step=0.5, group="Edge Controls")
+minPredSum    = input.float(1.8,  title="Min Prediction Sum (strength)", minval=0.0, step=0.5, group="Edge Controls")
 minBarsBetween = input.int(1, title="Cooldown Bars Between Entries", minval=0, group="Edge Controls")
 useSignalFusion = input.bool(true, title="Use Signal Fusion", group="Edge Controls")
 minFusionScore = input.int(1, title="Min Fusion Score", minval=0, maxval=4, group="Edge Controls")
@@ -420,7 +420,7 @@ squeezeReleaseFreshBars = input.int(4, title="Squeeze Release Fresh Bars", minva
 squeezeBoostValue = input.float(0.25, title="Squeeze Boost Value", minval=0.0, step=0.05, group="Phase 3: Squeeze Context")
 
 useDivergenceContext = input.bool(true, title="Use Divergence Context", group="Phase 3: Divergence Context")
-divRsiLen = input.int(14, title="Divergence RSI Length", minval=1, group="Phase 3: Divergence Context")
+divRsiLen = input.int(21, title="Divergence RSI Length", minval=1, group="Phase 3: Divergence Context")
 divPivotLeft = input.int(3, title="Divergence Pivot Left", minval=1, group="Phase 3: Divergence Context")
 divPivotRight = input.int(3, title="Divergence Pivot Right", minval=1, group="Phase 3: Divergence Context")
 divFreshBars = input.int(8, title="Divergence Fresh Bars", minval=1, group="Phase 3: Divergence Context")

@@ -25,7 +25,7 @@ test('buildLlmResearchContext includes champion allowlist memory and hard rules 
   assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 4096);
 });
 
-test('buildLlmResearchContext truncates recent memory under byte cap', () => {
+test('buildLlmResearchContext trims recent memory before overflow fallback', () => {
   const result = buildLlmResearchContext({
     champion: { minPredSum: 1.7, divRsiLen: 14 },
     allowlist: {
@@ -42,11 +42,18 @@ test('buildLlmResearchContext truncates recent memory under byte cap', () => {
       })),
       activeHypotheses: [{ family: 'signal', score: 1 }],
     },
-    maxPromptBytes: 2000,
+    maxPromptBytes: 4096,
   });
 
   assert.equal(result.truncated, true);
-  assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 2000);
+  assert.equal(result.overflow, false);
+  assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 4096);
+
+  const parsed = JSON.parse(result.prompt);
+  assert.equal(parsed.champion.minPredSum, 1.7);
+  assert.equal(parsed.allowlist.parameters[0].key, 'minPredSum');
+  assert.ok(Array.isArray(parsed.memory.recentCandidates));
+  assert.ok(parsed.memory.recentCandidates.length < 200);
 });
 
 test('buildLlmResearchContext hard caps oversized champion and allowlist', () => {
@@ -84,14 +91,16 @@ test('buildLlmResearchContext hard caps oversized champion and allowlist', () =>
 
 
 test('buildLlmResearchContext honors tiny caps', () => {
-  const result = buildLlmResearchContext({
-    champion: {},
-    allowlist: {},
-    memory: {},
-    maxPromptBytes: 1,
-  });
+  for (const cap of [1, 0]) {
+    const result = buildLlmResearchContext({
+      champion: {},
+      allowlist: {},
+      memory: {},
+      maxPromptBytes: cap,
+    });
 
-  assert.equal(result.truncated, true);
-  assert.equal(result.overflow, true);
-  assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 1);
+    assert.equal(result.truncated, true);
+    assert.equal(result.overflow, true);
+    assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= cap);
+  }
 });

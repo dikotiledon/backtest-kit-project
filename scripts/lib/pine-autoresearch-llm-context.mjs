@@ -18,6 +18,14 @@ function cloneMemory(memory) {
   };
 }
 
+function resolvePromptCap(maxPromptBytes) {
+  if (Number.isFinite(maxPromptBytes)) {
+    return Math.max(0, maxPromptBytes);
+  }
+
+  return 16384;
+}
+
 function buildHardRules(maxPromptBytes) {
   return [
     'Output must be exactly one JSON object.',
@@ -25,7 +33,7 @@ function buildHardRules(maxPromptBytes) {
     'No batch envelopes.',
     'No code fences.',
     'No extra commentary.',
-    `Keep prompt within ${Number.isFinite(maxPromptBytes) ? maxPromptBytes : 16384} bytes.`,
+    `Keep prompt within ${maxPromptBytes} bytes.`,
   ];
 }
 
@@ -72,11 +80,11 @@ function summarizeSection(value) {
   };
 }
 
-function buildFullPrompt({ champion, allowlist, memory, maxPromptBytes }) {
+function buildFullPromptPayload({ champion, allowlist, memory, maxPromptBytes }) {
   return {
     instructions: buildHardRules(maxPromptBytes),
     budget: {
-      maxPromptBytes: Number.isFinite(maxPromptBytes) && maxPromptBytes > 0 ? maxPromptBytes : 16384,
+      maxPromptBytes,
     },
     champion: isPlainObject(champion) ? { ...champion } : {},
     allowlist: isPlainObject(allowlist) ? { ...allowlist } : {},
@@ -84,11 +92,11 @@ function buildFullPrompt({ champion, allowlist, memory, maxPromptBytes }) {
   };
 }
 
-function buildOverflowPrompt({ champion, allowlist, memory, maxPromptBytes }) {
+function buildOverflowPromptPayload({ champion, allowlist, memory, maxPromptBytes }) {
   return {
     instructions: buildHardRules(maxPromptBytes),
     budget: {
-      maxPromptBytes: Number.isFinite(maxPromptBytes) && maxPromptBytes > 0 ? maxPromptBytes : 16384,
+      maxPromptBytes,
     },
     overflow: true,
     truncated: true,
@@ -98,8 +106,12 @@ function buildOverflowPrompt({ champion, allowlist, memory, maxPromptBytes }) {
   };
 }
 
-function buildEmergencyPrompt() {
-  return { overflow: true, truncated: true };
+function buildPromptResult(payload, truncated, overflow) {
+  return {
+    prompt: typeof payload === 'string' ? payload : serializePrompt(payload),
+    truncated,
+    overflow,
+  };
 }
 
 export function buildLlmResearchContext({
@@ -108,30 +120,55 @@ export function buildLlmResearchContext({
   memory = {},
   maxPromptBytes = 16384,
 } = {}) {
+  const cap = resolvePromptCap(maxPromptBytes);
   const promptMemory = cloneMemory(memory);
-  const cap = Number.isFinite(maxPromptBytes) && maxPromptBytes > 0 ? maxPromptBytes : 16384;
+  let truncated = false;
 
-  const candidates = [
-    { payload: buildFullPrompt({ champion, allowlist, memory: promptMemory, maxPromptBytes: cap }), truncated: false, overflow: false },
-    { payload: buildOverflowPrompt({ champion, allowlist, memory: promptMemory, maxPromptBytes: cap }), truncated: true, overflow: true },
-    { payload: buildEmergencyPrompt(), truncated: true, overflow: true },
-    { payload: {}, truncated: true, overflow: true },
-  ];
+  const fullPrompt = buildFullPromptPayload({
+    champion,
+    allowlist,
+    memory: promptMemory,
+    maxPromptBytes: cap,
+  });
 
-  for (const candidate of candidates) {
-    const prompt = serializePrompt(candidate.payload);
-    if (Buffer.byteLength(prompt, 'utf8') <= cap) {
-      return {
-        prompt,
-        truncated: candidate.truncated,
-        overflow: candidate.overflow,
-      };
+  if (promptByteLength(fullPrompt) <= cap) {
+    return buildPromptResult(fullPrompt, false, false);
+  }
+
+  while (Array.isArray(promptMemory.recentCandidates) && promptMemory.recentCandidates.length > 0) {
+    const current = promptMemory.recentCandidates;
+    const nextCount = current.length === 1 ? 0 : Math.max(1, Math.floor(current.length / 2));
+    const nextRecentCandidates = nextCount > 0 ? current.slice(-nextCount) : [];
+
+    if (nextRecentCandidates.length === current.length) {
+      break;
+    }
+
+    promptMemory.recentCandidates = nextRecentCandidates;
+    truncated = true;
+
+    const trimmedPrompt = buildFullPromptPayload({
+      champion,
+      allowlist,
+      memory: promptMemory,
+      maxPromptBytes: cap,
+    });
+
+    if (promptByteLength(trimmedPrompt) <= cap) {
+      return buildPromptResult(trimmedPrompt, true, false);
     }
   }
 
-  return {
-    prompt: '',
-    truncated: true,
-    overflow: true,
-  };
+  const overflowPrompt = buildOverflowPromptPayload({
+    champion,
+    allowlist,
+    memory: promptMemory,
+    maxPromptBytes: cap,
+  });
+
+  if (promptByteLength(overflowPrompt) <= cap) {
+    return buildPromptResult(overflowPrompt, true, true);
+  }
+
+  return buildPromptResult('', true, true);
 }

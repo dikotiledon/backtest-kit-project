@@ -48,6 +48,28 @@ test('LLM task installer and remover keep only LLM task names', async () => {
   }
 });
 
+test('LLM task installer dry-run previews only LLM tasks', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-install-dryrun-'));
+  try {
+    const configDir = path.join(tempRoot, 'config');
+    await fs.mkdir(configDir, { recursive: true });
+    await fs.writeFile(path.join(configDir, 'pine-autoresearch-llm.default.json'), JSON.stringify({
+      matrixId: 'pine-fusion-v4-core-15m-locked-window',
+      provider: { mode: 'disabled' },
+    }), 'utf8');
+
+    const result = await runPwshFile(path.join(repoRoot, 'scripts/ops/install-pine-autoresearch-llm-tasks.ps1'), ['-RepoRoot', tempRoot, '-DryRun'], repoRoot);
+
+    assert.equal(result.code, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /\[dry-run\].*BacktestKit-Pine-LLM-Run/);
+    assert.match(result.stdout, /\[dry-run\].*BacktestKit-Pine-LLM-Digest/);
+    assert.doesNotMatch(result.stdout, /BacktestKit-Pine-Autoresearch-Micro/);
+    assert.doesNotMatch(result.stdout, /BacktestKit-Pine-Autoresearch-Full/);
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
+
 test('LLM dry-run does not create runtime dirs', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-dryrun-'));
   try {

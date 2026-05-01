@@ -1,6 +1,7 @@
 param(
   [string]$RepoRoot,
   [string]$ConfigPath = './config/pine-autoresearch-llm.default.json',
+  [switch]$DryRun,
   [switch]$WhatIf
 )
 
@@ -19,7 +20,11 @@ if (-not (Test-Path -LiteralPath $ConfigPath)) {
 }
 
 $config = Get-Content -LiteralPath $ConfigPath -Raw | ConvertFrom-Json
-$pwshPath = (Get-Command pwsh).Source
+$isDryRun = $DryRun -or $WhatIf
+$pwshPath = (Get-Process -Id $PID).Path
+if (-not $pwshPath) {
+  $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
+}
 $runScript = Join-Path $PSScriptRoot 'pine-autoresearch-llm-run.ps1'
 
 function Register-Task($TaskName, $ScheduleArgs, $ScriptPath) {
@@ -32,8 +37,8 @@ function Register-Task($TaskName, $ScheduleArgs, $ScriptPath) {
   $args = @('/Create', '/F', '/TN', $taskName, '/TR', $taskCommand) + $ScheduleArgs
   $preview = 'schtasks ' + ($args -join ' ')
 
-  if ($WhatIf) {
-    Write-Host "[whatif] $preview"
+  if ($isDryRun) {
+    Write-Host "[dry-run] $preview"
     return
   }
 

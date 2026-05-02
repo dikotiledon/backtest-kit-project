@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
 
 import {
   buildLlmChallengerSummary,
+  executeLlmMatrixCandidate,
   summarizeLlmMatrixDelta,
   shouldEnqueueLlmCandidate,
 } from '../scripts/lib/pine-autoresearch-llm-evaluator.mjs';
@@ -92,4 +96,60 @@ test('shouldEnqueueLlmCandidate only allows matrix promote recommendation', () =
   assert.equal(shouldEnqueueLlmCandidate({ matrixDecision: { recommendation: 'promote' } }), true);
   assert.equal(shouldEnqueueLlmCandidate({ matrixDecision: { recommendation: 'hold' } }), false);
   assert.equal(shouldEnqueueLlmCandidate({ matrixDecision: null }), false);
+});
+
+test('executeLlmMatrixCandidate evaluates one LLM patch through injected matrix evaluator', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-evaluator-'));
+
+  try {
+    const baseConfig = {
+      matrixId: 'matrix-a',
+      researchRoot: path.join(dir, 'pine/autoresearch/matrix-a'),
+    };
+    const championState = {
+      configId: 'champion-a',
+      config: { minPredSum: 2, divRsiLen: 14, useFusionV4: true },
+    };
+
+    const result = await executeLlmMatrixCandidate({
+      candidate: { patch: { minPredSum: 2.2 }, rationale: 'raise selectivity' },
+      candidateFingerprint: 'abc123def456999',
+      config: { baseConfigPath: './config/pine-autoresearch.default.json' },
+      repoRoot: dir,
+      loadBaseConfig: async () => baseConfig,
+      loadChampionState: async () => championState,
+      evaluateMatrixCandidate: async (resolvedConfig, runId, incumbent, challengerSummary) => ({
+        labResults: [{
+          lab: { labId: 'primary' },
+          decision: {
+            recommendation: 'promote',
+            comparisons: {
+              scoreDelta: 2,
+              roiDeltaPct: 3,
+              profitFactorDelta: 0.4,
+              drawdownDeltaPct: -0.1,
+            },
+          },
+          challenger: { config: challengerSummary.config },
+        }],
+        matrixDecision: { recommendation: 'promote', summary: 'primary passed' },
+      }),
+      nowId: () => '2026-05-02T00-00-00-000Z',
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.promotable, true);
+    assert.equal(result.runId, 'llm-matrix-a-2026-05-02T00-00-00-000Z-abc123def456');
+    assert.equal(result.metricsDelta.recommendation, 'promote');
+    assert.equal(result.metricsDelta.aggregateScoreDelta, 2);
+    assert.match(result.evaluationManifestPath, /llm-matrix-a-2026-05-02T00-00-00-000Z-abc123def456\.json$/);
+
+    const manifest = JSON.parse(await fs.readFile(result.evaluationManifestPath, 'utf8'));
+    assert.equal(manifest.lane, 'llm-evaluator-bridge');
+    assert.equal(manifest.matrixDecision.recommendation, 'promote');
+    assert.equal(manifest.challenger.config.minPredSum, 2.2);
+    assert.equal(manifest.challenger.config.useFusionV4, true);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });

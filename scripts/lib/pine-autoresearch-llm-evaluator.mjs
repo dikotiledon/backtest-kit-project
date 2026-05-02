@@ -1,8 +1,14 @@
 import path from 'node:path';
 
 import {
+  ensureChampionState,
+  evaluateMatrix,
+  loadConfig as loadAutoresearchConfig,
+} from '../pine-autoresearch.mjs';
+import {
   configFingerprint,
   isoNow,
+  timestampId,
   writeJson,
 } from './pine-autoresearch.mjs';
 
@@ -101,4 +107,55 @@ export async function writeLlmEvaluationManifest({
 
   await writeJson(manifestPath, manifest);
   return { manifestPath, manifest };
+}
+
+export async function executeLlmMatrixCandidate({
+  candidate,
+  candidateFingerprint,
+  config,
+  repoRoot = process.cwd(),
+  loadBaseConfig = loadAutoresearchConfig,
+  loadChampionState = ensureChampionState,
+  evaluateMatrixCandidate = evaluateMatrix,
+  nowId = timestampId,
+} = {}) {
+  if (!candidate?.patch || typeof candidate.patch !== 'object') {
+    return { ok: false, reason: 'missing_candidate_patch' };
+  }
+  if (!candidateFingerprint) {
+    return { ok: false, reason: 'missing_candidate_fingerprint' };
+  }
+
+  const baseConfigPath = config?.baseConfigPath ?? './config/pine-autoresearch.default.json';
+  const baseConfig = await loadBaseConfig(repoRoot, baseConfigPath, config?.execution?.baseOverrides ?? {});
+  const championState = await loadChampionState(baseConfig);
+  const challengerSummary = buildLlmChallengerSummary({ championState, candidate, candidateFingerprint });
+  const runId = `llm-${baseConfig.matrixId}-${nowId()}-${String(candidateFingerprint).slice(0, 12)}`;
+
+  const { labResults, matrixDecision } = await evaluateMatrixCandidate(
+    baseConfig,
+    runId,
+    championState,
+    challengerSummary,
+  );
+
+  const metricsDelta = summarizeLlmMatrixDelta({ labResults, matrixDecision });
+  const { manifestPath: evaluationManifestPath } = await writeLlmEvaluationManifest({
+    baseConfig,
+    runId,
+    championState,
+    challengerSummary,
+    labResults,
+    matrixDecision,
+  });
+
+  return {
+    ok: true,
+    runId,
+    evaluationManifestPath,
+    metricsDelta,
+    matrixDecision,
+    labResults,
+    promotable: shouldEnqueueLlmCandidate({ matrixDecision }),
+  };
 }

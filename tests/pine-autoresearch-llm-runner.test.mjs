@@ -343,6 +343,59 @@ test('file provider validates, reserves before execution, and finalizes one cand
   }
 });
 
+test('runner writes LLM manifest separately from executor evaluation manifest', async () => {
+  const { dir, configPath, allowlistPath } = await fixture();
+  const candidateFile = path.join(dir, 'candidate.json');
+  const evaluationManifestPath = path.join(dir, 'evaluation-manifest.json');
+
+  try {
+    await fs.writeFile(candidateFile, JSON.stringify({
+      patch: { minPredSum: 1.8 },
+      rationale: 'raise threshold',
+    }), 'utf8');
+    await fs.writeFile(evaluationManifestPath, JSON.stringify({
+      lane: 'llm-evaluator-bridge',
+      matrixDecision: { recommendation: 'promote' },
+    }), 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'matrix-a',
+      allowlistPath,
+      provider: { mode: 'file', candidateFile },
+      champion: { minPredSum: 1.7 },
+      memory: { maxPromptBytes: 4096 },
+      candidate: { maxChangedParams: 2 },
+    }), 'utf8');
+
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      executeCandidate: async () => ({
+        ok: true,
+        runId: 'eval-run-a',
+        evaluationManifestPath,
+        metricsDelta: { recommendation: 'promote', aggregateScoreDelta: 1 },
+        promotable: true,
+      }),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, 'candidate_enqueued_for_review');
+    assert.notEqual(result.manifestPath, evaluationManifestPath);
+    assert.equal(result.evaluationManifestPath, evaluationManifestPath);
+
+    const evaluationManifest = JSON.parse(await fs.readFile(evaluationManifestPath, 'utf8'));
+    assert.equal(evaluationManifest.lane, 'llm-evaluator-bridge');
+
+    const llmManifest = JSON.parse(await fs.readFile(result.manifestPath, 'utf8'));
+    assert.equal(llmManifest.lane, 'llm');
+    assert.equal(llmManifest.evaluationManifestPath, evaluationManifestPath);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('openai responses provider flow stays no-network and enqueues review', async () => {
   const { dir, configPath } = await openAiFixture();
   const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');

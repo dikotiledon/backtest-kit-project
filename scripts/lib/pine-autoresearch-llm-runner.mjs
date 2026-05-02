@@ -73,6 +73,7 @@ function buildStatus({
   candidateFingerprint = null,
   runId = null,
   manifestPath = null,
+  evaluationManifestPath = null,
   details = null,
 }) {
   return {
@@ -86,6 +87,7 @@ function buildStatus({
     candidateFingerprint,
     runId,
     manifestPath,
+    evaluationManifestPath,
     details,
     at: isoNow(),
   };
@@ -171,8 +173,8 @@ async function defaultExecuteCandidate({ candidateId, candidateFingerprint }) {
 }
 
 async function writeManifest({ paths, candidate, validation, identity, executeResult, config }) {
-  const manifestPath = executeResult?.manifestPath
-    ?? path.join(paths.manifests, `${timestampId()}-${identity.candidateFingerprint}.json`);
+  const manifestPath = path.join(paths.manifests, `${timestampId()}-${identity.candidateFingerprint}.json`);
+  const evaluationManifestPath = executeResult?.evaluationManifestPath ?? executeResult?.manifestPath ?? null;
 
   const payload = {
     lane: 'llm',
@@ -185,10 +187,12 @@ async function writeManifest({ paths, candidate, validation, identity, executeRe
     candidate,
     provider: { mode: config?.provider?.mode ?? null },
     metricsDelta: executeResult?.metricsDelta ?? null,
+    matrixDecision: executeResult?.matrixDecision ?? null,
+    evaluationManifestPath,
   };
 
   await writeJson(manifestPath, payload);
-  return manifestPath;
+  return { manifestPath, evaluationManifestPath };
 }
 
 function summarizePendingReview(queue) {
@@ -679,7 +683,7 @@ export async function runLlmAutoresearch({
     };
   }
 
-  const manifestPath = await writeManifest({
+  const { manifestPath, evaluationManifestPath } = await writeManifest({
     paths,
     candidate: parsed,
     validation,
@@ -694,6 +698,7 @@ export async function runLlmAutoresearch({
     candidateFingerprint: identity.candidateFingerprint,
     runId: execution.runId ?? null,
     manifestPath,
+    evaluationManifestPath,
     metricsDelta: execution.metricsDelta ?? null,
     at: isoNow(),
   });
@@ -723,6 +728,7 @@ export async function runLlmAutoresearch({
         candidateId: identity.candidateId,
         runId: execution.runId ?? null,
         manifestPath,
+        evaluationManifestPath,
         candidate: parsed,
         provider: { mode: baseProvider.mode ?? null },
         metricsDelta: execution.metricsDelta ?? null,
@@ -743,6 +749,7 @@ export async function runLlmAutoresearch({
     candidateFingerprint: identity.candidateFingerprint,
     runId: execution.runId ?? null,
     manifestPath,
+    evaluationManifestPath,
     details: {
       reviewSummary,
       metricsDelta: execution.metricsDelta ?? null,
@@ -760,6 +767,7 @@ export async function runLlmAutoresearch({
     candidateFingerprint: identity.candidateFingerprint,
     runId: execution.runId ?? null,
     manifestPath,
+    evaluationManifestPath,
     validation,
     execution,
   };

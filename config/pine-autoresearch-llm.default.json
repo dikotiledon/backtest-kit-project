@@ -15,13 +15,13 @@
     "finalizeBudgetMs": 60000
   },
   "provider": {
-    "mode": "disabled",
+    "mode": "openai-chat-completions",
     "cliCommand": null,
     "candidateFile": null,
     "timeoutMs": 90000,
-    "apiBaseUrl": "https://api.openai.com/v1",
+    "apiBaseUrl": "http://127.0.0.1:5555/v1",
     "apiKeyEnv": "OPENAI_API_KEY",
-    "model": null,
+    "model": "openai/gpt-oss-120b:free",
     "temperature": 0.2,
     "topP": 1,
     "maxOutputTokens": 1200,

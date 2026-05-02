@@ -96,8 +96,43 @@ async function openAiFixture() {
   return { dir, configPath };
 }
 
-test('end-to-end file candidate creates manifest and review queue without promotion queue', async () => {
-  const { dir, configPath } = await fixture();
+test('end-to-end evaluate candidate and enqueue review without promotion queue', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-llm-e2e-bridge-'));
+  const allowlistPath = path.join(dir, 'allowlist.json');
+  const candidateFile = path.join(dir, 'candidate.json');
+  const configPath = path.join(dir, 'llm.json');
+  const evaluationManifestPath = path.join(dir, 'evaluation-manifest.json');
+
+  await fs.writeFile(allowlistPath, JSON.stringify({
+    version: 1,
+    freezeArchitecture: true,
+    maxChangedParams: 2,
+    parameters: [
+      { key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1, mutability: 'tunable', family: 'signal' },
+    ],
+  }), 'utf8');
+
+  await fs.writeFile(candidateFile, JSON.stringify({
+    patch: { minPredSum: 2.2 },
+    rationale: 'raise threshold',
+  }), 'utf8');
+
+  await fs.writeFile(configPath, JSON.stringify({
+    matrixId: 'matrix-a',
+    baseConfigPath: './config/pine-autoresearch.default.json',
+    allowlistPath,
+    execution: { mode: 'matrix-eval' },
+    provider: { mode: 'file', candidateFile },
+    champion: { minPredSum: 2 },
+    memory: {
+      maxPromptBytes: 4096,
+      maxHotMemoryBytes: 262144,
+      recentCandidates: 20,
+      topWinners: 10,
+      tabuFingerprints: 50,
+    },
+    candidate: { maxChangedParams: 2 },
+  }), 'utf8');
 
   try {
     const result = await runLlmAutoresearch({
@@ -105,24 +140,53 @@ test('end-to-end file candidate creates manifest and review queue without promot
       repoRoot: dir,
       command: 'run',
       scheduled: false,
-      executeCandidate: async () => ({ ok: true, runId: 'run-a', promotable: true, metricsDelta: { score: 1 } }),
+      productionExecuteCandidate: async (options) => {
+        assert.equal(options.repoRoot, dir);
+        assert.equal(options.config.execution.mode, 'matrix-eval');
+        assert.equal(options.candidate.patch.minPredSum, 2.2);
+
+        await fs.writeFile(evaluationManifestPath, JSON.stringify({
+          lane: 'llm-evaluator-bridge',
+          matrixDecision: { recommendation: 'promote', summary: 'fixture promote' },
+          challenger: { config: { minPredSum: 2.2 } },
+        }), 'utf8');
+
+        return {
+          ok: true,
+          runId: 'eval-run',
+          evaluationManifestPath,
+          promotable: true,
+          metricsDelta: { recommendation: 'promote' },
+        };
+      },
     });
 
     assert.equal(result.ok, true);
+    assert.equal(result.reason, 'candidate_enqueued_for_review');
+    assert.equal(result.evaluationManifestPath, evaluationManifestPath);
     assert.match(result.manifestPath, /manifests/);
     await fs.stat(result.manifestPath);
+    await fs.stat(result.evaluationManifestPath);
 
     const manifest = JSON.parse(await fs.readFile(result.manifestPath, 'utf8'));
     assert.equal(manifest.lane, 'llm');
-    assert.equal(manifest.runId, 'run-a');
+    assert.equal(manifest.runId, 'eval-run');
     assert.equal(manifest.matrixId, 'matrix-a');
     assert.equal(manifest.candidateId, `${manifest.parentChampionFingerprint}:${manifest.candidateFingerprint}`);
-    assert.deepEqual(manifest.metricsDelta, { score: 1 });
+    assert.deepEqual(manifest.metricsDelta, { recommendation: 'promote' });
+    assert.equal(manifest.evaluationManifestPath, evaluationManifestPath);
     assert.equal(manifest.provider.mode, 'file');
+
+    const evaluationManifest = JSON.parse(await fs.readFile(evaluationManifestPath, 'utf8'));
+    assert.equal(evaluationManifest.lane, 'llm-evaluator-bridge');
+    assert.equal(evaluationManifest.matrixDecision.recommendation, 'promote');
+    assert.equal(evaluationManifest.matrixDecision.summary, 'fixture promote');
+    assert.equal(evaluationManifest.challenger.config.minPredSum, 2.2);
 
     const queue = await readReviewQueue(path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl'));
     assert.equal(queue.items.length, 1);
     assert.equal(queue.items[0].status, 'pending_review');
+    assert.equal(queue.items[0].runId, 'eval-run');
 
     await assert.rejects(
       () => fs.stat(path.join(dir, 'pine/autoresearch/matrix-a/state/promotion-queue.jsonl')),

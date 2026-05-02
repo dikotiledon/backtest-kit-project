@@ -131,6 +131,10 @@ test('executeLlmMatrixCandidate evaluates one LLM patch through injected matrix 
             },
           },
           challenger: { config: challengerSummary.config },
+          analysis: {
+            incumbent: { trades: [{ id: 1 }], rows: [{ bar: 1 }] },
+            challenger: { trades: [{ id: 2 }], rows: [{ bar: 2 }] },
+          },
         }],
         matrixDecision: { recommendation: 'promote', summary: 'primary passed' },
       }),
@@ -149,6 +153,8 @@ test('executeLlmMatrixCandidate evaluates one LLM patch through injected matrix 
     assert.equal(manifest.matrixDecision.recommendation, 'promote');
     assert.equal(manifest.challenger.config.minPredSum, 2.2);
     assert.equal(manifest.challenger.config.useFusionV4, true);
+    assert.equal(manifest.labResults[0].analysis, undefined);
+    assert.equal(manifest.matrixCandidates[0].labResults[0].analysis, undefined);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

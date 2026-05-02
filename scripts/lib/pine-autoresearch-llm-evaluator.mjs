@@ -67,6 +67,16 @@ export function shouldEnqueueLlmCandidate({ matrixDecision } = {}) {
   return matrixDecision?.recommendation === 'promote';
 }
 
+function summarizeLlmLabResultForManifest(result) {
+  if (!result || typeof result !== 'object') return result;
+  const { analysis, ...summary } = result;
+  return summary;
+}
+
+function summarizeLlmLabResultsForManifest(labResults = []) {
+  return labResults.map((result) => summarizeLlmLabResultForManifest(result));
+}
+
 export async function writeLlmEvaluationManifest({
   baseConfig,
   runId,
@@ -85,6 +95,7 @@ export async function writeLlmEvaluationManifest({
     ?? path.join(baseConfig.researchRoot, 'manifests', `${runId}.json`);
 
   const generatedAt = isoNow();
+  const manifestLabResults = summarizeLlmLabResultsForManifest(labResults);
   const manifest = {
     lane: 'llm-evaluator-bridge',
     generatedAt,
@@ -94,11 +105,11 @@ export async function writeLlmEvaluationManifest({
     challenger: challengerSummary,
     matrixCandidates: [{
       challenger: challengerSummary,
-      labResults,
+      labResults: manifestLabResults,
       matrixDecision,
       robustness: summarizeLlmMatrixDelta({ labResults, matrixDecision }),
     }],
-    labResults,
+    labResults: manifestLabResults,
     matrixDecision,
     promotionEligible: shouldEnqueueLlmCandidate({ matrixDecision }),
     promotionEligibleReason: matrixDecision?.summary ?? null,

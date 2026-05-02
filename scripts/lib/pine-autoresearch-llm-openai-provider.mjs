@@ -13,7 +13,7 @@ function systemInstruction() {
     'Return exactly one JSON object and no markdown.',
     'No prose. No code fences. No comments. No trailing explanation.',
     'The JSON object must match the provided schema.',
-    'If you cannot improve the strategy, return a valid JSON object with an empty params object and a concise rationale.',
+    'If you cannot improve the strategy, return a valid JSON object with the smallest allowed params patch and a concise rationale.',
   ].join('\n');
 }
 

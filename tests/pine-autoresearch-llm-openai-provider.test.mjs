@@ -39,6 +39,8 @@ test('buildChatCompletionsRequest creates non-streaming structured JSON request'
   assert.match(request.messages[0].content, /no markdown/i);
   assert.match(request.messages[0].content, /No code fences/);
   assert.match(request.messages[0].content, /If you cannot improve the strategy/);
+  assert.doesNotMatch(request.messages[0].content, /empty params object/);
+  assert.match(request.messages[0].content, /smallest allowed params patch/);
   assert.deepEqual(request.messages[1], { role: 'user', content: 'candidate prompt' });
   assert.equal(request.response_format.type, 'json_schema');
   assert.equal(request.response_format.json_schema.strict, true);
@@ -61,6 +63,8 @@ test('buildResponsesRequest creates non-streaming structured JSON request', () =
   assert.match(request.instructions, /no markdown/i);
   assert.match(request.instructions, /No code fences/);
   assert.match(request.instructions, /If you cannot improve the strategy/);
+  assert.doesNotMatch(request.instructions, /empty params object/);
+  assert.match(request.instructions, /smallest allowed params patch/);
   assert.equal(request.input, 'candidate prompt');
   assert.equal(request.text.format.type, 'json_schema');
   assert.equal(request.text.format.strict, true);

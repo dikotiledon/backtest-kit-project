@@ -116,3 +116,31 @@ Unresolved blockers pause new `run`, `propose`, and `enqueue` paths for active p
 - Provider responses are untrusted. Local candidate parsing, allowlist validation, fingerprinting, reservation, and manual review still gate all output.
 - Streaming, tools, function calls, background responses, and conversation persistence are intentionally disabled for this lane.
 - API providers can be installed as scheduled tasks only after explicit `-Enable` or `scheduled.enabled=true`.
+
+## Matrix evaluator bridge
+
+`npm run pine:autoresearch:llm` now runs the LLM candidate through the existing Pine autoresearch matrix evaluator when `execution.mode` is `matrix-eval`.
+
+Automatic path:
+
+1. provider returns exactly one JSON candidate
+2. LLM allowlist validation accepts or rejects the patch
+3. patch is merged over the current Pine autoresearch champion config
+4. existing Pine matrix evaluator runs primary + shadow selection labs
+5. LLM lane manifest is written under `pine/autoresearch-llm/`
+6. evaluator manifest is written under the normal Pine autoresearch research root
+7. matrix `promote` recommendation enqueues an LLM manual-review item
+
+This does not make existing Pine autoresearch depend on LLM. Existing `pine:autoresearch`, `pine:autoresearch:promote`, and `pine:autoresearch:autopromote` continue to work without LLM files.
+
+Manual review remains required before promotion. To inspect:
+
+```bash
+npm run pine:autoresearch:llm:review-status
+```
+
+To promote an accepted candidate, use the evaluator manifest path from the LLM manifest/review item:
+
+```bash
+node ./scripts/pine-autoresearch.mjs promote --config ./config/pine-autoresearch.default.json --manifest <evaluationManifestPath>
+```

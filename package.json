@@ -23,6 +23,8 @@
     "pine:autoresearch:llm:propose": "node ./scripts/pine-autoresearch-llm.mjs propose --config ./config/pine-autoresearch-llm.default.json",
     "pine:autoresearch:llm:digest": "node ./scripts/pine-autoresearch-llm.mjs digest --config ./config/pine-autoresearch-llm.default.json",
     "pine:autoresearch:llm:validate": "node ./scripts/pine-autoresearch-llm.mjs validate --config ./config/pine-autoresearch-llm.default.json",
+    "pine:autoresearch:llm:review-status": "node ./scripts/pine-autoresearch-llm.mjs review-status --config ./config/pine-autoresearch-llm.default.json",
+    "pine:autoresearch:llm:review-resolve": "node ./scripts/pine-autoresearch-llm.mjs review-resolve --config ./config/pine-autoresearch-llm.default.json",
     "pine:ops:install-llm-tasks": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-llm-tasks.ps1",
     "pine:ops:remove-llm-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-llm-tasks.ps1",
     "pine:ops:install-tasks": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-tasks.ps1",

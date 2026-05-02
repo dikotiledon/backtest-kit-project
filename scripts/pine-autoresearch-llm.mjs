@@ -49,11 +49,20 @@ async function main() {
     throw new Error(`Unknown command: ${command}`);
   }
 
+  const reviewResolve = command === 'review-resolve'
+    ? {
+      itemId: args.itemId || args['item-id'],
+      status: args.status,
+      reason: args.reason,
+    }
+    : null;
+
   const result = await runLlmAutoresearch({
     configPath,
     repoRoot,
     command: command === 'enqueue' ? 'propose' : command,
     scheduled,
+    configOverrides: reviewResolve ? { reviewResolve } : null,
   });
 
   if (result.ok) {
@@ -63,8 +72,19 @@ async function main() {
     }
 
     console.log(`[llm-autoresearch] ${result.reason}`);
+    if (command === 'review-status') {
+      const items = result.reviewSummary?.unresolvedItems ?? [];
+      console.log(JSON.stringify({ unresolvedCount: result.reviewSummary?.unresolvedCount ?? 0, items }, null, 2));
+    }
+    if (command === 'review-resolve' && result.itemId) {
+      console.log(`[llm-autoresearch] item=${result.itemId}`);
+      console.log(`[llm-autoresearch] reviewStatus=${result.reviewStatus}`);
+    }
     if (result.manifestPath) {
       console.log(`[llm-autoresearch] manifest=${result.manifestPath}`);
+    }
+    if (result.evaluationManifestPath) {
+      console.log(`[llm-autoresearch] evaluationManifest=${result.evaluationManifestPath}`);
     }
     if (result.status?.reason && result.status.reason !== result.reason) {
       console.log(`[llm-autoresearch] status=${result.status.reason}`);

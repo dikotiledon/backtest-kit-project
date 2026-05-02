@@ -14,10 +14,10 @@ export function buildLlmLaneNamespace(matrixId) {
   return `llm-${normalizeMatrixId(matrixId)}`;
 }
 
-export function buildLlmLanePaths({ repoRoot = process.cwd(), matrixId }) {
+export function buildLlmLanePaths({ repoRoot = process.cwd(), matrixId, stateRoot = null }) {
   const normalizedMatrixId = normalizeMatrixId(matrixId);
   const namespace = buildLlmLaneNamespace(normalizedMatrixId);
-  const root = path.join(repoRoot, 'pine', 'autoresearch-llm', namespace);
+  const root = stateRoot ? path.join(stateRoot, namespace) : path.join(repoRoot, 'pine', 'autoresearch-llm', namespace);
   const state = path.join(root, 'state');
   const manifests = path.join(root, 'manifests');
   const runs = path.join(root, 'runs');

@@ -343,6 +343,136 @@ test('file provider validates, reserves before execution, and finalizes one cand
   }
 });
 
+test('executor exception finalizes reservation as failed', async () => {
+  const { dir, configPath, allowlistPath } = await fixture();
+  const candidateFile = path.join(dir, 'candidate.json');
+  const ledgerPath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-ledger.jsonl');
+  const activeReservationsPath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-active-reservations.json');
+
+  try {
+    await fs.writeFile(candidateFile, JSON.stringify({
+      patch: { minPredSum: 1.8 },
+      rationale: 'raise threshold',
+    }), 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'matrix-a',
+      allowlistPath,
+      provider: { mode: 'file', candidateFile },
+      champion: { minPredSum: 1.7 },
+      memory: { maxPromptBytes: 4096 },
+      candidate: { maxChangedParams: 2 },
+    }), 'utf8');
+
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      executeCandidate: async () => {
+        throw new Error('matrix exploded');
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'execution_exception');
+
+    const ledger = await readLlmLedger(ledgerPath);
+    assert.deepEqual(ledger.events.map((event) => event.type), ['reserved', 'failed']);
+    assert.deepEqual(JSON.parse(await fs.readFile(activeReservationsPath, 'utf8')), []);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('review-status returns actionable unresolved review item details', async () => {
+  const { dir, configPath } = await fixture();
+  const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');
+
+  try {
+    await appendReviewQueueEvent(reviewQueuePath, {
+      item: buildReviewQueueItem({
+        parentChampionFingerprint: 'champ',
+        candidateFingerprint: 'cand',
+        candidateId: 'item-a',
+        runId: 'eval-run',
+        manifestPath: path.join(dir, 'llm-manifest.json'),
+        evaluationManifestPath: path.join(dir, 'eval-manifest.json'),
+        createdAt: '2026-05-01T00:00:00.000Z',
+      }),
+    });
+
+    const result = await runLlmAutoresearch({ configPath, repoRoot: dir, command: 'review-status' });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, 'review_status');
+    assert.equal(result.reviewSummary.unresolvedCount, 1);
+    assert.equal(result.reviewSummary.unresolvedItems[0].itemId, 'item-a');
+    assert.equal(result.reviewSummary.unresolvedItems[0].runId, 'eval-run');
+    assert.match(result.reviewSummary.unresolvedItems[0].evaluationManifestPath, /eval-manifest\.json$/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('review-resolve appends status event and clears blockers', async () => {
+  const { dir, configPath } = await fixture();
+  const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');
+
+  try {
+    await appendReviewQueueEvent(reviewQueuePath, {
+      item: buildReviewQueueItem({
+        parentChampionFingerprint: 'champ',
+        candidateFingerprint: 'cand',
+        candidateId: 'item-a',
+        createdAt: '2026-05-01T00:00:00.000Z',
+      }),
+    });
+
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'review-resolve',
+      configOverrides: {
+        reviewResolve: { itemId: 'item-a', status: 'archived', reason: 'done' },
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, 'review_resolved');
+    assert.equal(result.reviewSummary.unresolvedCount, 0);
+
+    const queue = await readReviewQueue(reviewQueuePath);
+    assert.equal(queue.items[0].status, 'archived');
+    assert.equal(queue.items[0].reason, 'done');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('stateRoot relocates LLM lane state', async () => {
+  const { dir, configPath, allowlistPath } = await fixture();
+  const stateRoot = path.join(dir, 'custom-state');
+
+  try {
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'matrix-a',
+      allowlistPath,
+      stateRoot,
+      provider: { mode: 'disabled' },
+      memory: { maxPromptBytes: 4096 },
+      candidate: { maxChangedParams: 2 },
+    }), 'utf8');
+
+    const result = await runLlmAutoresearch({ configPath, repoRoot: dir, command: 'review-status' });
+
+    assert.equal(result.ok, true);
+    await fs.access(path.join(stateRoot, 'llm-matrix-a/state/llm-provider-status.json'));
+    await assert.rejects(fs.access(path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-provider-status.json')), /ENOENT/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('runner writes LLM manifest separately from executor evaluation manifest', async () => {
   const { dir, configPath, allowlistPath } = await fixture();
   const candidateFile = path.join(dir, 'candidate.json');

@@ -133,7 +133,7 @@ Automatic path:
 
 This does not make existing Pine autoresearch depend on LLM. Existing `pine:autoresearch`, `pine:autoresearch:promote`, and `pine:autoresearch:autopromote` continue to work without LLM files.
 
-Manual review remains required before promotion. To inspect:
+Manual review remains required before promotion. To inspect pending review items and their `evaluationManifestPath` values:
 
 ```bash
 npm run pine:autoresearch:llm:review-status
@@ -144,3 +144,11 @@ To promote an accepted candidate, use the evaluator manifest path from the LLM m
 ```bash
 node ./scripts/pine-autoresearch.mjs promote --config ./config/pine-autoresearch.default.json --manifest <evaluationManifestPath>
 ```
+
+After accepting, rejecting, or archiving the item, append an immutable resolution event so future LLM runs are no longer blocked by the pending review item:
+
+```bash
+npm run pine:autoresearch:llm:review-resolve -- --item-id <itemId> --status archived --reason "promoted via evaluator manifest"
+```
+
+Supported resolution statuses are `accepted_for_manual_promotion`, `rejected`, `stale`, `superseded`, and `archived`.

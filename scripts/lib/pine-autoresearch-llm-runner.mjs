@@ -6,7 +6,7 @@ import { buildLlmResearchContext } from './pine-autoresearch-llm-context.mjs';
 import { proposeCandidate } from './pine-autoresearch-llm-provider.mjs';
 import { executeLlmMatrixCandidate } from './pine-autoresearch-llm-evaluator.mjs';
 import { parseCandidateJson, validateCandidate, fingerprintCandidate } from './pine-autoresearch-llm-schema.mjs';
-import { appendReviewQueueEvent, buildReviewQueueItem, readReviewQueue, unresolvedReviewItems } from './pine-autoresearch-llm-review-queue.mjs';
+import { appendReviewQueueEvent, buildReviewQueueItem, readReviewQueue, resolveReviewItem, unresolvedReviewItems } from './pine-autoresearch-llm-review-queue.mjs';
 import { reserveCandidate, finalizeReservation } from './pine-autoresearch-llm-reservation.mjs';
 import { readLlmLedger, summarizeLlmLedgerFingerprints } from './pine-autoresearch-llm-ledger.mjs';
 import { pruneResearchMemory, updateResearchMemory } from './pine-autoresearch-llm-memory.mjs';
@@ -201,6 +201,16 @@ function summarizePendingReview(queue) {
   return {
     unresolvedCount: unresolved.length,
     unresolvedIds: unresolved.map((item) => item.itemId),
+    unresolvedItems: unresolved.map((item) => ({
+      itemId: item.itemId,
+      status: item.status,
+      runId: item.runId ?? null,
+      manifestPath: item.manifestPath ?? null,
+      evaluationManifestPath: item.evaluationManifestPath ?? null,
+      candidateFingerprint: item.candidateFingerprint ?? null,
+      parentChampionFingerprint: item.parentChampionFingerprint ?? null,
+      reason: item.reason ?? null,
+    })),
     hasBlockers: unresolved.length > 0,
     blockerStatuses: [...new Set(unresolved.map((item) => item.status).filter(Boolean))],
   };
@@ -380,22 +390,89 @@ async function runReviewStatusOnly({ config, paths, scheduled, reviewSummary }) 
   };
 }
 
-async function runReviewResolveOnly({ config, paths, scheduled, reviewSummary }) {
+async function runReviewResolveOnly({ config, paths, scheduled, reviewSummary, reviewResolve = {} }) {
+  const itemId = reviewResolve.itemId ?? null;
+  const nextStatus = reviewResolve.status ?? null;
+  const reason = reviewResolve.reason ?? null;
+
+  if (!itemId || !nextStatus) {
+    const status = await writeProviderStatus(paths, buildStatus({
+      ok: false,
+      reason: 'review_resolve_missing_args',
+      command: 'review-resolve',
+      scheduled,
+      matrixId: paths.matrixId,
+      providerMode: config?.provider?.mode,
+      details: {
+        reviewSummary,
+        required: ['itemId', 'status'],
+      },
+    }));
+
+    return {
+      ok: false,
+      reason: 'review_resolve_missing_args',
+      status,
+      reviewSummary,
+    };
+  }
+
+  const unresolved = reviewSummary?.unresolvedItems ?? [];
+  const target = unresolved.find((item) => item.itemId === itemId);
+  if (!target) {
+    const status = await writeProviderStatus(paths, buildStatus({
+      ok: false,
+      reason: 'review_item_not_found',
+      command: 'review-resolve',
+      scheduled,
+      matrixId: paths.matrixId,
+      providerMode: config?.provider?.mode,
+      details: {
+        reviewSummary,
+        itemId,
+      },
+    }));
+
+    return {
+      ok: false,
+      reason: 'review_item_not_found',
+      status,
+      reviewSummary,
+      itemId,
+    };
+  }
+
+  await resolveReviewItem(paths.reviewQueue, {
+    itemId,
+    status: nextStatus,
+    reason,
+    at: isoNow(),
+  });
+
+  const nextReviewQueue = await readReviewQueue(paths.reviewQueue);
+  const nextReviewSummary = summarizePendingReview(nextReviewQueue);
   const status = await writeProviderStatus(paths, buildStatus({
     ok: true,
-    reason: 'review_resolve',
+    reason: 'review_resolved',
     command: 'review-resolve',
     scheduled,
     matrixId: paths.matrixId,
     providerMode: config?.provider?.mode,
-    details: reviewSummary,
+    details: {
+      reviewSummary: nextReviewSummary,
+      itemId,
+      status: nextStatus,
+      reason,
+    },
   }));
 
   return {
     ok: true,
-    reason: 'review_resolve',
+    reason: 'review_resolved',
     status,
-    reviewSummary,
+    reviewSummary: nextReviewSummary,
+    itemId,
+    reviewStatus: nextStatus,
   };
 }
 
@@ -407,45 +484,55 @@ export async function runLlmAutoresearch({
   executeCandidate,
   productionExecuteCandidate = executeLlmMatrixCandidate,
   proposeOpenAi,
+  configOverrides = null,
 } = {}) {
   const resolvedConfigPath = configPath
     ? (path.isAbsolute(configPath) ? configPath : path.resolve(repoRoot, configPath))
     : path.resolve(repoRoot, 'config/pine-autoresearch-llm.default.json');
   const configDir = path.dirname(resolvedConfigPath);
-  const config = await readJson(resolvedConfigPath);
-  const allowlistPath = await resolveRelative(config.allowlistPath, [repoRoot, configDir]);
+  const loadedConfig = {
+    ...await readJson(resolvedConfigPath),
+    ...(configOverrides ?? {}),
+  };
+  const allowlistPath = await resolveRelative(loadedConfig.allowlistPath, [repoRoot, configDir]);
 
   if (!allowlistPath) {
     throw new Error('allowlistPath required');
   }
 
   const allowlist = await readJson(allowlistPath);
-  const paths = buildLlmLanePaths({ repoRoot, matrixId: config.matrixId });
+  const stateRoot = await resolveRelative(loadedConfig.stateRoot, [repoRoot, configDir]);
+  const baseConfigPath = loadedConfig.baseConfigPath
+    ? await resolveRelative(loadedConfig.baseConfigPath, [configDir, repoRoot])
+    : null;
+  const effectiveConfig = baseConfigPath ? { ...loadedConfig, baseConfigPath } : loadedConfig;
+  const paths = buildLlmLanePaths({ repoRoot, matrixId: loadedConfig.matrixId, stateRoot });
   await ensureDirectories(paths);
 
   const reviewQueue = await readReviewQueue(paths.reviewQueue);
   const reviewSummary = summarizePendingReview(reviewQueue);
 
   if (command === 'review-status') {
-    return runReviewStatusOnly({ config, paths, scheduled, reviewSummary });
+    return runReviewStatusOnly({ config: effectiveConfig, paths, scheduled, reviewSummary });
   }
 
   if (command === 'review-resolve') {
-    return runReviewResolveOnly({ config, paths, scheduled, reviewSummary });
+    return runReviewResolveOnly({ config: effectiveConfig, paths, scheduled, reviewSummary, reviewResolve: effectiveConfig.reviewResolve ?? {} });
   }
 
   if (command === 'validate') {
-    return runValidateOnly({ config, allowlist, paths, scheduled, reviewSummary });
+    return runValidateOnly({ config: effectiveConfig, allowlist, paths, scheduled, reviewSummary });
   }
 
   if (command === 'digest') {
     const memory = pruneResearchMemory(
       await loadMemory(paths.memory),
-      config.memory ?? {},
+      effectiveConfig.memory ?? {},
     );
     return runDigestOnly({ memory, paths });
   }
 
+  const config = effectiveConfig;
   const baseProvider = config.provider ?? {};
   if (scheduled && baseProvider.mode === 'openclaw') {
     const status = await writeProviderStatus(paths, buildStatus({
@@ -638,19 +725,28 @@ export async function runLlmAutoresearch({
 
   const executor = executeCandidate
     ?? (config?.execution?.mode === 'matrix-eval' ? productionExecuteCandidate : defaultExecuteCandidate);
-  const execution = await executor({
-    candidate: parsed,
-    candidateId: identity.candidateId,
-    candidateFingerprint: identity.candidateFingerprint,
-    config,
-    repoRoot,
-    allowlist,
-    context: context.prompt,
-    paths,
-    scheduled,
-    command,
-    proposal,
-  });
+  let execution;
+  try {
+    execution = await executor({
+      candidate: parsed,
+      candidateId: identity.candidateId,
+      candidateFingerprint: identity.candidateFingerprint,
+      config,
+      repoRoot,
+      allowlist,
+      context: context.prompt,
+      paths,
+      scheduled,
+      command,
+      proposal,
+    });
+  } catch (error) {
+    execution = {
+      ok: false,
+      reason: 'execution_exception',
+      error: error?.message ?? String(error),
+    };
+  }
 
   if (!execution || execution.ok === false) {
     await finalizeReservation({ ledgerPath: paths.ledger }, {

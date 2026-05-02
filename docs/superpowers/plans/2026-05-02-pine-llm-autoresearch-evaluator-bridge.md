@@ -1,6 +1,6 @@
 # Pine LLM Autoresearch Evaluator Bridge Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** Make `npm run pine:autoresearch:llm` run the full propose → validate → existing Pine matrix evaluation → LLM review queue flow, so manual work remains only final promotion review, not candidate application/backtest wiring.
 
@@ -180,7 +180,7 @@ Recommended first implementation: minimal exports from `scripts/pine-autoresearc
 **Files:**
 - Create: `tests/pine-autoresearch-dependency-direction.test.mjs`
 
-- [ ] **Step 1: Write failing dependency guard test**
+- [x] **Step 1: Write failing dependency guard test**
 
 Create `tests/pine-autoresearch-dependency-direction.test.mjs`:
 
@@ -222,7 +222,7 @@ test('non-LLM autoresearch files do not import LLM lane modules', async () => {
 });
 ```
 
-- [ ] **Step 2: Run test**
+- [x] **Step 2: Run test**
 
 Run:
 
@@ -232,7 +232,7 @@ npm test -- tests/pine-autoresearch-dependency-direction.test.mjs
 
 Expected: PASS now. This test protects future tasks.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/pine-autoresearch-dependency-direction.test.mjs
@@ -247,7 +247,7 @@ git commit -m "test(pine): guard autoresearch llm dependency direction"
 - Modify: `scripts/pine-autoresearch.mjs`
 - Modify: `tests/pine-autoresearch.test.mjs`
 
-- [ ] **Step 1: Write export smoke test**
+- [x] **Step 1: Write export smoke test**
 
 In `tests/pine-autoresearch.test.mjs`, extend the existing import from `../scripts/pine-autoresearch.mjs` to include:
 
@@ -269,7 +269,7 @@ test('pine autoresearch exposes neutral evaluator seams for external lanes', () 
 });
 ```
 
-- [ ] **Step 2: Run focused test and verify fail**
+- [x] **Step 2: Run focused test and verify fail**
 
 Run:
 
@@ -279,7 +279,7 @@ npm test -- tests/pine-autoresearch.test.mjs --test-name-pattern "neutral evalua
 
 Expected: FAIL with missing export errors.
 
-- [ ] **Step 3: Export existing functions**
+- [x] **Step 3: Export existing functions**
 
 In `scripts/pine-autoresearch.mjs`, change function declarations from private to exported:
 
@@ -301,7 +301,7 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
 
 Do not change function bodies.
 
-- [ ] **Step 4: Run tests**
+- [x] **Step 4: Run tests**
 
 Run:
 
@@ -313,7 +313,7 @@ npm test -- tests/pine-autoresearch-dependency-direction.test.mjs
 
 Expected: all PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/pine-autoresearch.mjs tests/pine-autoresearch.test.mjs
@@ -328,7 +328,7 @@ git commit -m "feat(pine): expose neutral autoresearch evaluator seams"
 - Create: `tests/pine-autoresearch-llm-evaluator.test.mjs`
 - Create later: `scripts/lib/pine-autoresearch-llm-evaluator.mjs`
 
-- [ ] **Step 1: Write tests for pure adapter logic**
+- [x] **Step 1: Write tests for pure adapter logic**
 
 Create `tests/pine-autoresearch-llm-evaluator.test.mjs`:
 
@@ -430,7 +430,7 @@ test('shouldEnqueueLlmCandidate only allows matrix promote recommendation', () =
 });
 ```
 
-- [ ] **Step 2: Run tests and verify fail**
+- [x] **Step 2: Run tests and verify fail**
 
 Run:
 
@@ -447,7 +447,7 @@ Expected: FAIL because module does not exist.
 **Files:**
 - Create: `scripts/lib/pine-autoresearch-llm-evaluator.mjs`
 
-- [ ] **Step 1: Add pure helper implementation**
+- [x] **Step 1: Add pure helper implementation**
 
 Create `scripts/lib/pine-autoresearch-llm-evaluator.mjs` with:
 
@@ -558,7 +558,7 @@ export async function writeLlmEvaluationManifest({
 }
 ```
 
-- [ ] **Step 2: Run pure helper tests**
+- [x] **Step 2: Run pure helper tests**
 
 Run:
 
@@ -568,7 +568,7 @@ npm test -- tests/pine-autoresearch-llm-evaluator.test.mjs
 
 Expected: PASS.
 
-- [ ] **Step 3: Run dependency guard**
+- [x] **Step 3: Run dependency guard**
 
 Run:
 
@@ -578,7 +578,7 @@ npm test -- tests/pine-autoresearch-dependency-direction.test.mjs
 
 Expected: PASS.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add scripts/lib/pine-autoresearch-llm-evaluator.mjs tests/pine-autoresearch-llm-evaluator.test.mjs
@@ -593,7 +593,7 @@ git commit -m "feat(pine): add llm autoresearch evaluator adapter helpers"
 - Modify: `scripts/lib/pine-autoresearch-llm-evaluator.mjs`
 - Modify: `tests/pine-autoresearch-llm-evaluator.test.mjs`
 
-- [ ] **Step 1: Add executor test with injected dependencies**
+- [x] **Step 1: Add executor test with injected dependencies**
 
 Append to `tests/pine-autoresearch-llm-evaluator.test.mjs`:
 
@@ -661,7 +661,7 @@ test('executeLlmMatrixCandidate evaluates one LLM patch through injected matrix 
 });
 ```
 
-- [ ] **Step 2: Run and verify fail**
+- [x] **Step 2: Run and verify fail**
 
 Run:
 
@@ -671,7 +671,7 @@ npm test -- tests/pine-autoresearch-llm-evaluator.test.mjs --test-name-pattern e
 
 Expected: FAIL because `executeLlmMatrixCandidate` does not exist.
 
-- [ ] **Step 3: Implement production executor**
+- [x] **Step 3: Implement production executor**
 
 Append these imports to `scripts/lib/pine-autoresearch-llm-evaluator.mjs`:
 
@@ -739,7 +739,7 @@ export async function executeLlmMatrixCandidate({
 }
 ```
 
-- [ ] **Step 4: Run evaluator tests**
+- [x] **Step 4: Run evaluator tests**
 
 Run:
 
@@ -749,7 +749,7 @@ npm test -- tests/pine-autoresearch-llm-evaluator.test.mjs
 
 Expected: PASS.
 
-- [ ] **Step 5: Run existing autoresearch tests**
+- [x] **Step 5: Run existing autoresearch tests**
 
 Run:
 
@@ -759,7 +759,7 @@ npm test -- tests/pine-autoresearch.test.mjs tests/pine-autoresearch-dependency-
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scripts/lib/pine-autoresearch-llm-evaluator.mjs tests/pine-autoresearch-llm-evaluator.test.mjs
@@ -774,7 +774,7 @@ git commit -m "feat(pine): evaluate llm candidates through matrix bridge"
 - Modify: `scripts/lib/pine-autoresearch-llm-runner.mjs`
 - Modify: `tests/pine-autoresearch-llm-runner.test.mjs`
 
-- [ ] **Step 1: Add regression test: executor evaluation manifest is referenced, not overwritten**
+- [x] **Step 1: Add regression test: executor evaluation manifest is referenced, not overwritten**
 
 In `tests/pine-autoresearch-llm-runner.test.mjs`, add a test near executor tests:
 
@@ -833,7 +833,7 @@ test('runner writes LLM manifest separately from executor evaluation manifest', 
 });
 ```
 
-- [ ] **Step 2: Run and verify fail**
+- [x] **Step 2: Run and verify fail**
 
 Run:
 
@@ -843,7 +843,7 @@ npm test -- tests/pine-autoresearch-llm-runner.test.mjs --test-name-pattern "sep
 
 Expected: FAIL because runner currently treats executor `manifestPath` as LLM output path and does not return `evaluationManifestPath`.
 
-- [ ] **Step 3: Update `writeManifest()` in runner**
+- [x] **Step 3: Update `writeManifest()` in runner**
 
 In `scripts/lib/pine-autoresearch-llm-runner.mjs`, change `writeManifest()` to always allocate LLM lane path under `paths.manifests`:
 
@@ -910,7 +910,7 @@ return {
 };
 ```
 
-- [ ] **Step 4: Run runner tests**
+- [x] **Step 4: Run runner tests**
 
 Run:
 
@@ -920,7 +920,7 @@ npm test -- tests/pine-autoresearch-llm-runner.test.mjs
 
 Expected: PASS after updating older assertions that expected injected `manifestPath` to be LLM output path.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git add scripts/lib/pine-autoresearch-llm-runner.mjs tests/pine-autoresearch-llm-runner.test.mjs
@@ -936,7 +936,7 @@ git commit -m "fix(pine): separate llm and evaluation manifest paths"
 - Modify: `config/pine-autoresearch-llm.default.json`
 - Modify: `tests/pine-autoresearch-llm-runner.test.mjs`
 
-- [ ] **Step 1: Add executor selection tests**
+- [x] **Step 1: Add executor selection tests**
 
 In `tests/pine-autoresearch-llm-runner.test.mjs`, add:
 
@@ -1020,7 +1020,7 @@ test('runner uses production executor when execution mode is matrix-eval', async
 });
 ```
 
-- [ ] **Step 2: Run and verify fail**
+- [x] **Step 2: Run and verify fail**
 
 Run:
 
@@ -1030,7 +1030,7 @@ npm test -- tests/pine-autoresearch-llm-runner.test.mjs --test-name-pattern "pro
 
 Expected: FAIL because runner does not accept/use `productionExecuteCandidate` and does not select matrix executor.
 
-- [ ] **Step 3: Import production executor**
+- [x] **Step 3: Import production executor**
 
 In `scripts/lib/pine-autoresearch-llm-runner.mjs`, add:
 
@@ -1065,7 +1065,7 @@ When invoking executor, include `repoRoot`:
     repoRoot,
 ```
 
-- [ ] **Step 4: Add config execution block**
+- [x] **Step 4: Add config execution block**
 
 In `config/pine-autoresearch-llm.default.json`, add:
 
@@ -1078,7 +1078,7 @@ In `config/pine-autoresearch-llm.default.json`, add:
 
 Place it near `baseConfigPath`, before `scheduled`.
 
-- [ ] **Step 5: Run runner tests**
+- [x] **Step 5: Run runner tests**
 
 Run:
 
@@ -1088,7 +1088,7 @@ npm test -- tests/pine-autoresearch-llm-runner.test.mjs tests/pine-autoresearch-
 
 Expected: PASS.
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git add scripts/lib/pine-autoresearch-llm-runner.mjs config/pine-autoresearch-llm.default.json tests/pine-autoresearch-llm-runner.test.mjs
@@ -1102,7 +1102,7 @@ git commit -m "feat(pine): wire llm runner to matrix evaluator"
 **Files:**
 - Modify: `tests/pine-autoresearch-llm-e2e.test.mjs`
 
-- [ ] **Step 1: Add E2E test with file provider and injected production executor**
+- [x] **Step 1: Add E2E test with file provider and injected production executor**
 
 Add:
 
@@ -1182,7 +1182,7 @@ test('LLM run can evaluate candidate and enqueue review without touching normal 
 });
 ```
 
-- [ ] **Step 2: Run E2E test**
+- [x] **Step 2: Run E2E test**
 
 Run:
 
@@ -1192,7 +1192,7 @@ npm test -- tests/pine-autoresearch-llm-e2e.test.mjs --test-name-pattern "evalua
 
 Expected: PASS.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add tests/pine-autoresearch-llm-e2e.test.mjs
@@ -1207,7 +1207,7 @@ git commit -m "test(pine): cover llm evaluator bridge e2e"
 - Modify: `package.json`
 - Modify: `docs/pine-llm-autoresearch.md`
 
-- [ ] **Step 1: Add package scripts**
+- [x] **Step 1: Add package scripts**
 
 In `package.json`, add these scripts beside existing LLM scripts:
 
@@ -1216,7 +1216,7 @@ In `package.json`, add these scripts beside existing LLM scripts:
 "pine:autoresearch:llm:review-resolve": "node ./scripts/pine-autoresearch-llm.mjs review-resolve --config ./config/pine-autoresearch-llm.default.json"
 ```
 
-- [ ] **Step 2: Update docs**
+- [x] **Step 2: Update docs**
 
 In `docs/pine-llm-autoresearch.md`, add section:
 
@@ -1250,7 +1250,7 @@ node ./scripts/pine-autoresearch.mjs promote --config ./config/pine-autoresearch
 ```
 ```
 
-- [ ] **Step 3: Run docs grep smoke**
+- [x] **Step 3: Run docs grep smoke**
 
 Run:
 
@@ -1264,7 +1264,7 @@ Expected:
 docs ok
 ```
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```bash
 git add package.json docs/pine-llm-autoresearch.md
@@ -1278,7 +1278,7 @@ git commit -m "docs(pine): document llm evaluator bridge workflow"
 **Files:**
 - No code changes expected.
 
-- [ ] **Step 1: Run targeted LLM bridge suite**
+- [x] **Step 1: Run targeted LLM bridge suite**
 
 Run:
 
@@ -1288,7 +1288,7 @@ npm test -- tests/pine-autoresearch-llm-evaluator.test.mjs tests/pine-autoresear
 
 Expected: all PASS.
 
-- [ ] **Step 2: Run existing autoresearch no-regression suite**
+- [x] **Step 2: Run existing autoresearch no-regression suite**
 
 Run:
 
@@ -1298,7 +1298,7 @@ npm test -- tests/pine-autoresearch.test.mjs tests/pine-autoresearch-llm-no-regr
 
 Expected: all PASS.
 
-- [ ] **Step 3: Run provider/schema safety suite**
+- [x] **Step 3: Run provider/schema safety suite**
 
 Run:
 
@@ -1308,7 +1308,7 @@ npm test -- tests/pine-autoresearch-llm-provider.test.mjs tests/pine-autoresearc
 
 Expected: all PASS.
 
-- [ ] **Step 4: Run formatting diff check**
+- [x] **Step 4: Run formatting diff check**
 
 Run:
 
@@ -1318,7 +1318,7 @@ git diff --check
 
 Expected: no output.
 
-- [ ] **Step 5: Run dependency grep**
+- [x] **Step 5: Run dependency grep**
 
 Run:
 
@@ -1332,7 +1332,7 @@ Expected:
 dependency direction ok
 ```
 
-- [ ] **Step 6: Commit verification-only docs note only if needed**
+- [x] **Step 6: Commit verification-only docs note only if needed**
 
 If no files changed, do not commit. If docs needed correction, commit:
 
@@ -1348,7 +1348,7 @@ git commit -m "docs(pine): clarify llm bridge verification"
 **Files:**
 - Temporary local files only. Do not commit candidate secret files.
 
-- [ ] **Step 1: Create temporary candidate file**
+- [x] **Step 1: Create temporary candidate file**
 
 Run:
 
@@ -1356,7 +1356,7 @@ Run:
 node -e "const fs=require('fs'); fs.writeFileSync('pine/tmp-llm-candidate.json', JSON.stringify({ params: { minPredSum: 2.2 }, rationale: 'Smoke test bounded LLM bridge candidate.' }, null, 2));"
 ```
 
-- [ ] **Step 2: Temporarily switch provider to file for smoke**
+- [x] **Step 2: Temporarily switch provider to file for smoke**
 
 Do not commit this config mutation. Use a local copy:
 
@@ -1370,7 +1370,7 @@ fs.writeFileSync('config/pine-autoresearch-llm.local-smoke.json', JSON.stringify
 NODE
 ```
 
-- [ ] **Step 3: Run bridge smoke**
+- [x] **Step 3: Run bridge smoke**
 
 Run:
 
@@ -1387,7 +1387,7 @@ Expected output includes:
 
 If matrix recommends promotion, output may show review queue status and reason `candidate_enqueued_for_review`.
 
-- [ ] **Step 4: Inspect artifacts**
+- [x] **Step 4: Inspect artifacts**
 
 Run:
 
@@ -1412,7 +1412,7 @@ NODE
 
 Expected: recent LLM lane manifest/status exists and LLM manifest contains `evaluationManifestPath`.
 
-- [ ] **Step 5: Clean temporary smoke files**
+- [x] **Step 5: Clean temporary smoke files**
 
 Run:
 
@@ -1426,7 +1426,7 @@ On PowerShell:
 Remove-Item pine/tmp-llm-candidate.json, config/pine-autoresearch-llm.local-smoke.json -ErrorAction SilentlyContinue
 ```
 
-- [ ] **Step 6: Verify no temporary files staged**
+- [x] **Step 6: Verify no temporary files staged**
 
 Run:
 
@@ -1440,16 +1440,16 @@ Expected: no temporary smoke files. Existing unrelated user files may still appe
 
 ## Implementation Risk Checklist
 
-- [ ] Existing non-LLM autoresearch imports no LLM code.
-- [ ] Existing `pine:autoresearch` behavior unchanged except exported helper symbols.
-- [ ] LLM runner no longer overwrites evaluator manifest.
-- [ ] LLM candidate patch remains allowlist-bounded before evaluation.
-- [ ] Bridge evaluates exactly one LLM candidate, not a batch.
-- [ ] Bridge does not call `promote`.
-- [ ] Review queue remains LLM-specific.
-- [ ] Normal promotion queue is not written by LLM runner.
-- [ ] API key values are never printed, stored in manifests, or committed.
-- [ ] Scheduled LLM tasks still require explicit enablement.
+- [x] Existing non-LLM autoresearch imports no LLM code.
+- [x] Existing `pine:autoresearch` behavior unchanged except exported helper symbols.
+- [x] LLM runner no longer overwrites evaluator manifest.
+- [x] LLM candidate patch remains allowlist-bounded before evaluation.
+- [x] Bridge evaluates exactly one LLM candidate, not a batch.
+- [x] Bridge does not call `promote`.
+- [x] Review queue remains LLM-specific.
+- [x] Normal promotion queue is not written by LLM runner.
+- [x] API key values are never printed, stored in manifests, or committed.
+- [x] Scheduled LLM tasks still require explicit enablement.
 
 ---
 
@@ -1479,3 +1479,7 @@ No unresolved placeholder steps are intentionally present. The only angle-bracke
 ## Execution Recommendation
 
 Use subagent-driven implementation. This touches cross-cutting evaluator behavior and needs independent review after each task. Do not batch all tasks into one giant edit.
+
+## Completion note
+
+Implementation completed on 2026-05-02 in branch `feature/pine-llm-evaluator-bridge`. Final audit found and fixed review CLI workflow, executor exception finalization, stateRoot handling, and baseConfigPath resolution before merge.

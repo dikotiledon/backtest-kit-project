@@ -4,6 +4,7 @@ import path from 'node:path';
 import { buildLlmLanePaths } from './pine-autoresearch-llm-paths.mjs';
 import { buildLlmResearchContext } from './pine-autoresearch-llm-context.mjs';
 import { proposeCandidate } from './pine-autoresearch-llm-provider.mjs';
+import { executeLlmMatrixCandidate } from './pine-autoresearch-llm-evaluator.mjs';
 import { parseCandidateJson, validateCandidate, fingerprintCandidate } from './pine-autoresearch-llm-schema.mjs';
 import { appendReviewQueueEvent, buildReviewQueueItem, readReviewQueue, unresolvedReviewItems } from './pine-autoresearch-llm-review-queue.mjs';
 import { reserveCandidate, finalizeReservation } from './pine-autoresearch-llm-reservation.mjs';
@@ -404,6 +405,7 @@ export async function runLlmAutoresearch({
   command = 'run',
   scheduled = false,
   executeCandidate,
+  productionExecuteCandidate = executeLlmMatrixCandidate,
   proposeOpenAi,
 } = {}) {
   const resolvedConfigPath = configPath
@@ -634,12 +636,14 @@ export async function runLlmAutoresearch({
     };
   }
 
-  const executor = executeCandidate ?? defaultExecuteCandidate;
+  const executor = executeCandidate
+    ?? (config?.execution?.mode === 'matrix-eval' ? productionExecuteCandidate : defaultExecuteCandidate);
   const execution = await executor({
     candidate: parsed,
     candidateId: identity.candidateId,
     candidateFingerprint: identity.candidateFingerprint,
     config,
+    repoRoot,
     allowlist,
     context: context.prompt,
     paths,

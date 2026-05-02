@@ -396,6 +396,119 @@ test('runner writes LLM manifest separately from executor evaluation manifest', 
   }
 });
 
+
+test('runner uses injected executor before production matrix executor', async () => {
+  const { dir, configPath, allowlistPath } = await fixture();
+  const candidateFile = path.join(dir, 'candidate.json');
+
+  try {
+    await fs.writeFile(candidateFile, JSON.stringify({
+      patch: { minPredSum: 1.8 },
+      rationale: 'raise threshold',
+    }), 'utf8');
+
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'matrix-a',
+      allowlistPath,
+      execution: { mode: 'matrix-eval' },
+      provider: { mode: 'file', candidateFile },
+      champion: { minPredSum: 1.7, useFusionV4: true },
+      memory: {
+        maxPromptBytes: 4096,
+        maxHotMemoryBytes: 262144,
+        recentCandidates: 20,
+        topWinners: 10,
+        tabuFingerprints: 50,
+      },
+      candidate: { maxChangedParams: 2 },
+    }), 'utf8');
+
+    let injectedCalled = false;
+    let productionCalled = false;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      executeCandidate: async (options) => {
+        injectedCalled = true;
+        assert.equal(options.repoRoot, dir);
+        return {
+          ok: true,
+          runId: 'injected-run',
+          manifestPath: path.join(dir, 'manifest.json'),
+          metricsDelta: { score: 1 },
+          promotable: false,
+        };
+      },
+      productionExecuteCandidate: async () => {
+        productionCalled = true;
+        return { ok: true, runId: 'production-run' };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.runId, 'injected-run');
+    assert.equal(injectedCalled, true);
+    assert.equal(productionCalled, false);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('runner uses production executor when execution mode is matrix-eval', async () => {
+  const { dir, configPath, allowlistPath } = await fixture();
+  const candidateFile = path.join(dir, 'candidate.json');
+
+  try {
+    await fs.writeFile(candidateFile, JSON.stringify({
+      patch: { minPredSum: 1.8 },
+      rationale: 'raise threshold',
+    }), 'utf8');
+
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'matrix-a',
+      allowlistPath,
+      execution: { mode: 'matrix-eval' },
+      provider: { mode: 'file', candidateFile },
+      champion: { minPredSum: 1.7, useFusionV4: true },
+      memory: {
+        maxPromptBytes: 4096,
+        maxHotMemoryBytes: 262144,
+        recentCandidates: 20,
+        topWinners: 10,
+        tabuFingerprints: 50,
+      },
+      candidate: { maxChangedParams: 2 },
+    }), 'utf8');
+
+    let productionCalled = false;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      productionExecuteCandidate: async (options) => {
+        productionCalled = true;
+        assert.equal(options.repoRoot, dir);
+        return {
+          ok: true,
+          runId: 'production-run',
+          manifestPath: path.join(dir, 'manifest.json'),
+          metricsDelta: { score: 1 },
+          promotable: false,
+        };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.runId, 'production-run');
+    assert.equal(productionCalled, true);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('openai responses provider flow stays no-network and enqueues review', async () => {
   const { dir, configPath } = await openAiFixture();
   const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');

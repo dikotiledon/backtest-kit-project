@@ -2,6 +2,10 @@
   "matrixId": "pine-fusion-v4-core-15m-locked-window",
   "baseConfigPath": "./config/pine-autoresearch.default.json",
   "allowlistPath": "./config/pine-autoresearch-llm-allowlist.default.json",
+  "execution": {
+    "mode": "matrix-eval",
+    "baseOverrides": {}
+  },
   "stateRoot": "./pine/autoresearch-llm",
   "scheduled": {
     "enabled": false,

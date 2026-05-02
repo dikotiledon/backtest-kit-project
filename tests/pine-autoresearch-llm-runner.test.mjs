@@ -732,6 +732,7 @@ test('openai malformed text is rejected by local validation', async () => {
 
   try {
     let executeCalled = false;
+    const raw = `${'😀'.repeat(6000)}{"params":{"unknownParam":999}}`;
     const result = await runLlmAutoresearch({
       configPath,
       repoRoot: dir,
@@ -739,7 +740,7 @@ test('openai malformed text is rejected by local validation', async () => {
       scheduled: false,
       proposeOpenAi: async () => ({
         ok: true,
-        raw: 'Here is a candidate:\n{"params":{"unknownParam":999}}',
+        raw,
         source: 'openai-responses',
       }),
       executeCandidate: async () => {
@@ -751,6 +752,183 @@ test('openai malformed text is rejected by local validation', async () => {
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'candidate_invalid');
     assert.equal(executeCalled, false);
+    const invalidResponsesPath = path.join(
+      dir,
+      'pine/autoresearch-llm/llm-matrix-a/state/llm-invalid-responses.jsonl',
+    );
+    const invalidRows = (await fs.readFile(invalidResponsesPath, 'utf8'))
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line));
+    assert.equal(invalidRows.length, 1);
+    assert.equal(invalidRows[0].attempt, 1);
+    assert.equal(invalidRows[0].maxAttempts, 1);
+    assert.equal(invalidRows[0].reason, 'candidate_invalid');
+    assert.match(invalidRows[0].error, /Invalid JSON|unknownParam/);
+    assert.equal(invalidRows[0].providerMode, 'openai-responses');
+    assert.equal(invalidRows[0].source, 'openai-responses');
+    assert.equal(invalidRows[0].rawLength, Buffer.byteLength(raw, 'utf8'));
+    assert.match(invalidRows[0].rawSha256, /^[a-f0-9]{64}$/);
+    assert.equal(Buffer.byteLength(invalidRows[0].rawPreview, 'utf8') <= 16 * 1024, true);
+    assert.equal(invalidRows[0].rawPreview.includes('\uFFFD'), false);
+
+    const status = JSON.parse(await fs.readFile(
+      path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-provider-status.json'),
+      'utf8',
+    ));
+    assert.equal(status.details.invalidAttempts.length, 1);
+    assert.equal(status.details.invalidAttempts[0].attempt, 1);
+    assert.equal(status.details.invalidAttempts[0].maxAttempts, 1);
+    assert.equal(status.details.invalidAttempts[0].rawPreviewPath.endsWith('llm-invalid-responses.jsonl'), true);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('openai malformed candidate retries once and succeeds with feedback prompt', async () => {
+  const { dir, configPath } = await openAiFixture();
+  const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');
+  const invalidResponsesPath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-invalid-responses.jsonl');
+
+  try {
+    const baseConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({
+      ...baseConfig,
+      provider: { ...baseConfig.provider, maxCandidateAttempts: 2 },
+    }), 'utf8');
+
+    const prompts = [];
+    let executeCalled = false;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async (options) => {
+        prompts.push(options.prompt);
+        if (prompts.length === 1) {
+          return { ok: true, raw: '{}', source: 'openai-responses' };
+        }
+        return {
+          ok: true,
+          raw: '{"params":{"minPredSum":1.8},"rationale":"retry candidate"}',
+          source: 'openai-responses',
+        };
+      },
+      executeCandidate: async () => {
+        executeCalled = true;
+        return { ok: true, runId: 'retry-run', promotable: true, metricsDelta: { score: 1 } };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.reason, 'candidate_enqueued_for_review');
+    assert.equal(executeCalled, true);
+    assert.equal(prompts.length, 2);
+    assert.doesNotMatch(prompts[0], /Previous candidate output was invalid/);
+    assert.match(prompts[1], /Previous candidate output was invalid/);
+    assert.match(prompts[1], /Attempt 2 of 2/);
+    assert.match(prompts[1], /Return exactly one JSON object/);
+
+    const invalidRows = (await fs.readFile(invalidResponsesPath, 'utf8'))
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line));
+    assert.equal(invalidRows.length, 1);
+    assert.equal(invalidRows[0].rawPreview, '{}');
+    assert.equal(invalidRows[0].attempt, 1);
+    assert.equal(invalidRows[0].maxAttempts, 2);
+
+    const reviewItems = (await readReviewQueue(reviewQueuePath)).items;
+    assert.equal(reviewItems.length, 1);
+    assert.equal(reviewItems[0].candidate.params.minPredSum, 1.8);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('openai malformed candidate stops after configured attempts', async () => {
+  const { dir, configPath } = await openAiFixture();
+  const invalidResponsesPath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-invalid-responses.jsonl');
+
+  try {
+    const baseConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({
+      ...baseConfig,
+      provider: { ...baseConfig.provider, maxCandidateAttempts: 3 },
+    }), 'utf8');
+
+    let calls = 0;
+    let executeCalled = false;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async () => {
+        calls += 1;
+        return { ok: true, raw: '{}', source: 'openai-responses' };
+      },
+      executeCandidate: async () => {
+        executeCalled = true;
+        return { ok: true, runId: 'must-not-run' };
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'candidate_invalid');
+    assert.equal(calls, 3);
+    assert.equal(executeCalled, false);
+
+    const invalidRows = (await fs.readFile(invalidResponsesPath, 'utf8'))
+      .trim()
+      .split(/\r?\n/)
+      .map((line) => JSON.parse(line));
+    assert.deepEqual(invalidRows.map((row) => row.attempt), [1, 2, 3]);
+    assert.deepEqual(invalidRows.map((row) => row.maxAttempts), [3, 3, 3]);
+
+    const status = JSON.parse(await fs.readFile(
+      path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-provider-status.json'),
+      'utf8',
+    ));
+    assert.equal(status.reason, 'candidate_invalid');
+    assert.equal(status.details.invalidAttempts.length, 3);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('openai provider failure is not retried as candidate invalid', async () => {
+  const { dir, configPath } = await openAiFixture();
+
+  try {
+    const baseConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({
+      ...baseConfig,
+      provider: { ...baseConfig.provider, maxCandidateAttempts: 3 },
+    }), 'utf8');
+
+    let calls = 0;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async () => {
+        calls += 1;
+        return { ok: false, reason: 'missing_api_key_env:OPENAI_API_KEY', stderr: 'missing key' };
+      },
+      executeCandidate: async () => ({ ok: true, runId: 'must-not-run' }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'missing_api_key_env:OPENAI_API_KEY');
+    assert.equal(calls, 1);
+    await assert.rejects(
+      () => fs.access(path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-invalid-responses.jsonl')),
+      /ENOENT/,
+    );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

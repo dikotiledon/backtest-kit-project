@@ -449,6 +449,40 @@ test('review-resolve appends status event and clears blockers', async () => {
   }
 });
 
+test('review-resolve rejects invalid status without clearing blocker', async () => {
+  const { dir, configPath } = await fixture();
+  const reviewQueuePath = path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-manual-review-queue.jsonl');
+
+  try {
+    await appendReviewQueueEvent(reviewQueuePath, {
+      item: buildReviewQueueItem({
+        parentChampionFingerprint: 'champ',
+        candidateFingerprint: 'cand',
+        candidateId: 'item-a',
+        createdAt: '2026-05-01T00:00:00.000Z',
+      }),
+    });
+
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'review-resolve',
+      configOverrides: {
+        reviewResolve: { itemId: 'item-a', status: 'typo_status', reason: 'bad' },
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'review_resolve_invalid_status');
+    assert.equal(result.reviewSummary.unresolvedCount, 1);
+
+    const queue = await readReviewQueue(reviewQueuePath);
+    assert.equal(queue.items[0].status, 'pending_review');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('stateRoot relocates LLM lane state', async () => {
   const { dir, configPath, allowlistPath } = await fixture();
   const stateRoot = path.join(dir, 'custom-state');

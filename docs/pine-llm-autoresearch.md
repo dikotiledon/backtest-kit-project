@@ -151,4 +151,4 @@ After accepting, rejecting, or archiving the item, append an immutable resolutio
 npm run pine:autoresearch:llm:review-resolve -- --item-id <itemId> --status archived --reason "promoted via evaluator manifest"
 ```
 
-Supported resolution statuses are `accepted_for_manual_promotion`, `rejected`, `stale`, `superseded`, and `archived`.
+Supported terminal resolution statuses are `rejected`, `stale`, `superseded`, and `archived`. `accepted_for_manual_promotion` is intentionally still a blocking review status until the item is archived or otherwise resolved.

@@ -216,6 +216,8 @@ function summarizePendingReview(queue) {
   };
 }
 
+const REVIEW_RESOLUTION_STATUSES = new Set(['rejected', 'stale', 'superseded', 'archived']);
+
 function shouldBlockProposalPath(command, reviewSummary) {
   return ['run', 'propose', 'enqueue'].includes(command) && Boolean(reviewSummary?.hasBlockers);
 }
@@ -414,6 +416,31 @@ async function runReviewResolveOnly({ config, paths, scheduled, reviewSummary, r
       reason: 'review_resolve_missing_args',
       status,
       reviewSummary,
+    };
+  }
+
+  if (!REVIEW_RESOLUTION_STATUSES.has(nextStatus)) {
+    const status = await writeProviderStatus(paths, buildStatus({
+      ok: false,
+      reason: 'review_resolve_invalid_status',
+      command: 'review-resolve',
+      scheduled,
+      matrixId: paths.matrixId,
+      providerMode: config?.provider?.mode,
+      details: {
+        reviewSummary,
+        itemId,
+        status: nextStatus,
+        allowedStatuses: [...REVIEW_RESOLUTION_STATUSES],
+      },
+    }));
+
+    return {
+      ok: false,
+      reason: 'review_resolve_invalid_status',
+      status,
+      reviewSummary,
+      itemId,
     };
   }
 

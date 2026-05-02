@@ -168,6 +168,42 @@ async function appendInvalidResponse(paths, {
   };
 }
 
+function normalizeMaxCandidateAttempts(provider = {}) {
+  const value = Number(provider.maxCandidateAttempts ?? 1);
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(5, Math.floor(value)));
+}
+
+function buildRetryPrompt(basePrompt, { attempt, maxAttempts, lastError, lastRawPreview }) {
+  if (attempt <= 1) return basePrompt;
+  return [
+    basePrompt,
+    '',
+    'Previous candidate output was invalid.',
+    `Attempt ${attempt} of ${maxAttempts}.`,
+    `Validation error: ${String(lastError ?? '').slice(0, 1000)}`,
+    `Invalid output preview: ${String(lastRawPreview ?? '').slice(0, 1000)}`,
+    'Return exactly one JSON object matching the schema. No markdown. No prose. No code fences.',
+  ].join('\n');
+}
+
+function parseAndValidateProposal({ proposal, allowlist, config, ledger, memory }) {
+  const parsed = parseCandidateJson(proposal.raw);
+  const validation = validateCandidate({
+    candidate: normalizeApiCandidate(parsed),
+    allowlist: resolveEffectiveAllowlist(allowlist, config.candidate),
+    champion: config.champion ?? {},
+    recentFingerprints: buildRecentFingerprintSet({ ledger, memory }),
+    allowGuarded: Boolean(config?.candidate?.allowGuarded),
+  });
+
+  if (!validation || validation.ok === false) {
+    throw new Error(validation?.reason ?? 'candidate validation failed');
+  }
+
+  return { parsed, validation };
+}
+
 function resolveEffectiveAllowlist(allowlist, candidateConfig = {}) {
   const maxes = [allowlist?.maxChangedParams, candidateConfig?.maxChangedParams]
     .filter((value) => Number.isFinite(value) && value >= 0);
@@ -300,6 +336,10 @@ async function runProposalOnly({
   proposal,
   reviewSummary,
   command,
+  parsed,
+  validation,
+  invalidAttempts = [],
+  lastError = null,
 }) {
   if (!proposal.ok) {
     const ok = proposal.reason === 'proposal_unavailable';
@@ -323,60 +363,8 @@ async function runProposalOnly({
     };
   }
 
-  try {
-    const parsed = parseCandidateJson(proposal.raw);
-    const ledger = await readLlmLedger(paths.ledger);
-    const memory = await loadMemory(paths.memory);
-    const validation = validateCandidate({
-      candidate: normalizeApiCandidate(parsed),
-      allowlist: resolveEffectiveAllowlist(allowlist, config?.candidate),
-      champion: config?.champion ?? {},
-      recentFingerprints: buildRecentFingerprintSet({ ledger, memory }),
-      allowGuarded: Boolean(config?.candidate?.allowGuarded),
-    });
-
-    const identity = buildCandidateIdentity({ championFingerprint: fingerprintCandidate({ patch: config.champion ?? {} }), validation });
-    const status = await writeProviderStatus(paths, buildStatus({
-      ok: true,
-      reason: 'proposal_ready',
-      command,
-      scheduled,
-      matrixId: paths.matrixId,
-      providerMode: config?.provider?.mode,
-      candidateId: identity.candidateId,
-      candidateFingerprint: identity.candidateFingerprint,
-      details: {
-        reviewSummary,
-        context: {
-          truncated: context?.truncated ?? false,
-          overflow: context?.overflow ?? false,
-        },
-      },
-    }));
-
-    return {
-      ok: true,
-      reason: 'proposal_ready',
-      status,
-      candidate: parsed,
-      candidateId: identity.candidateId,
-      candidateFingerprint: identity.candidateFingerprint,
-      validation,
-      reviewSummary,
-    };
-  } catch (error) {
-    const invalidAttempts = [await appendInvalidResponse(paths, {
-      attempt: 1,
-      maxAttempts: 1,
-      command,
-      scheduled,
-      matrixId: paths.matrixId,
-      providerMode: config?.provider?.mode,
-      source: proposal.source ?? null,
-      reason: 'candidate_invalid',
-      error: String(error?.message ?? error),
-      raw: proposal.raw,
-    })];
+  if (!parsed || !validation) {
+    const error = String(lastError ?? 'candidate invalid');
     const status = await writeProviderStatus(paths, buildStatus({
       ok: false,
       reason: 'candidate_invalid',
@@ -387,18 +375,48 @@ async function runProposalOnly({
       details: {
         reviewSummary,
         invalidAttempts,
-        error: String(error?.message ?? error),
+        error,
       },
     }));
 
     return {
       ok: false,
       reason: 'candidate_invalid',
-      error: String(error?.message ?? error),
+      error,
       status,
       reviewSummary,
     };
   }
+
+  const identity = buildCandidateIdentity({ championFingerprint: fingerprintCandidate({ patch: config.champion ?? {} }), validation });
+  const status = await writeProviderStatus(paths, buildStatus({
+    ok: true,
+    reason: 'proposal_ready',
+    command,
+    scheduled,
+    matrixId: paths.matrixId,
+    providerMode: config?.provider?.mode,
+    candidateId: identity.candidateId,
+    candidateFingerprint: identity.candidateFingerprint,
+    details: {
+      reviewSummary,
+      context: {
+        truncated: context?.truncated ?? false,
+        overflow: context?.overflow ?? false,
+      },
+    },
+  }));
+
+  return {
+    ok: true,
+    reason: 'proposal_ready',
+    status,
+    candidate: parsed,
+    candidateId: identity.candidateId,
+    candidateFingerprint: identity.candidateFingerprint,
+    validation,
+    reviewSummary,
+  };
 }
 
 async function runDigestOnly({ memory, paths }) {
@@ -718,20 +736,72 @@ export async function runLlmAutoresearch({
     maxPromptBytes: config.memory?.maxPromptBytes,
   });
 
-  const proposal = await proposeCandidate({
-    provider: {
-      ...baseProvider,
-      candidateFile: await resolveRelative(baseProvider.candidateFile, [repoRoot, configDir]),
-    },
-    scheduled,
-    prompt: context.prompt,
-    allowlist,
-    allowGuarded: Boolean(config?.candidate?.allowGuarded),
-    proposeOpenAi,
-  });
+  const maxCandidateAttempts = normalizeMaxCandidateAttempts(baseProvider);
+  const invalidAttempts = [];
+  let proposal = null;
+  let parsed = null;
+  let validation = null;
+  let lastError = null;
+  let lastRawPreview = null;
+
+  for (let attempt = 1; attempt <= maxCandidateAttempts; attempt += 1) {
+    proposal = await proposeCandidate({
+      provider: {
+        ...baseProvider,
+        candidateFile: await resolveRelative(baseProvider.candidateFile, [repoRoot, configDir]),
+      },
+      scheduled,
+      prompt: buildRetryPrompt(context.prompt, {
+        attempt,
+        maxAttempts: maxCandidateAttempts,
+        lastError,
+        lastRawPreview,
+      }),
+      allowlist,
+      allowGuarded: Boolean(config?.candidate?.allowGuarded),
+      proposeOpenAi,
+    });
+
+    if (!proposal.ok) {
+      break;
+    }
+
+    try {
+      const attemptMemory = await loadMemory(paths.memory);
+      const attemptResult = parseAndValidateProposal({
+        proposal,
+        allowlist,
+        config,
+        ledger: await readLlmLedger(paths.ledger),
+        memory: attemptMemory,
+      });
+      parsed = attemptResult.parsed;
+      validation = attemptResult.validation;
+      break;
+    } catch (error) {
+      lastError = String(error?.message ?? error);
+      lastRawPreview = byteBoundedPreview(proposal.raw);
+      invalidAttempts.push(await appendInvalidResponse(paths, {
+        attempt,
+        maxAttempts: maxCandidateAttempts,
+        command,
+        scheduled,
+        matrixId: paths.matrixId,
+        providerMode: baseProvider.mode,
+        source: proposal.source ?? null,
+        reason: 'candidate_invalid',
+        error: lastError,
+        raw: proposal.raw,
+      }));
+
+      if (attempt >= maxCandidateAttempts) {
+        break;
+      }
+    }
+  }
 
   if (command !== 'run') {
-    return runProposalOnly({ config, allowlist, paths, context, scheduled, proposal, reviewSummary, command });
+    return runProposalOnly({ config, allowlist, paths, context, scheduled, proposal, reviewSummary, command, parsed, validation, invalidAttempts, lastError });
   }
 
   if (!proposal.ok) {
@@ -758,48 +828,25 @@ export async function runLlmAutoresearch({
     };
   }
 
-  let parsed;
-  let validation;
-  try {
-    parsed = parseCandidateJson(proposal.raw);
-    validation = validateCandidate({
-      candidate: normalizeApiCandidate(parsed),
-      allowlist: resolveEffectiveAllowlist(allowlist, config.candidate),
-      champion: config.champion ?? {},
-      recentFingerprints: buildRecentFingerprintSet({ ledger: await readLlmLedger(paths.ledger), memory }),
-      allowGuarded: Boolean(config?.candidate?.allowGuarded),
-    });
-  } catch (error) {
-    const invalidAttempts = [await appendInvalidResponse(paths, {
-      attempt: 1,
-      maxAttempts: 1,
-      command,
-      scheduled,
-      matrixId: paths.matrixId,
-      providerMode: baseProvider.mode,
-      source: proposal.source ?? null,
-      reason: 'candidate_invalid',
-      error: String(error?.message ?? error),
-      raw: proposal.raw,
-    })];
+  if (proposal?.ok && (!parsed || !validation)) {
     const status = await writeProviderStatus(paths, buildStatus({
       ok: false,
       reason: 'candidate_invalid',
       command,
       scheduled,
       matrixId: paths.matrixId,
-      providerMode: baseProvider.mode,
+      providerMode: config?.provider?.mode,
       details: {
         reviewSummary,
         invalidAttempts,
-        error: String(error?.message ?? error),
+        error: lastError,
       },
     }));
 
     return {
       ok: false,
       reason: 'candidate_invalid',
-      error: String(error?.message ?? error),
+      error: lastError,
       status,
       reviewSummary,
     };

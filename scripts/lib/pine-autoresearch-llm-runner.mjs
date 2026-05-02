@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -97,6 +98,59 @@ function buildStatus({
 async function writeProviderStatus(paths, payload) {
   await writeJson(paths.providerStatus, payload);
   return payload;
+}
+
+const INVALID_RESPONSE_PREVIEW_BYTES = 16 * 1024;
+
+function byteBoundedPreview(value, maxBytes = INVALID_RESPONSE_PREVIEW_BYTES) {
+  const text = String(value ?? '');
+  const buffer = Buffer.from(text, 'utf8');
+  if (buffer.length <= maxBytes) return text;
+  return buffer.subarray(0, maxBytes).toString('utf8');
+}
+
+function sha256Text(value) {
+  return crypto.createHash('sha256').update(String(value ?? ''), 'utf8').digest('hex');
+}
+
+async function appendInvalidResponse(paths, {
+  attempt,
+  maxAttempts,
+  command,
+  scheduled,
+  matrixId,
+  providerMode,
+  source = null,
+  reason,
+  error,
+  raw,
+}) {
+  const entry = {
+    at: isoNow(),
+    attempt,
+    maxAttempts,
+    command,
+    scheduled: Boolean(scheduled),
+    matrixId,
+    providerMode: providerMode ?? null,
+    source: source ?? null,
+    reason,
+    error: String(error ?? ''),
+    rawLength: String(raw ?? '').length,
+    rawSha256: sha256Text(raw),
+    rawPreview: byteBoundedPreview(raw),
+  };
+
+  await fs.appendFile(paths.invalidResponses, `${JSON.stringify(entry)}\n`, 'utf8');
+  return {
+    attempt,
+    maxAttempts,
+    reason,
+    error: entry.error,
+    rawLength: entry.rawLength,
+    rawSha256: entry.rawSha256,
+    rawPreviewPath: paths.invalidResponses,
+  };
 }
 
 function resolveEffectiveAllowlist(allowlist, candidateConfig = {}) {
@@ -296,6 +350,18 @@ async function runProposalOnly({
       reviewSummary,
     };
   } catch (error) {
+    const invalidAttempts = [await appendInvalidResponse(paths, {
+      attempt: 1,
+      maxAttempts: 1,
+      command,
+      scheduled,
+      matrixId: paths.matrixId,
+      providerMode: config?.provider?.mode,
+      source: proposal.source ?? null,
+      reason: 'candidate_invalid',
+      error: String(error?.message ?? error),
+      raw: proposal.raw,
+    })];
     const status = await writeProviderStatus(paths, buildStatus({
       ok: false,
       reason: 'candidate_invalid',
@@ -305,6 +371,7 @@ async function runProposalOnly({
       providerMode: config?.provider?.mode,
       details: {
         reviewSummary,
+        invalidAttempts,
         error: String(error?.message ?? error),
       },
     }));
@@ -688,6 +755,18 @@ export async function runLlmAutoresearch({
       allowGuarded: Boolean(config?.candidate?.allowGuarded),
     });
   } catch (error) {
+    const invalidAttempts = [await appendInvalidResponse(paths, {
+      attempt: 1,
+      maxAttempts: 1,
+      command,
+      scheduled,
+      matrixId: paths.matrixId,
+      providerMode: baseProvider.mode,
+      source: proposal.source ?? null,
+      reason: 'candidate_invalid',
+      error: String(error?.message ?? error),
+      raw: proposal.raw,
+    })];
     const status = await writeProviderStatus(paths, buildStatus({
       ok: false,
       reason: 'candidate_invalid',
@@ -697,6 +776,7 @@ export async function runLlmAutoresearch({
       providerMode: baseProvider.mode,
       details: {
         reviewSummary,
+        invalidAttempts,
         error: String(error?.message ?? error),
       },
     }));

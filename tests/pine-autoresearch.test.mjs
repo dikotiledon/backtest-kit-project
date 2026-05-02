@@ -210,7 +210,7 @@ test('selectPromotionManifestSource backfills manifestPath for explicit manifest
 });
 
 test('resolvePromotionManifestPath returns null without explicit target', () => {
-  const result = resolvePromotionManifestPath({ config: { researchRoot: 'D:\tmp\research' }, args: {} });
+  const result = resolvePromotionManifestPath({ config: { researchRoot: 'D:\\tmp\\research' }, args: {} });
 
   assert.equal(result, null);
 });

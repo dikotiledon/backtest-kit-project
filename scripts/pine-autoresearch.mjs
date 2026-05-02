@@ -411,7 +411,7 @@ export function buildScoutRegimeAnalysisArtifact({ matrixId, runId, selectedCand
   };
 }
 
-function manifestsDir(config) {
+export function manifestsDir(config) {
   return path.join(config.researchRoot, 'manifests');
 }
 
@@ -446,7 +446,7 @@ export function withManifestPath(manifest, manifestPath) {
   return { ...manifest, manifestPath };
 }
 
-function latestManifestPath(config) {
+export function latestManifestPath(config) {
   return path.join(config.researchRoot, 'latest.json');
 }
 
@@ -863,7 +863,7 @@ async function seedChampionState(config) {
   return championState;
 }
 
-async function ensureChampionState(config) {
+export async function ensureChampionState(config) {
   try {
     return await readJson(championPath(config));
   } catch {
@@ -976,7 +976,7 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
   };
 }
 
-async function evaluateMatrix(config, runId, championState, challengerSummary) {
+export async function evaluateMatrix(config, runId, championState, challengerSummary) {
   const labs = partitionLabs(config).selectionLabs;
   const sameCandidate = sameConfig(championState.config, challengerSummary?.config);
   const labResults = [];

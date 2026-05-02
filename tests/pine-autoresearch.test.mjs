@@ -29,7 +29,11 @@ import {
   decideCycleStartAction,
   canForceQueuedPromotion,
   decideQueuedPromotionAction,
+  evaluateMatrix,
+  ensureChampionState,
+  latestManifestPath,
   loadConfig,
+  manifestsDir,
   resolveAutopromoteQueueStatus,
   mergeSchedulerTabuFingerprints,
   resolvePromotionManifestPath,
@@ -206,9 +210,16 @@ test('selectPromotionManifestSource backfills manifestPath for explicit manifest
 });
 
 test('resolvePromotionManifestPath returns null without explicit target', () => {
-  const result = resolvePromotionManifestPath({ config: { researchRoot: 'D:\\tmp\\research' }, args: {} });
+  const result = resolvePromotionManifestPath({ config: { researchRoot: 'D:\tmp\research' }, args: {} });
 
   assert.equal(result, null);
+});
+
+test('pine autoresearch exposes neutral evaluator seams for external lanes', () => {
+  assert.equal(typeof evaluateMatrix, 'function');
+  assert.equal(typeof ensureChampionState, 'function');
+  assert.equal(typeof latestManifestPath, 'function');
+  assert.equal(typeof manifestsDir, 'function');
 });
 
 test('pine-autoresearch-run.ps1 parses cleanly', async () => {

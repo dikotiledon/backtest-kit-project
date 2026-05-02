@@ -39,6 +39,7 @@ export function buildLlmLanePaths({ repoRoot = process.cwd(), matrixId, stateRoo
     reviewQueue: path.join(state, 'llm-manual-review-queue.jsonl'),
     tabu: path.join(state, 'llm-tabu-fingerprints.json'),
     providerStatus: path.join(state, 'llm-provider-status.json'),
+    invalidResponses: path.join(state, 'llm-invalid-responses.jsonl'),
     mutexName: `Global\\BacktestKit-Pine-LLM-Autoresearch-${normalizedMatrixId}`,
   };
 }

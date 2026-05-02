@@ -751,6 +751,11 @@ test('openai malformed text is rejected by local validation', async () => {
     assert.equal(result.ok, false);
     assert.equal(result.reason, 'candidate_invalid');
     assert.equal(executeCalled, false);
+    const invalidResponsesPath = path.join(
+      dir,
+      'pine/autoresearch-llm/llm-matrix-a/state/llm-invalid-responses.jsonl',
+    );
+    await assert.rejects(fs.access(invalidResponsesPath), /ENOENT/);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

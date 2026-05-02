@@ -9,12 +9,12 @@ function trimTrailingSlash(value) {
 
 function systemInstruction() {
   return [
-    'You propose Pine strategy autoresearch candidates.',
+    'You are optimizing a Pine Script trading-strategy parameter patch.',
     'Return exactly one JSON object and no markdown.',
+    'No prose. No code fences. No comments. No trailing explanation.',
     'The JSON object must match the provided schema.',
-    'Do not include arrays of candidates.',
-    'Do not propose code edits, architecture toggles, or parameters outside the schema.',
-  ].join(' ');
+    'If you cannot improve the strategy, return a valid JSON object with an empty params object and a concise rationale.',
+  ].join('\n');
 }
 
 function sampling(provider = {}) {

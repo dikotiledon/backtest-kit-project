@@ -732,6 +732,7 @@ test('openai malformed text is rejected by local validation', async () => {
 
   try {
     let executeCalled = false;
+    const raw = `${'😀'.repeat(6000)}{"params":{"unknownParam":999}}`;
     const result = await runLlmAutoresearch({
       configPath,
       repoRoot: dir,
@@ -739,7 +740,7 @@ test('openai malformed text is rejected by local validation', async () => {
       scheduled: false,
       proposeOpenAi: async () => ({
         ok: true,
-        raw: 'Here is a candidate:\n{"params":{"unknownParam":999}}',
+        raw,
         source: 'openai-responses',
       }),
       executeCandidate: async () => {
@@ -766,9 +767,10 @@ test('openai malformed text is rejected by local validation', async () => {
     assert.match(invalidRows[0].error, /Invalid JSON|unknownParam/);
     assert.equal(invalidRows[0].providerMode, 'openai-responses');
     assert.equal(invalidRows[0].source, 'openai-responses');
-    assert.equal(invalidRows[0].rawLength, 'Here is a candidate:\n{"params":{"unknownParam":999}}'.length);
+    assert.equal(invalidRows[0].rawLength, Buffer.byteLength(raw, 'utf8'));
     assert.match(invalidRows[0].rawSha256, /^[a-f0-9]{64}$/);
-    assert.match(invalidRows[0].rawPreview, /Here is a candidate/);
+    assert.equal(Buffer.byteLength(invalidRows[0].rawPreview, 'utf8') <= 16 * 1024, true);
+    assert.equal(invalidRows[0].rawPreview.includes('\uFFFD'), false);
 
     const status = JSON.parse(await fs.readFile(
       path.join(dir, 'pine/autoresearch-llm/llm-matrix-a/state/llm-provider-status.json'),
@@ -782,7 +784,6 @@ test('openai malformed text is rejected by local validation', async () => {
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
-
 test('runner never writes existing promotion queue', async () => {
   const { dir, configPath } = await fixture();
 

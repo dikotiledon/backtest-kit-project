@@ -104,9 +104,24 @@ const INVALID_RESPONSE_PREVIEW_BYTES = 16 * 1024;
 
 function byteBoundedPreview(value, maxBytes = INVALID_RESPONSE_PREVIEW_BYTES) {
   const text = String(value ?? '');
-  const buffer = Buffer.from(text, 'utf8');
-  if (buffer.length <= maxBytes) return text;
-  return buffer.subarray(0, maxBytes).toString('utf8');
+  let bytes = 0;
+  let preview = '';
+
+  for (const char of text) {
+    const charBytes = Buffer.byteLength(char, 'utf8');
+    if (bytes + charBytes > maxBytes) {
+      break;
+    }
+
+    preview += char;
+    bytes += charBytes;
+  }
+
+  return preview;
+}
+
+function byteLengthText(value) {
+  return Buffer.byteLength(String(value ?? ''), 'utf8');
 }
 
 function sha256Text(value) {
@@ -136,7 +151,7 @@ async function appendInvalidResponse(paths, {
     source: source ?? null,
     reason,
     error: String(error ?? ''),
-    rawLength: String(raw ?? '').length,
+    rawLength: byteLengthText(raw),
     rawSha256: sha256Text(raw),
     rawPreview: byteBoundedPreview(raw),
   };

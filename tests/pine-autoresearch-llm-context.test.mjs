@@ -25,6 +25,33 @@ test('buildLlmResearchContext includes champion allowlist memory and hard rules 
   assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 4096);
 });
 
+test('buildLlmResearchContext includes matrix-aware research rules and blockers', () => {
+  const result = buildLlmResearchContext({
+    champion: { minPredSum: 1.8, riskRewardRatio: 2, stopLossPct: 1 },
+    allowlist: { parameters: [{ key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1 }] },
+    memory: {
+      latestMatrixBlocker: {
+        recommendation: 'hold',
+        reason: 'matrix failed primaryPromote gate(s)',
+        aggregateRoiDeltaPct: 15.15,
+        promotedLabCount: 3,
+        labCount: 6,
+      },
+      failureLessons: [
+        'Avoid generic lower-threshold plus tighter-stop patches unless matrix evidence supports churn reduction.',
+      ],
+    },
+    maxPromptBytes: 16384,
+  });
+
+  assert.match(result.prompt, /falsifiable candidate patch/i);
+  assert.match(result.prompt, /latest matrix blocker/i);
+  assert.match(result.prompt, /current champion baseline/i);
+  assert.match(result.prompt, /primary\/shadow/i);
+  assert.match(result.prompt, /generic lower-threshold/i);
+  assert.match(result.prompt, /primaryPromote/);
+});
+
 test('buildLlmResearchContext trims recent memory before overflow fallback', () => {
   const result = buildLlmResearchContext({
     champion: { minPredSum: 1.7, divRsiLen: 14 },

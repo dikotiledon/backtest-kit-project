@@ -11,7 +11,9 @@ function cloneArray(value) {
 function cloneMemory(memory) {
   return {
     ...(isPlainObject(memory) ? memory : {}),
+    latestMatrixBlocker: isPlainObject(memory?.latestMatrixBlocker) ? { ...memory.latestMatrixBlocker } : null,
     recentCandidates: cloneArray(memory?.recentCandidates),
+    failureLessons: Array.isArray(memory?.failureLessons) ? [...memory.failureLessons] : [],
     topWinners: cloneArray(memory?.topWinners),
     rejectedFingerprints: Array.isArray(memory?.rejectedFingerprints) ? [...memory.rejectedFingerprints] : [],
     activeHypotheses: cloneArray(memory?.activeHypotheses),
@@ -28,11 +30,17 @@ function resolvePromptCap(maxPromptBytes) {
 
 function buildHardRules(maxPromptBytes) {
   return [
-    'Output must be exactly one JSON object.',
+    'Return exactly one JSON object (strict) matching requiredOutput schema.',
     'No markdown.',
     'No batch envelopes.',
     'No code fences.',
     'No extra commentary.',
+    'Propose one falsifiable candidate patch targeting latest matrix blocker.',
+    'Reference current champion baseline and current parameter values.',
+    'Use primary/shadow and hold/promote gate evidence when available (ROI, drawdown, profit factor, trade count, primaryPromote).',
+    'Avoid generic lower-threshold + higher-RR + tighter-stop advice unless matrix evidence supports it.',
+    'Avoid recent duplicate/rejected candidate families and explain novelty versus recent candidates.',
+    'Prefer no more than 3 changed params even when maxChangedParams allows 4.',
     `Keep prompt within ${maxPromptBytes} bytes.`,
   ];
 }
@@ -80,21 +88,46 @@ function summarizeSection(value) {
   };
 }
 
+function buildResearchContext(memory) {
+  return {
+    latestMatrixBlocker: isPlainObject(memory?.latestMatrixBlocker) ? { ...memory.latestMatrixBlocker } : null,
+    recentCandidates: cloneArray(memory?.recentCandidates),
+    failureLessons: Array.isArray(memory?.failureLessons) ? [...memory.failureLessons] : [],
+    topWinners: cloneArray(memory?.topWinners),
+    rejectedFingerprints: Array.isArray(memory?.rejectedFingerprints) ? [...memory.rejectedFingerprints] : [],
+    activeHypotheses: cloneArray(memory?.activeHypotheses),
+  };
+}
+
+function buildRequiredOutput() {
+  return {
+    params: 'Object of changed parameter values only. Keep same keys/types as allowlist. Prefer <=3 changed params unless strong matrix evidence justifies 4.',
+    rationale: 'Short explanation of falsifiable hypothesis, novelty versus recent/rejected candidate families, expected matrix impact, and evidence against current champion baseline.',
+  };
+}
+
 function buildFullPromptPayload({ champion, allowlist, memory, maxPromptBytes }) {
+  const championPayload = isPlainObject(champion) ? { ...champion } : {};
+  const allowlistPayload = isPlainObject(allowlist) ? { ...allowlist } : {};
+  const researchContext = buildResearchContext(memory);
+
   return {
     instructions: buildHardRules(maxPromptBytes),
+    requiredOutput: buildRequiredOutput(),
     budget: {
       maxPromptBytes,
     },
-    champion: isPlainObject(champion) ? { ...champion } : {},
-    allowlist: isPlainObject(allowlist) ? { ...allowlist } : {},
+    champion: championPayload,
+    allowlist: allowlistPayload,
     memory,
+    researchContext,
   };
 }
 
 function buildOverflowPromptPayload({ champion, allowlist, memory, maxPromptBytes }) {
   return {
     instructions: buildHardRules(maxPromptBytes),
+    requiredOutput: summarizeSection(buildRequiredOutput()),
     budget: {
       maxPromptBytes,
     },
@@ -103,6 +136,7 @@ function buildOverflowPromptPayload({ champion, allowlist, memory, maxPromptByte
     champion: summarizeSection(champion),
     allowlist: summarizeSection(allowlist),
     memory: summarizeSection(memory),
+    researchContext: summarizeSection(buildResearchContext(memory)),
   };
 }
 
@@ -168,6 +202,16 @@ export function buildLlmResearchContext({
 
   if (promptByteLength(overflowPrompt) <= cap) {
     return buildPromptResult(overflowPrompt, true, true);
+  }
+
+  const minimalOverflowPrompt = {
+    overflow: true,
+    truncated: true,
+    message: 'overflow',
+  };
+
+  if (promptByteLength(minimalOverflowPrompt) <= cap) {
+    return buildPromptResult(minimalOverflowPrompt, true, true);
   }
 
   return buildPromptResult('', true, true);

@@ -506,15 +506,19 @@ export function decideAutoPromotionAction({ latestManifest, historyEvents = [], 
   const candidate = latestManifest?.challenger || null;
   const candidateChanged = !sameConfig(championState?.config, candidate?.config);
   const matrixReady = requireMatrixPromotion ? decision?.recommendation === 'promote' : Boolean(candidate);
+  const precomputedLineage = safePolicy.lineage;
+  const lineage = precomputedLineage && typeof precomputedLineage === 'object' && !Array.isArray(precomputedLineage)
+    ? precomputedLineage
+    : summarizePromotionLineage({
+        historyEvents: safeHistoryEvents,
+        limit: safePolicy.lineagePolicy?.lookbackPromotions ?? 6,
+      });
   const lineageGate = decideLineagePromotionGate({
     candidateFingerprint: latestManifest?.candidateFingerprint ?? latestManifest?.challenger?.candidateFingerprint ?? null,
     candidateFamilyKey: latestManifest?.candidateFamilyKey ?? latestManifest?.challenger?.familyKey ?? null,
     currentChampionFingerprint: latestManifest?.championFingerprint ?? championState?.configFingerprint ?? null,
     currentChampionFamilyKey: latestManifest?.championFamilyKey ?? championState?.familyKey ?? null,
-    lineage: summarizePromotionLineage({
-      historyEvents: safeHistoryEvents,
-      limit: safePolicy.lineagePolicy?.lookbackPromotions ?? 12,
-    }),
+    lineage,
     matrixDecision: decision,
     robustness: latestManifest?.robustness ?? latestManifest?.selectedCandidate?.robustness ?? {},
     policy: safePolicy.lineagePolicy ?? { enabled: false },

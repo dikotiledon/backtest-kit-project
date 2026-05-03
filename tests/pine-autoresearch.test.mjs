@@ -1124,6 +1124,125 @@ test('decideAutoPromotionAction blocks direct ping-pong reversal without extra m
   assert.equal(result.lineage.risk.level, 'direct-reversal');
 });
 
+test('decideAutoPromotionAction falls back to history lineage when policy.lineage is malformed array', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'old-b', config: { minPredSum: 1.6 } },
+      candidateFingerprint: 'fp-b',
+      candidateFamilyKey: 'family-b',
+      championFingerprint: 'fp-c',
+      championFamilyKey: 'family-c',
+      matrixDecision: {
+        recommendation: 'promote',
+        counts: { shadowPassCount: 3, shadowPassRatio: 0.6 },
+      },
+      robustness: { aggregateScoreDelta: 2, aggregateRoiDeltaPct: 1, aggregateProfitFactorDelta: 0.03 },
+    },
+    championState: { configId: 'current-c', config: { minPredSum: 1.8 }, configFingerprint: 'fp-c' },
+    historyEvents: [
+      {
+        type: 'autopromote',
+        timestamp: '2026-05-03T00:00:00.000Z',
+        fromFingerprint: 'fp-b',
+        toFingerprint: 'fp-c',
+        fromFamilyKey: 'family-b',
+        toFamilyKey: 'family-c',
+      },
+    ],
+    policy: {
+      enabled: true,
+      cooldownHours: 0,
+      maxPromotionsPerDay: 10,
+      requireMatrixPromotion: true,
+      lineage: [],
+      lineagePolicy: {
+        enabled: true,
+        lookbackPromotions: 5,
+        baseShadowPassCount: 3,
+        directReversalExtraShadowPasses: 1,
+        minExtraAggregateScoreDelta: 5,
+      },
+    },
+    now: '2026-05-03T06:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.gates.lineage, false);
+  assert.equal(result.lineage.risk.level, 'direct-reversal');
+});
+
+test('decideAutoPromotionAction falls back to history lineage when policy.lineage is malformed scalar', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+      matrixDecision: { recommendation: 'promote' },
+    },
+    championState: { configId: 'champion', config: { minPredSum: 2 } },
+    historyEvents: [{ type: 'promote', timestamp: '2026-04-20T00:30:00.000Z' }],
+    policy: {
+      enabled: true,
+      cooldownHours: 24,
+      maxPromotionsPerDay: 2,
+      requireMatrixPromotion: true,
+      lineage: 'bad',
+    },
+    now: '2026-04-21T02:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.deepEqual(result.failedGates, []);
+});
+test('decideAutoPromotionAction uses precomputed policy lineage when provided', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'old-b', config: { minPredSum: 1.6 } },
+      candidateFingerprint: 'fp-b',
+      candidateFamilyKey: 'family-b',
+      championFingerprint: 'fp-c',
+      championFamilyKey: 'family-c',
+      matrixDecision: {
+        recommendation: 'promote',
+        counts: { shadowPassCount: 3, shadowPassRatio: 0.6 },
+      },
+      robustness: { aggregateScoreDelta: 2, aggregateRoiDeltaPct: 1, aggregateProfitFactorDelta: 0.03 },
+    },
+    championState: { configId: 'current-c', config: { minPredSum: 1.8 }, configFingerprint: 'fp-c' },
+    historyEvents: [],
+    policy: {
+      enabled: true,
+      cooldownHours: 0,
+      maxPromotionsPerDay: 10,
+      requireMatrixPromotion: true,
+      lineage: {
+        recentTransitions: [
+          {
+            fromFingerprint: 'fp-b',
+            toFingerprint: 'fp-c',
+            fromFamilyKey: 'family-b',
+            toFamilyKey: 'family-c',
+          },
+        ],
+        recentPromotedFingerprints: ['fp-c'],
+        recentDemotedFingerprints: ['fp-b'],
+        recentPromotedFamilies: ['family-c'],
+        recentDemotedFamilies: ['family-b'],
+      },
+      lineagePolicy: {
+        enabled: true,
+        lookbackPromotions: 5,
+        baseShadowPassCount: 3,
+        directReversalExtraShadowPasses: 1,
+        minExtraAggregateScoreDelta: 5,
+      },
+    },
+    now: '2026-05-03T06:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.gates.lineage, false);
+  assert.equal(result.lineage.risk.level, 'direct-reversal');
+});
+
 test('decideAutoPromotionAction allows direct reversal with extra matrix margin', () => {
   const result = decideAutoPromotionAction({
     latestManifest: {
@@ -1812,6 +1931,63 @@ test('resolveTrackSelectionState pre-rotates on prior novelty and max-cycle evid
   assert.equal(maxCycle.activeTrackSelectionState.cycleIndex, 10);
 });
 
+
+
+test('buildScoutOrchestrationState persists candidate and champion lineage keys', () => {
+  const championState = {
+    configId: 'champion-a',
+    score: 100,
+    tradeCount: 100,
+    roiPct: 50,
+    winRatePct: 40,
+    profitFactor: 2,
+    maxDrawdownPct: 3,
+    config: { useFusionV4: true, useDivergenceContext: true, minPredSum: 1.8 },
+    configFingerprint: 'fp-a',
+  };
+  const challenger = {
+    configId: 'challenger-b',
+    score: 110,
+    tradeCount: 120,
+    roiPct: 60,
+    winRatePct: 42,
+    profitFactor: 2.2,
+    maxDrawdownPct: 2.5,
+    config: { useFusionV4: true, useDivergenceContext: true, minPredSum: 1.6 },
+  };
+
+  const result = buildScoutOrchestrationState({
+    config: {
+      researchRoot: 'pine/autoresearch/test',
+      matrixId: 'test-matrix',
+      grid: 'phase3-core',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 1, paretoShortlistSize: 2 },
+      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+    },
+    runId: 'run-lineage',
+    championState,
+    historyEventsBefore: [],
+    searchBatch: [],
+    primarySweep: { topConfigs: [challenger] },
+    matrixCandidates: [{
+      challenger,
+      labResults: [],
+      matrixDecision: { recommendation: 'promote', summary: 'Promote challenger', counts: { shadowPassCount: 0, shadowPassRatio: 0 } },
+      robustness: { aggregateScoreDelta: 10, aggregateRoiDeltaPct: 10 },
+    }],
+    trackState: { championFingerprint: 'fp-a', candidateFingerprint: 'fp-b' },
+  });
+
+  assert.equal(result.manifest.candidateFingerprint, 'fp-b');
+  assert.equal(result.manifest.championFingerprint, 'fp-a');
+  assert.equal(typeof result.manifest.candidateFamilyKey, 'string');
+  assert.equal(typeof result.manifest.championFamilyKey, 'string');
+  assert.equal(result.manifest.robustness.aggregateScoreDelta, 10);
+});
+
 test('buildScoutOrchestrationState does not inherit a stale lastRotationTrigger', () => {
   const result = buildScoutOrchestrationState({
     config: {
@@ -1853,6 +2029,57 @@ test('buildScoutOrchestrationState does not inherit a stale lastRotationTrigger'
   assert.equal(result.manifest.rotationReason, null);
 });
 
+
+
+
+test('promotion history event records from/to fingerprints and family keys', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-lineage-promote-'));
+  try {
+    const configPath = path.join(dir, 'config.json');
+    const scriptPath = path.join(dir, 'strategy.pine');
+    await fs.writeFile(scriptPath, 'minPredSum = input.float(1.8, title="Min Prediction Sum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'lineage-test',
+      scriptPath,
+      outputs: {
+        researchRoot: path.join(dir, 'research'),
+        digestRoot: path.join(dir, 'digest'),
+      },
+      baseConfig: { minPredSum: 1.8 },
+      autoPromotion: { enabled: true, cooldownHours: 0, maxPromotionsPerDay: 10, requireMatrixPromotion: true },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({
+      runId: 'run-promote-lineage',
+      generatedAt: '2026-05-03T00:00:00.000Z',
+      champion: { configId: 'champion-a', config: { minPredSum: 1.8 }, configFingerprint: 'fp-a' },
+      challenger: { configId: 'challenger-b', config: { minPredSum: 1.6 } },
+      candidateFingerprint: 'fp-b',
+      championFingerprint: 'fp-a',
+      candidateFamilyKey: 'family-b',
+      championFamilyKey: 'family-a',
+      matrixDecision: { recommendation: 'promote', summary: 'Promote challenger' },
+    }), 'utf8');
+
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      configId: 'champion-a',
+      config: { minPredSum: 1.8 },
+      configFingerprint: 'fp-a',
+    }), 'utf8');
+    const result = await autoresearchCli.runPromote(config, { force: false }, 'manual');
+    assert.equal(result.promoted, true);
+
+    const history = JSON.parse((await fs.readFile(path.join(config.researchRoot, 'history.jsonl'), 'utf8')).trim().split('\n').at(-1));
+    assert.equal(history.fromFingerprint, 'fp-a');
+    assert.equal(history.toFingerprint, 'fp-b');
+    assert.equal(history.fromFamilyKey, 'family-a');
+    assert.equal(history.toFamilyKey, 'family-b');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
 
 test('renderDigestMarkdown includes search-plan, shortlist summary, and rotation diagnostics', () => {
   const markdown = renderDigestMarkdown({
@@ -2085,3 +2312,5 @@ test('partitionLabs keeps blind holdout out of selection labs', () => {
   assert.deepEqual(tiers.selectionLabs.map((lab) => lab.labId), ['train-primary', 'selection-shadow']);
   assert.deepEqual(tiers.blindHoldoutLabs.map((lab) => lab.labId), ['november-blind']);
 });
+
+

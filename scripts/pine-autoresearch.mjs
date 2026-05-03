@@ -55,6 +55,7 @@ import {
   summarizeTopCandidateSimilarity,
   writeSchedulerState,
 } from './lib/pine-autoresearch-tracks.mjs';
+import { buildCandidateFamilyKey, summarizePromotionLineage } from './lib/pine-autoresearch-lineage.mjs';
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -359,8 +360,11 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       noNewCandidate,
       noNewCandidateStreak: trackState.noNewCandidateStreak ?? 0,
       candidateFingerprint: trackState.candidateFingerprint ?? null,
+      candidateFamilyKey: buildCandidateFamilyKey({ config: challengerSummary?.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys }),
       rejectedCandidateFingerprint: noNewCandidate ? null : (trackState.rejectedCandidateFingerprint ?? null),
       championFingerprint: trackState.championFingerprint ?? null,
+      championFamilyKey: buildCandidateFamilyKey({ config: championState?.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys }),
+      robustness: selectedCandidate?.robustness ?? null,
       labSetId: trackState.labSetId ?? null,
       gridName: trackState.gridName ?? config.grid ?? null,
     },
@@ -1426,7 +1430,7 @@ async function runBlindHoldout(config) {
   return { holdoutPath, payload };
 }
 
-async function runPromote(config, args, mode = 'manual', manifestOverride = null) {
+export async function runPromote(config, args, mode = 'manual', manifestOverride = null) {
   await ensureDirs(config);
   const championState = await ensureChampionState(config);
   const explicitManifestPath = resolvePromotionManifestPath({ config, args });
@@ -1468,12 +1472,20 @@ async function runPromote(config, args, mode = 'manual', manifestOverride = null
   await writeJson(championPath(config), nextChampion);
 
   const notePath = await writePromotionNote(config, latest, mode);
+  const fromFingerprint = latest.championFingerprint ?? championState.configFingerprint ?? configFingerprint(championState.config || {});
+  const toFingerprint = latest.candidateFingerprint ?? latest.challenger?.candidateFingerprint ?? configFingerprint(latest.challenger?.config || {});
+  const fromFamilyKey = latest.championFamilyKey ?? buildCandidateFamilyKey({ config: championState.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys });
+  const toFamilyKey = latest.candidateFamilyKey ?? buildCandidateFamilyKey({ config: latest.challenger?.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys });
   await appendJsonl(historyPath(config), {
     timestamp: promotedAt,
     type: mode === 'auto' ? 'autopromote' : 'promote',
     runId: latest.runId,
     fromConfigId: championState.configId,
     toConfigId: latest.challenger.configId,
+    fromFingerprint,
+    toFingerprint,
+    fromFamilyKey,
+    toFamilyKey,
     championConfigId: latest.challenger.configId,
     challengerConfigId: latest.challenger.configId,
     recommendation: 'promote',
@@ -1525,11 +1537,15 @@ async function runAutopromote(config, args) {
 
   const queuedManifestWithPath = withManifestPath(queuedManifest, queuedItem.manifestPath);
   const historyEvents = await loadHistoryEvents(config);
+  const lineage = summarizePromotionLineage({
+    historyEvents,
+    limit: config.autoPromotion?.lineagePolicy?.lookbackPromotions ?? 6,
+  });
   const action = decideAutoPromotionAction({
     latestManifest: queuedManifestWithPath,
     historyEvents,
     championState,
-    policy: config.autoPromotion,
+    policy: { ...config.autoPromotion, lineage },
   });
   const queuedAction = decideQueuedPromotionAction({
     queuedItem,
@@ -1668,3 +1684,4 @@ if (pathToFileURL(process.argv[1] || '').href === import.meta.url) {
     process.exit(1);
   });
 }
+

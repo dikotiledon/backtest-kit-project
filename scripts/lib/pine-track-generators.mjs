@@ -217,7 +217,7 @@ function getPatchPool(family, base) {
   return incumbentLocalPatches(base);
 }
 
-function getFallbackPatchPool(families = [], base = {}) {
+function getFallbackPatchPool(families = [], base = {}, { interleave = false } = {}) {
   const normalizedFamilies = Array.isArray(families) && families.length > 0
     ? families.map((item) => String(item).toLowerCase())
     : ['signal', 'risk'];
@@ -244,9 +244,35 @@ function getFallbackPatchPool(families = [], base = {}) {
       { trailAtrMult: Math.max(0.5, numeric(base.trailAtrMult ?? 1) - 0.25) },
       { trailActivateR: numeric(base.trailActivateR ?? 0.5) + 0.5 },
     ],
+    'exit-state': [
+      { minBarsBetween: lowerBound((base.minBarsBetween ?? 2) + 1, 0), slAtrMult: lowerBound((base.slAtrMult ?? 1) - 0.25, 0.25) },
+      { minPredSum: lowerBound((base.minPredSum ?? 2) - 0.25, 0.5), tpAtrMult: numeric(base.tpAtrMult ?? 2.5) + 0.5 },
+      { minPredSum: numeric(base.minPredSum ?? 2) + 0.25, trailAtrMult: Math.max(0.5, numeric(base.trailAtrMult ?? 1) - 0.25) },
+    ],
+    asymmetry: [
+      { minPredSum: lowerBound((base.minPredSum ?? 2) - 0.25, 0.5), slAtrMult: lowerBound((base.slAtrMult ?? 1) - 0.25, 0.25) },
+      { minPredSum: numeric(base.minPredSum ?? 2) + 0.25, tpAtrMult: numeric(base.tpAtrMult ?? 2.5) + 0.5 },
+      { minBarsBetween: numeric(base.minBarsBetween ?? 2) + 1, trailActivateR: numeric(base.trailActivateR ?? 0.5) + 0.5 },
+    ],
   };
 
-  return normalizedFamilies.flatMap((family) => (pools[family] || []).map((patch) => ({ family, patch })));
+  const familyPools = normalizedFamilies
+    .map((family) => ({ family, patches: pools[family] || [] }))
+    .filter((entry) => entry.patches.length > 0);
+
+  if (!interleave) {
+    return familyPools.flatMap((entry) => entry.patches.map((patch) => ({ family: entry.family, patch })));
+  }
+
+  const maxLength = familyPools.reduce((max, entry) => Math.max(max, entry.patches.length), 0);
+  const mixed = [];
+  for (let index = 0; index < maxLength; index++) {
+    for (const entry of familyPools) {
+      if (!entry.patches[index]) continue;
+      mixed.push({ family: entry.family, patch: entry.patches[index] });
+    }
+  }
+  return mixed;
 }
 
 function extractPatchObject(patch = {}) {
@@ -294,11 +320,22 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
   const includeFallback = budgetPolicy.includeFallback === true;
   const escapeActive = selfLoopEscape.enabled === true
     && (schedulerState.noNewCandidateStreak ?? 0) >= (selfLoopEscape.activateAfter ?? 1);
-  const fallbackFamilies = Array.isArray(selfLoopEscape.fallbackFamilies) && selfLoopEscape.fallbackFamilies.length > 0
+  const rawStagnationLevel = Number(schedulerState?.stagnationLevel ?? 0);
+  const stagnationLevel = Number.isFinite(rawStagnationLevel) ? Math.max(0, Math.floor(rawStagnationLevel)) : 0;
+  const configuredFallbackFamilies = Array.isArray(selfLoopEscape.fallbackFamilies) && selfLoopEscape.fallbackFamilies.length > 0
     ? selfLoopEscape.fallbackFamilies
     : ['signal', 'risk'];
+  const stagnationFallbackFamilies = stagnationLevel >= 2
+    && Array.isArray(selfLoopEscape.stagnationFallbackFamilies)
+    && selfLoopEscape.stagnationFallbackFamilies.length > 0
+    ? selfLoopEscape.stagnationFallbackFamilies
+    : configuredFallbackFamilies;
+  const fallbackFamilies = stagnationFallbackFamilies;
+  const fallbackInterleave = stagnationLevel >= 2;
   const minFallbackConfigs = Math.max(0, Number(selfLoopEscape.minFallbackConfigs ?? 3) || 0);
-  const selfLoopFallbackPool = escapeActive && includeSelfLoopFallback ? getFallbackPatchPool(fallbackFamilies, base) : [];
+  const selfLoopFallbackPool = escapeActive && includeSelfLoopFallback
+    ? getFallbackPatchPool(fallbackFamilies, base, { interleave: fallbackInterleave })
+    : [];
   const trackLimit = Math.max(0, Math.min(limit, pool.length));
   const tabuSet = normalizeTabuCache(schedulerState.tabuRejectedFingerprints);
   let tabuSkipped = 0;
@@ -329,10 +366,22 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
 
   if (escapeActive && includeSelfLoopFallback) {
     const fallbackCandidates = [];
-    const temperatureBoost = Number.isFinite(Number(selfLoopEscape.temperatureBoost))
+    const baseTemperatureBoost = Number.isFinite(Number(selfLoopEscape.temperatureBoost))
       ? Number(selfLoopEscape.temperatureBoost)
       : 1.5;
-    const fallbackTemperature = Number((Math.max(1, temperature) * Math.max(1, temperatureBoost)).toFixed(4));
+    const stagnationTemperatureBoost = Number.isFinite(Number(selfLoopEscape.stagnationTemperatureBoost))
+      ? Number(selfLoopEscape.stagnationTemperatureBoost)
+      : 1;
+    const temperatureBoost = stagnationLevel > 0
+      ? Math.max(baseTemperatureBoost, baseTemperatureBoost * Math.max(1, stagnationTemperatureBoost))
+      : baseTemperatureBoost;
+    const maxTemperature = Number.isFinite(Number(budgetPolicy.annealing?.maxTemperature))
+      ? Number(budgetPolicy.annealing.maxTemperature)
+      : 6;
+    const uncappedFallbackTemperature = Math.max(1, temperature) * Math.max(1, temperatureBoost);
+    const fallbackTemperature = Number((stagnationLevel > 0
+      ? Math.min(maxTemperature, uncappedFallbackTemperature)
+      : uncappedFallbackTemperature).toFixed(4));
     let fallbackSkipped = 0;
     for (let probe = 0; probe < selfLoopFallbackPool.length && fallbackCandidates.length < limit; probe++) {
       const { family: fallbackFamily, patch: rawPatch } = selfLoopFallbackPool[(offset + probe) % selfLoopFallbackPool.length];

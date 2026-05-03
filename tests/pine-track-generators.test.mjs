@@ -390,6 +390,195 @@ test('self-loop fallback temperature never shrinks below normal mutation scale',
   assert.equal(fallback.temperature, 1.5);
 });
 
+test('buildTrackCandidateBatch preserves legacy fallback ordering when stagnation is not active', () => {
+  const batch = buildTrackCandidateBatch({
+    track: { trackId: 'squeeze-context', sourceFamily: 'squeeze' },
+    incumbent,
+    maxConfigs: 8,
+    historyEvents: [],
+    schedulerState: { noNewCandidateStreak: 2, stagnationLevel: 0, tabuRejectedFingerprints: [] },
+    budgetPolicy: {
+      selfLoopEscape: {
+        enabled: true,
+        activateAfter: 1,
+        includeFallback: true,
+        fallbackFamilies: ['signal', 'risk'],
+        minFallbackConfigs: 8,
+        temperatureBoost: 1.5,
+      },
+    },
+  });
+
+  const fallbackFamilies = batch
+    .filter((item) => item.lane === 'self-loop-fallback')
+    .map((item) => item.family);
+
+  assert.deepEqual(fallbackFamilies.slice(0, 8), [
+    'signal',
+    'signal',
+    'signal',
+    'signal',
+    'signal',
+    'signal',
+    'risk',
+    'risk',
+  ]);
+});
+
+test('buildTrackCandidateBatch increases fallback diversity at stagnation level two', () => {
+  const batch = buildTrackCandidateBatch({
+    track: { trackId: 'squeeze-context', sourceFamily: 'squeeze' },
+    incumbent: {
+      minPredSum: 1.8,
+      tpAtrMult: 6.85,
+      slAtrMult: 0.5,
+      useSqueezeContext: true,
+      useDivergenceContext: true,
+    },
+    maxConfigs: 6,
+    historyEvents: [],
+    schedulerState: { noNewCandidateStreak: 4, stagnationLevel: 2, tabuRejectedFingerprints: [] },
+    budgetPolicy: {
+      selfLoopEscape: {
+        enabled: true,
+        activateAfter: 1,
+        includeFallback: true,
+        fallbackFamilies: ['signal', 'risk'],
+        stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'asymmetry'],
+        minFallbackConfigs: 4,
+        temperatureBoost: 1.5,
+      },
+    },
+  });
+
+  const fallbackFamilies = new Set(batch.filter((item) => item.lane === 'self-loop-fallback').map((item) => item.family));
+  assert.equal(batch.length, 6);
+  assert.equal(fallbackFamilies.has('exit-state') || fallbackFamilies.has('asymmetry'), true);
+});
+
+test('buildTrackCandidateBatch applies stronger fallback temperature when stagnation boost is active', () => {
+  const baseInput = {
+    track: { trackId: 'divergence-context', sourceFamily: 'divergence' },
+    incumbent: { minPredSum: 1.8, tpAtrMult: 6.85, slAtrMult: 0.5, useDivergenceContext: true },
+    maxConfigs: 4,
+    historyEvents: [],
+    budgetPolicy: {
+      annealing: { enabled: true, baseTemperature: 0.5, growthFactor: 1.5, maxTemperature: 3 },
+      selfLoopEscape: {
+        enabled: true,
+        activateAfter: 1,
+        includeFallback: true,
+        fallbackFamilies: ['signal', 'risk'],
+        minFallbackConfigs: 2,
+        temperatureBoost: 1.5,
+        stagnationTemperatureBoost: 2,
+      },
+    },
+  };
+
+  const baselineBatch = buildTrackCandidateBatch({
+    ...baseInput,
+    schedulerState: { noNewCandidateStreak: 4, stagnationLevel: 0, tabuRejectedFingerprints: [] },
+  });
+  const stagnatedBatch = buildTrackCandidateBatch({
+    ...baseInput,
+    schedulerState: { noNewCandidateStreak: 4, stagnationLevel: 1, tabuRejectedFingerprints: [] },
+  });
+
+  const fallbackKey = (item) => `${item.family}:${item.variantId}`;
+  const baselineByFingerprint = new Map(
+    baselineBatch
+      .filter((item) => item.lane === 'self-loop-fallback')
+      .map((item) => [fallbackKey(item), item.temperature]),
+  );
+  const stagnatedByFingerprint = new Map(
+    stagnatedBatch
+      .filter((item) => item.lane === 'self-loop-fallback')
+      .map((item) => [fallbackKey(item), item.temperature]),
+  );
+
+  const sharedFingerprints = [...baselineByFingerprint.keys()].filter((key) => stagnatedByFingerprint.has(key));
+  assert.ok(sharedFingerprints.length > 0);
+  assert.equal(
+    sharedFingerprints.some((key) => stagnatedByFingerprint.get(key) > baselineByFingerprint.get(key)),
+    true,
+  );
+});
+
+test('buildTrackCandidateBatch treats malformed stagnation levels as zero', () => {
+  const baseInput = {
+    track: { trackId: 'divergence-context', sourceFamily: 'divergence' },
+    incumbent: { minPredSum: 1.8, tpAtrMult: 6.85, slAtrMult: 0.5, useDivergenceContext: true },
+    maxConfigs: 6,
+    historyEvents: [],
+    budgetPolicy: {
+      annealing: { enabled: true, baseTemperature: 1.4, growthFactor: 1, maxTemperature: 4 },
+      selfLoopEscape: {
+        enabled: true,
+        activateAfter: 1,
+        includeFallback: true,
+        fallbackFamilies: ['signal', 'risk'],
+        stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'asymmetry'],
+        minFallbackConfigs: 3,
+        temperatureBoost: 1.5,
+        stagnationTemperatureBoost: 2,
+      },
+    },
+  };
+
+  const baseline = buildTrackCandidateBatch({
+    ...baseInput,
+    schedulerState: { noNewCandidateStreak: 4, stagnationLevel: 0, tabuRejectedFingerprints: [] },
+  });
+  const infinity = buildTrackCandidateBatch({
+    ...baseInput,
+    schedulerState: { noNewCandidateStreak: 4, stagnationLevel: Number.POSITIVE_INFINITY, tabuRejectedFingerprints: [] },
+  });
+  const negative = buildTrackCandidateBatch({
+    ...baseInput,
+    schedulerState: { noNewCandidateStreak: 4, stagnationLevel: -1, tabuRejectedFingerprints: [] },
+  });
+  const nan = buildTrackCandidateBatch({
+    ...baseInput,
+    schedulerState: { noNewCandidateStreak: 4, stagnationLevel: Number.NaN, tabuRejectedFingerprints: [] },
+  });
+
+  const summarizeFallback = (items) => items
+    .filter((item) => item.lane === 'self-loop-fallback')
+    .map((item) => ({ family: item.family, temperature: item.temperature }));
+
+  assert.deepEqual(summarizeFallback(infinity), summarizeFallback(baseline));
+  assert.deepEqual(summarizeFallback(negative), summarizeFallback(baseline));
+  assert.deepEqual(summarizeFallback(nan), summarizeFallback(baseline));
+});
+
+test('buildTrackCandidateBatch caps fallback temperature at annealing maxTemperature', () => {
+  const batch = buildTrackCandidateBatch({
+    track: { trackId: 'divergence-context', sourceFamily: 'divergence' },
+    incumbent: { minPredSum: 1.8, tpAtrMult: 6.85, slAtrMult: 0.5, useDivergenceContext: true },
+    maxConfigs: 6,
+    historyEvents: [],
+    schedulerState: { noNewCandidateStreak: 6, stagnationLevel: 4, tabuRejectedFingerprints: [] },
+    budgetPolicy: {
+      annealing: { enabled: true, baseTemperature: 1.8, growthFactor: 2.5, maxTemperature: 2 },
+      selfLoopEscape: {
+        enabled: true,
+        activateAfter: 1,
+        includeFallback: true,
+        fallbackFamilies: ['signal', 'risk'],
+        minFallbackConfigs: 3,
+        temperatureBoost: 3,
+        stagnationTemperatureBoost: 3,
+      },
+    },
+  });
+
+  const fallbackTemps = batch.filter((item) => item.lane === 'self-loop-fallback').map((item) => item.temperature);
+  assert.ok(fallbackTemps.length > 0);
+  assert.equal(fallbackTemps.every((value) => value <= 2), true);
+  assert.equal(fallbackTemps.some((value) => value === 2), true);
+});
+
 test('hard rotation advances to the next enabled track instead of re-picking the same one', () => {
   const tracks = normalizeResearchTracks([
     { trackId: 'track-a', name: 'Track A', gridName: 'grid-a', enabled: true },

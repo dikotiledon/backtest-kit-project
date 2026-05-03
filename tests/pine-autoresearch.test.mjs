@@ -2112,7 +2112,81 @@ test('buildScoutOrchestrationState does not inherit a stale lastRotationTrigger'
   assert.equal(result.manifest.rotationReason, null);
 });
 
+test('buildScoutOrchestrationState exposes stagnation metadata in manifest', () => {
+  const result = buildScoutOrchestrationState({
+    config: {
+      researchRoot: 'pine/autoresearch/test',
+      matrixId: 'test-matrix',
+      grid: 'phase3-core',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 1, paretoShortlistSize: 1 },
+      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 1, minShadowPassRatio: 1, requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+    },
+    runId: 'run-stagnation',
+    championState: {
+      configId: 'champion-a',
+      score: 100,
+      tradeCount: 100,
+      roiPct: 50,
+      profitFactor: 2,
+      maxDrawdownPct: 3,
+      config: { minPredSum: 1.8 },
+    },
+    historyEventsBefore: [],
+    searchBatch: [],
+    primarySweep: { topConfigs: [] },
+    matrixCandidates: [],
+    trackState: {
+      activeTrackId: 'track-a',
+      noNewCandidateStreak: 3,
+      stagnationLevel: 2,
+      stagnationReason: 'noNewCandidateStreak',
+      lastEscalatedAt: '2026-05-03T00:00:00.000Z',
+    },
+  });
 
+  assert.equal(result.manifest.noNewCandidateStreak, 3);
+  assert.equal(result.manifest.stagnationLevel, 2);
+  assert.equal(result.manifest.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(result.manifest.lastEscalatedAt, '2026-05-03T00:00:00.000Z');
+
+  const resultWithoutEscalation = buildScoutOrchestrationState({
+    config: {
+      researchRoot: 'pine/autoresearch/test',
+      matrixId: 'test-matrix',
+      grid: 'phase3-core',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 1, paretoShortlistSize: 1 },
+      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 1, minShadowPassRatio: 1, requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+    },
+    runId: 'run-stagnation-default-null',
+    championState: {
+      configId: 'champion-a',
+      score: 100,
+      tradeCount: 100,
+      roiPct: 50,
+      profitFactor: 2,
+      maxDrawdownPct: 3,
+      config: { minPredSum: 1.8 },
+    },
+    historyEventsBefore: [],
+    searchBatch: [],
+    primarySweep: { topConfigs: [] },
+    matrixCandidates: [],
+    trackState: {
+      activeTrackId: 'track-a',
+      noNewCandidateStreak: 3,
+      stagnationLevel: 2,
+      stagnationReason: 'noNewCandidateStreak',
+    },
+  });
+
+  assert.equal(resultWithoutEscalation.manifest.lastEscalatedAt, null);
+});
 
 
 test('promotion history event records from/to fingerprints and family keys', async () => {

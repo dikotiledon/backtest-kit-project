@@ -24,7 +24,14 @@
         "risk"
       ],
       "minFallbackConfigs": 3,
-      "temperatureBoost": 1.5
+      "temperatureBoost": 1.5,
+      "stagnationFallbackFamilies": [
+        "signal",
+        "risk",
+        "exit-state",
+        "asymmetry"
+      ],
+      "stagnationTemperatureBoost": 2
     },
     "annealing": {
       "enabled": true,
@@ -78,7 +85,14 @@
     "noNoveltyRotateAfter": 2,
     "maxCyclesPerTrack": 6,
     "preferCurrentChampionUntil": 2,
-    "cooldownCyclesAfterPromote": 1
+    "cooldownCyclesAfterPromote": 1,
+    "stagnation": {
+      "enabled": true,
+      "noNewCandidateEscalateAfter": 3,
+      "holdEscalateAfter": 5,
+      "highSimilarityThreshold": 0.9,
+      "maxStagnationLevel": 3
+    }
   },
   "noveltyPolicy": {
     "signatureFields": [
@@ -247,9 +261,28 @@
   },
   "autoPromotion": {
     "enabled": true,
-    "cooldownHours": 1,
-    "maxPromotionsPerDay": 24,
-    "requireMatrixPromotion": true
+    "cooldownHours": 12,
+    "maxPromotionsPerDay": 2,
+    "requireMatrixPromotion": true,
+    "lineagePolicy": {
+      "enabled": true,
+      "lookbackPromotions": 6,
+      "familyKeys": [
+        "useSignalFusion",
+        "useFusionV2",
+        "useFusionV3",
+        "useFusionV4",
+        "useDivergenceContext",
+        "useSqueezeContext",
+        "useSupertrendFilter",
+        "useTrailingStop",
+        "useStopsTP"
+      ],
+      "baseShadowPassCount": 3,
+      "directReversalExtraShadowPasses": 1,
+      "minExtraAggregateScoreDelta": 5,
+      "minExtraAggregateRoiDeltaPct": 0
+    }
   },
   "retention": {
     "keepLatestRuns": 8,

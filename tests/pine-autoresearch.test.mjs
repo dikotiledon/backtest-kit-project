@@ -2327,6 +2327,8 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
       fallbackFamilies: ['signal', 'risk'],
       minFallbackConfigs: 3,
       temperatureBoost: 1.5,
+      stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'asymmetry'],
+      stagnationTemperatureBoost: 2,
     },
     annealing: {
       enabled: true,
@@ -2456,6 +2458,100 @@ test('loadConfig normalizes blind holdout labs with slug + merged thresholds', a
     minTradeCount: 111,
     minTradeRatioVsIncumbent: 0.75,
   });
+});
+
+
+
+test('loadConfig exposes lineage and stagnation guardrail defaults', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-elite-config-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'elite-config-test',
+      scriptPath,
+      researchRoot: path.join(dir, 'research'),
+      digestRoot: path.join(dir, 'digest'),
+      baseConfig: { minPredSum: 1.8 },
+      autoPromotion: { enabled: true },
+      rotationPolicy: {},
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    assert.equal(config.autoPromotion.requireMatrixPromotion, true);
+    assert.equal(config.autoPromotion.lineagePolicy.enabled, true);
+    assert.equal(config.autoPromotion.lineagePolicy.lookbackPromotions, 6);
+    assert.equal(config.rotationPolicy.stagnation.enabled, true);
+    assert.equal(config.rotationPolicy.stagnation.noNewCandidateEscalateAfter, 3);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig preserves lineagePolicy defaults when raw overrides only one field', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-elite-config-lineage-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'elite-config-lineage-partial',
+      scriptPath,
+      researchRoot: path.join(dir, 'research'),
+      digestRoot: path.join(dir, 'digest'),
+      baseConfig: { minPredSum: 1.8 },
+      autoPromotion: {
+        enabled: true,
+        lineagePolicy: {
+          enabled: false,
+        },
+      },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    assert.equal(config.autoPromotion.enabled, true);
+    assert.equal(config.autoPromotion.lineagePolicy.enabled, false);
+    assert.equal(config.autoPromotion.lineagePolicy.lookbackPromotions, 6);
+    assert.ok(Array.isArray(config.autoPromotion.lineagePolicy.familyKeys));
+    assert.ok(config.autoPromotion.lineagePolicy.familyKeys.includes('useFusionV4'));
+    assert.equal(config.autoPromotion.lineagePolicy.baseShadowPassCount, 3);
+    assert.equal(config.autoPromotion.lineagePolicy.directReversalExtraShadowPasses, 1);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('loadConfig preserves stagnation defaults when raw overrides subset of fields', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-elite-config-stagnation-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'elite-config-stagnation-partial',
+      scriptPath,
+      researchRoot: path.join(dir, 'research'),
+      digestRoot: path.join(dir, 'digest'),
+      baseConfig: { minPredSum: 1.8 },
+      autoPromotion: { enabled: true },
+      rotationPolicy: {
+        stagnation: {
+          enabled: false,
+          maxStagnationLevel: 7,
+        },
+      },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    assert.equal(config.rotationPolicy.stagnation.enabled, false);
+    assert.equal(config.rotationPolicy.stagnation.maxStagnationLevel, 7);
+    assert.equal(config.rotationPolicy.stagnation.noNewCandidateEscalateAfter, 3);
+    assert.equal(config.rotationPolicy.stagnation.holdEscalateAfter, 5);
+    assert.equal(config.rotationPolicy.stagnation.highSimilarityThreshold, 0.9);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('partitionLabs keeps blind holdout out of selection labs', () => {

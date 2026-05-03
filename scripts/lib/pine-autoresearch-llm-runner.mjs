@@ -913,7 +913,31 @@ export async function runLlmAutoresearch({
       });
 
       if (!proposal.ok) {
-        break;
+        const ok = proposal.reason === 'proposal_unavailable';
+        const status = await writeProviderStatus(paths, buildStatus({
+          ok,
+          reason: proposal.reason,
+          command,
+          scheduled,
+          matrixId: paths.matrixId,
+          providerMode: baseProvider.mode,
+          details: {
+            reviewSummary,
+            quality,
+          },
+        }));
+
+        await writeJson(paths.memory, updateResearchMemory(memory, {
+          pendingReviewCount: reviewSummary.unresolvedCount,
+        }, config.memory ?? {}));
+
+        return {
+          ok,
+          reason: proposal.reason,
+          status,
+          quality,
+          reviewSummary,
+        };
       }
 
       try {

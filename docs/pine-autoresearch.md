@@ -251,3 +251,45 @@ Planned companion docs:
 Existing context docs:
 - [Pine autoresearch cron loop](./2026-04-21-pine-autoresearch-cron.md)
 - [Pine autoresearch anti-curvefit protocol](./2026-04-29-pine-autoresearch-anti-curvefit.md)
+
+## Elite autonomous research guardrails
+
+The non-LLM autoresearch lane is designed as a guarded autonomous research system, not a blind optimizer.
+
+Autopromote is allowed only when all layers agree:
+
+1. the cycle wrote an exact manifest
+2. matrix decision is `promote`
+3. candidate differs from current champion
+4. expectancy policy does not reject the improvement, when the expectancy gate is enabled
+5. promotion queue still matches the exact manifest and champion fingerprint at decision time
+6. cooldown and daily quota pass
+7. lineage anti-ping-pong gate passes
+
+### Why promotion speed is capped
+
+Research can run often. Promotion is durable champion replacement. Every promotion changes the baseline for future comparisons, so unattended promotion must limit champion churn even when matrix gates are strong.
+
+Recommended policy settings:
+
+These are operator presets expressed as direct `autoPromotion.cooldownHours` and `autoPromotion.maxPromotionsPerDay` values, not runtime profile names.
+
+| Profile | cooldownHours | maxPromotionsPerDay | Use |
+|---|---:|---:|---|
+| Conservative production | 24 | 1 | safest unattended champion evolution |
+| Balanced autonomous | 12 | 2 | checked-in balanced default in `config/pine-autoresearch.default.json` |
+| Aggressive lab | 6 | 4 | sandbox or high-observation mode |
+
+Do not use 24 promotions/day for live champion state unless the run is explicitly a lab experiment.
+
+### Anti-ping-pong lineage
+
+Promotion history records from/to fingerprints and family keys. If a candidate tries to reverse a recent promotion, autopromote blocks it unless the new evidence has extra margin.
+
+This prevents A → B → A → B churn caused by micro-regime noise.
+
+### N-run escape
+
+Repeated no-new-candidate, high-similarity hold, or same-track stagnation increases `stagnationLevel` in scheduler state. Higher stagnation level widens fallback families and raises mutation temperature.
+
+Stagnation escape changes search pressure only. It never weakens matrix, expectancy, queue, cooldown, or lineage promotion gates.

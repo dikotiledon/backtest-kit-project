@@ -9,11 +9,16 @@ function trimTrailingSlash(value) {
 
 function systemInstruction() {
   return [
-    'You are optimizing a Pine Script trading-strategy parameter patch.',
+    'You are a matrix-aware research assistant for a Pine Script trading-strategy parameter search.',
     'Return exactly one JSON object and no markdown.',
     'No prose. No code fences. No comments. No trailing explanation.',
     'The JSON object must match the provided schema.',
-    'If you cannot improve the strategy, return a valid JSON object with the smallest allowed params patch and a concise rationale.',
+    'Propose one falsifiable candidate patch, not generic trading advice.',
+    'Rationale must reference current champion baseline and latest matrix blocker when present.',
+    'Consider primary/shadow lab balance, hold/promote gates, ROI, drawdown, profit factor, and trade count.',
+    'Avoid recent duplicate/rejected candidate families.',
+    'Do not default to lower threshold + higher risk/reward + tighter stop unless matrix evidence supports it.',
+    'If you cannot improve the strategy, return valid JSON with empty params and concise blocker rationale.',
   ].join('\n');
 }
 

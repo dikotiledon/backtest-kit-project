@@ -39,11 +39,28 @@ test('buildChatCompletionsRequest creates non-streaming structured JSON request'
   assert.match(request.messages[0].content, /no markdown/i);
   assert.match(request.messages[0].content, /No code fences/);
   assert.match(request.messages[0].content, /If you cannot improve the strategy/);
-  assert.doesNotMatch(request.messages[0].content, /empty params object/);
-  assert.match(request.messages[0].content, /smallest allowed params patch/);
+  assert.match(request.messages[0].content, /empty params/i);
+  assert.match(request.messages[0].content, /falsifiable/i);
   assert.deepEqual(request.messages[1], { role: 'user', content: 'candidate prompt' });
   assert.equal(request.response_format.type, 'json_schema');
   assert.equal(request.response_format.json_schema.strict, true);
+});
+
+test('chat completions developer instruction demands matrix-aware non-generic candidate', () => {
+  const request = buildChatCompletionsRequest({
+    provider: { model: 'model-a' },
+    prompt: 'prompt-a',
+    allowlist: {
+      parameters: [{ key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1, mutability: 'tunable' }],
+    },
+  });
+
+  const developer = request.messages.find((message) => message.role === 'developer')?.content ?? '';
+  assert.match(developer, /matrix-aware research/i);
+  assert.match(developer, /current champion/i);
+  assert.match(developer, /latest matrix blocker/i);
+  assert.match(developer, /generic trading advice/i);
+  assert.match(developer, /falsifiable/i);
 });
 
 test('buildResponsesRequest creates non-streaming structured JSON request', () => {
@@ -63,8 +80,8 @@ test('buildResponsesRequest creates non-streaming structured JSON request', () =
   assert.match(request.instructions, /no markdown/i);
   assert.match(request.instructions, /No code fences/);
   assert.match(request.instructions, /If you cannot improve the strategy/);
-  assert.doesNotMatch(request.instructions, /empty params object/);
-  assert.match(request.instructions, /smallest allowed params patch/);
+  assert.match(request.instructions, /empty params/i);
+  assert.match(request.instructions, /falsifiable/i);
   assert.equal(request.input, 'candidate prompt');
   assert.equal(request.text.format.type, 'json_schema');
   assert.equal(request.text.format.strict, true);

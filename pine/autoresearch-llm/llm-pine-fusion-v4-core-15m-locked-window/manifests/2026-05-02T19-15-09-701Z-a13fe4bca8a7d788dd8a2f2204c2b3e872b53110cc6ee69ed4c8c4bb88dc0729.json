@@ -1,0 +1,62 @@
+{
+  "lane": "llm",
+  "createdAt": "2026-05-02T19:15:09.701Z",
+  "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-02T19-02-01-489Z-a13fe4bca8a7",
+  "matrixId": "pine-fusion-v4-core-15m-locked-window",
+  "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:a13fe4bca8a7d788dd8a2f2204c2b3e872b53110cc6ee69ed4c8c4bb88dc0729",
+  "candidateFingerprint": "a13fe4bca8a7d788dd8a2f2204c2b3e872b53110cc6ee69ed4c8c4bb88dc0729",
+  "parentChampionFingerprint": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "candidate": {
+    "params": {
+      "minPredSum": 1.2,
+      "riskRewardRatio": 2,
+      "stopLossPct": 0.5
+    },
+    "rationale": "Lower minPredSum to capture more signals, increase riskRewardRatio for better reward, tighten stopLossPct to limit losses.",
+    "patch": {
+      "minPredSum": 1.2,
+      "riskRewardRatio": 2,
+      "stopLossPct": 0.5
+    }
+  },
+  "provider": {
+    "mode": "openai-chat-completions"
+  },
+  "metricsDelta": {
+    "recommendation": "hold",
+    "summary": "Hold champion 0003__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-5.5__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21: matrix failed primaryPromote gate(s).",
+    "labCount": 6,
+    "promotedLabCount": 3,
+    "aggregateScoreDelta": 13.28,
+    "aggregateRoiDeltaPct": 15.15,
+    "aggregateProfitFactorDelta": 0.1,
+    "aggregateDrawdownDeltaPct": 0.77
+  },
+  "matrixDecision": {
+    "recommendation": "hold",
+    "summary": "Hold champion 0003__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-5.5__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21: matrix failed primaryPromote gate(s).",
+    "gates": {
+      "candidateChanged": true,
+      "primaryPromote": false,
+      "shadowPassCount": true,
+      "shadowPassRatio": true
+    },
+    "failedGates": [
+      "primaryPromote"
+    ],
+    "counts": {
+      "totalLabs": 6,
+      "shadowLabs": 5,
+      "allPassCount": 3,
+      "shadowPassCount": 3,
+      "shadowPassRatio": 0.6
+    },
+    "policy": {
+      "requirePrimaryPromote": true,
+      "minShadowPassCount": 3,
+      "minShadowPassRatio": 0.6,
+      "requireCandidateChange": true
+    }
+  },
+  "evaluationManifestPath": "D:\\Code\\Experiment\\backtest-kit-project\\pine\\autoresearch\\pine-fusion-v4-core-15m-locked-window\\manifests\\llm-pine-fusion-v4-core-15m-locked-window-2026-05-02T19-02-01-489Z-a13fe4bca8a7.json"
+}

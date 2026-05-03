@@ -5,6 +5,24 @@
       "candidateFingerprint": "d44b17bd8f69b7dbb2b5bf4f9bd35b00b88b5329cd3b933e8b72e95fc161a6b9",
       "status": "completed",
       "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-02T13-44-14-127Z-d44b17bd8f69"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:a13fe4bca8a7d788dd8a2f2204c2b3e872b53110cc6ee69ed4c8c4bb88dc0729",
+      "candidateFingerprint": "a13fe4bca8a7d788dd8a2f2204c2b3e872b53110cc6ee69ed4c8c4bb88dc0729",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-02T19-02-01-489Z-a13fe4bca8a7"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:c3b417820e31033ef2acbddd91a7219b25298002ce5d5c3caed1533c237abe0a",
+      "candidateFingerprint": "c3b417820e31033ef2acbddd91a7219b25298002ce5d5c3caed1533c237abe0a",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-03T07-01-53-172Z-c3b417820e31"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:99748a25c58ad9170d4e874a11da26f37cb19391610a22dc22066b3f63c9509a",
+      "candidateFingerprint": "99748a25c58ad9170d4e874a11da26f37cb19391610a22dc22066b3f63c9509a",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-03T09-17-18-483Z-99748a25c58a"
     }
   ],
   "topWinners": [
@@ -20,6 +38,48 @@
         "aggregateRoiDeltaPct": -87.9,
         "aggregateProfitFactorDelta": 0.88,
         "aggregateDrawdownDeltaPct": -3.25
+      }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:a13fe4bca8a7d788dd8a2f2204c2b3e872b53110cc6ee69ed4c8c4bb88dc0729",
+      "candidateFingerprint": "a13fe4bca8a7d788dd8a2f2204c2b3e872b53110cc6ee69ed4c8c4bb88dc0729",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0003__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-5.5__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21: matrix failed primaryPromote gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 3,
+        "aggregateScoreDelta": 13.28,
+        "aggregateRoiDeltaPct": 15.15,
+        "aggregateProfitFactorDelta": 0.1,
+        "aggregateDrawdownDeltaPct": 0.77
+      }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:c3b417820e31033ef2acbddd91a7219b25298002ce5d5c3caed1533c237abe0a",
+      "candidateFingerprint": "c3b417820e31033ef2acbddd91a7219b25298002ce5d5c3caed1533c237abe0a",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0004__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.65__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.6__divShortBoostValue-0.6: matrix failed primaryPromote gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 3,
+        "aggregateScoreDelta": 10.81,
+        "aggregateRoiDeltaPct": 14.27,
+        "aggregateProfitFactorDelta": 0.01,
+        "aggregateDrawdownDeltaPct": 1.49
+      }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:99748a25c58ad9170d4e874a11da26f37cb19391610a22dc22066b3f63c9509a",
+      "candidateFingerprint": "99748a25c58ad9170d4e874a11da26f37cb19391610a22dc22066b3f63c9509a",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 3,
+        "aggregateScoreDelta": 10.87,
+        "aggregateRoiDeltaPct": 14.33,
+        "aggregateProfitFactorDelta": 0.01,
+        "aggregateDrawdownDeltaPct": 1.49
       }
     }
   ],

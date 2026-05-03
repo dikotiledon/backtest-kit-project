@@ -247,8 +247,8 @@
   },
   "autoPromotion": {
     "enabled": true,
-    "cooldownHours": 24,
-    "maxPromotionsPerDay": 1,
+    "cooldownHours": 1,
+    "maxPromotionsPerDay": 24,
     "requireMatrixPromotion": true
   },
   "retention": {

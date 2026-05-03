@@ -12,15 +12,25 @@ function changedParamKeys(candidate) {
   return Object.keys(candidate.params).sort();
 }
 
+function toFiniteNumber(value) {
+  if (value === null || value === undefined) return Number.NaN;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : Number.NaN;
+  if (typeof value === 'bigint') return Number(value);
+  if (typeof value === 'symbol' || typeof value === 'function') return Number.NaN;
+  if (typeof value === 'object') return Number.NaN;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
 function isLowerThanChampion(key, candidate, champion) {
-  const next = Number(candidate?.params?.[key]);
-  const current = Number(champion?.[key]);
+  const next = toFiniteNumber(candidate?.params?.[key]);
+  const current = toFiniteNumber(champion?.[key]);
   return Number.isFinite(next) && Number.isFinite(current) && next < current;
 }
 
 function isHigherThanChampion(key, candidate, champion) {
-  const next = Number(candidate?.params?.[key]);
-  const current = Number(champion?.[key]);
+  const next = toFiniteNumber(candidate?.params?.[key]);
+  const current = toFiniteNumber(champion?.[key]);
   return Number.isFinite(next) && Number.isFinite(current) && next > current;
 }
 
@@ -152,6 +162,32 @@ export function scoreCandidateQuality({
   return result;
 }
 
+function safeCandidatePreview(candidate, maxLength = 1000) {
+  try {
+    const seen = new WeakSet();
+    const serialized = JSON.stringify(candidate ?? {}, (key, value) => {
+      if (typeof value === 'bigint') {
+        return String(value);
+      }
+      if (value && typeof value === 'object') {
+        if (seen.has(value)) {
+          return '[Circular]';
+        }
+        seen.add(value);
+      }
+      return value;
+    });
+
+    if (typeof serialized !== 'string') {
+      return '[unserializable candidate]';
+    }
+
+    return serialized.slice(0, maxLength);
+  } catch {
+    return '[unserializable candidate]';
+  }
+}
+
 export function buildQualityFeedbackPrompt(basePrompt, { quality, candidate } = {}) {
   return [
     String(basePrompt ?? ''),
@@ -160,7 +196,7 @@ export function buildQualityFeedbackPrompt(basePrompt, { quality, candidate } = 
     `Quality score: ${quality?.score ?? 'unknown'}`,
     `Flags: ${(quality?.flags ?? []).join(', ') || 'none'}`,
     `Notes: ${(quality?.notes ?? []).join(' ') || 'none'}`,
-    `Rejected candidate preview: ${JSON.stringify(candidate ?? {}).slice(0, 1000)}`,
+    `Rejected candidate preview: ${safeCandidatePreview(candidate, 1000)}`,
     '',
     'Revise candidate as matrix-aware research hypothesis:',
     '- reference current champion baseline or current parameter value;',

@@ -98,3 +98,77 @@ test('buildQualityFeedbackPrompt gives actionable re-ask instructions', () => {
   assert.match(prompt, /current champion baseline/);
   assert.match(prompt, /Return exactly one JSON object/);
 });
+
+test('scoreCandidateQuality handles missing args and malformed nested values without throw', () => {
+  assert.doesNotThrow(() => scoreCandidateQuality());
+
+  const result = scoreCandidateQuality({
+    candidate: { params: { minPredSum: { nested: true } }, rationale: null },
+    champion: { minPredSum: [1, 2, 3] },
+    memory: { recentCandidates: 'not-an-array' },
+    config: { quality: { minScore: 'bad' } },
+  });
+
+  assert.equal(typeof result, 'object');
+  assert.equal(typeof result.ok, 'boolean');
+  assert.equal(typeof result.score, 'number');
+  assert.equal(Array.isArray(result.flags), true);
+  assert.equal(Array.isArray(result.notes), true);
+});
+
+test('buildQualityFeedbackPrompt handles circular + BigInt candidate safely', () => {
+  const circular = { params: { minPredSum: 1.2 } };
+  circular.self = circular;
+  circular.big = 12n;
+
+  const prompt = buildQualityFeedbackPrompt('BASE', {
+    quality: { score: 10, flags: ['x'], notes: ['y'] },
+    candidate: circular,
+  });
+
+  assert.match(prompt, /Rejected candidate preview:/);
+  assert.match(prompt, /Return exactly one JSON object/);
+
+  const previewLine = prompt
+    .split('\n')
+    .find((line) => line.startsWith('Rejected candidate preview: '));
+  assert.equal(Boolean(previewLine), true);
+  assert.equal(previewLine.length <= 1028, true);
+});
+
+test('scoreCandidateQuality handles Symbol param values without throw', () => {
+  assert.doesNotThrow(() =>
+    scoreCandidateQuality({
+      candidate: {
+        params: {
+          minPredSum: Symbol('min'),
+          riskRewardRatio: Symbol('rr'),
+          stopLossPct: Symbol('sl'),
+        },
+        rationale:
+          'Champion baseline context with matrix primary promote and ROI note for robustness.',
+      },
+      champion,
+      memory,
+      config: { quality: { minScore: 70 } },
+    }),
+  );
+
+  const result = scoreCandidateQuality({
+    candidate: {
+      params: {
+        minPredSum: Symbol('min'),
+        riskRewardRatio: Symbol('rr'),
+        stopLossPct: Symbol('sl'),
+      },
+      rationale:
+        'Champion baseline context with matrix primary promote and ROI note for robustness.',
+    },
+    champion,
+    memory,
+    config: { quality: { minScore: 70 } },
+  });
+
+  assert.equal(typeof result, 'object');
+  assert.equal(Array.isArray(result.flags), true);
+});

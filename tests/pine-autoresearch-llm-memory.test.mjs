@@ -43,3 +43,36 @@ test('updateResearchMemory records candidate summary and pendingReviewCount', ()
   assert.equal(updated.pendingReviewCount, 3);
   assert.equal(updated.recentCandidates[0].candidateId, 'champ:cand');
 });
+
+test('updateResearchMemory records compact matrix blocker and failure lesson', () => {
+  const next = updateResearchMemory({}, {
+    type: 'completed',
+    candidate: { params: { minPredSum: 1.2, riskRewardRatio: 2.5, stopLossPct: 0.5 } },
+    metricsDelta: {
+      recommendation: 'hold',
+      summary: 'Hold champion: matrix failed primaryPromote gate(s).',
+      aggregateRoiDeltaPct: 15.15,
+      aggregateDrawdownDeltaPct: 0.77,
+      promotedLabCount: 3,
+      labCount: 6,
+    },
+  }, { recentCandidates: 20, failureLessons: 20 });
+
+  assert.equal(next.latestMatrixBlocker.recommendation, 'hold');
+  assert.match(next.latestMatrixBlocker.reason, /primaryPromote/);
+  assert.equal(next.latestMatrixBlocker.promotedLabCount, 3);
+  assert.equal(next.failureLessons.length, 1);
+  assert.match(next.failureLessons[0], /primaryPromote/);
+});
+
+test('updateResearchMemory records duplicate invalid response lesson', () => {
+  const next = updateResearchMemory({}, {
+    type: 'candidate_invalid',
+    reason: 'duplicate candidate fingerprint',
+    candidate: { params: { minPredSum: 1.2, riskRewardRatio: 2, stopLossPct: 1 } },
+  }, { recentCandidates: 20, failureLessons: 20 });
+
+  assert.equal(next.failureLessons.length, 1);
+  assert.match(next.failureLessons[0], /duplicate candidate fingerprint/);
+  assert.equal(next.recentCandidates[0].outcome, 'candidate_invalid');
+});

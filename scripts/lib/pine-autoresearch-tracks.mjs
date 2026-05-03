@@ -9,6 +9,14 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
+function normalizeNonNegativeInteger(value, fallback = 0) {
+  const numeric = typeof value === 'number' ? value : Number.NaN;
+  if (!Number.isFinite(numeric)) {
+    return fallback;
+  }
+  return Math.max(0, Math.floor(numeric));
+}
+
 function stableValue(value) {
   if (Array.isArray(value)) {
     return value.map((item) => stableValue(item));
@@ -140,6 +148,10 @@ export function defaultSchedulerState() {
     lastNoNewCandidateAt: null,
     lastRotationTrigger: null,
     lastPromotionEligibleAt: null,
+    stagnationLevel: 0,
+    stagnationReason: null,
+    lastEscalatedAt: null,
+    blockedPromotionFingerprints: [],
     tabuRejectedFingerprints: [],
   };
 }
@@ -230,7 +242,8 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
   const repeatedNovelty =
     noveltySignature === previous.lastNoveltySignature
     && championFingerprint === previous.lastChampionFingerprint;
-  const candidateChanged = candidateFingerprint != null && candidateFingerprint !== previous.lastCandidateFingerprint;
+  const candidateChanged = candidateFingerprint != null
+    && candidateFingerprint !== previous.lastCandidateFingerprint;
   const noChangeStreak = rotationHappened
     ? 0
     : candidateChanged
@@ -239,6 +252,50 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
   const noNewCandidateStreak = noNewCandidate
     ? previous.noNewCandidateStreak + 1
     : 0;
+
+  const stagnationPolicy = isPlainObject(policy.stagnation) ? policy.stagnation : {};
+  const stagnationEnabled = stagnationPolicy.enabled === true;
+  const maxStagnationLevel = Math.max(1, Number(stagnationPolicy.maxStagnationLevel ?? 3) || 3);
+  const noNewCandidateEscalateAfter = Math.max(1, Number(stagnationPolicy.noNewCandidateEscalateAfter ?? 3) || 3);
+  const holdEscalateAfter = Math.max(1, Number(stagnationPolicy.holdEscalateAfter ?? 5) || 5);
+  const highSimilarityThreshold = Number.isFinite(Number(stagnationPolicy.highSimilarityThreshold))
+    ? Number(stagnationPolicy.highSimilarityThreshold)
+    : 0.9;
+
+  let stagnationLevel = previous.stagnationLevel ?? 0;
+  let stagnationReason = previous.stagnationReason ?? null;
+  let lastEscalatedAt = previous.lastEscalatedAt ?? null;
+
+  if (stagnationEnabled && manifest.promotionEligible === true) {
+    stagnationLevel = 0;
+    stagnationReason = null;
+  } else if (stagnationEnabled) {
+    const noNewEscalates = noNewCandidateStreak >= noNewCandidateEscalateAfter;
+    const highSimilarityHold = manifest.promotionEligible === false
+      && noChangeStreak >= holdEscalateAfter
+      && Number.isFinite(manifest.topCandidateSimilarity)
+      && manifest.topCandidateSimilarity >= highSimilarityThreshold;
+    const nextReason = noNewEscalates ? 'noNewCandidateStreak' : highSimilarityHold ? 'highSimilarityHold' : null;
+    if (nextReason) {
+      const cadenceAnchor = nextReason === 'noNewCandidateStreak'
+        ? noNewCandidateStreak
+        : noChangeStreak;
+      const cadenceThreshold = nextReason === 'noNewCandidateStreak'
+        ? noNewCandidateEscalateAfter
+        : holdEscalateAfter;
+      const thresholdCrossed = cadenceAnchor === cadenceThreshold;
+      const cadenceBucketAdvanced = cadenceAnchor > cadenceThreshold
+        && cadenceAnchor % cadenceThreshold === 0;
+      const reasonTransitioned = previous.stagnationReason !== nextReason;
+
+      if (thresholdCrossed || cadenceBucketAdvanced || reasonTransitioned) {
+        stagnationLevel = Math.min(maxStagnationLevel, stagnationLevel + 1);
+        stagnationReason = nextReason;
+        lastEscalatedAt = manifest.generatedAt ?? previous.lastEscalatedAt ?? null;
+      }
+    }
+  }
+
   const tabuLimit = Number.isFinite(policy.tabuLimit) ? policy.tabuLimit : 128;
   const priorTabu = Array.isArray(previous.tabuRejectedFingerprints) ? previous.tabuRejectedFingerprints : [];
   const nextRejected = manifest.rejectedCandidateFingerprint && manifest.rejectedCandidateFingerprint !== championFingerprint
@@ -276,6 +333,12 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     lastPromotionEligibleAt: manifest.promotionEligible === true
       ? (manifest.promotionEligibleAt ?? manifest.generatedAt ?? previous.lastPromotionEligibleAt)
       : previous.lastPromotionEligibleAt,
+    stagnationLevel,
+    stagnationReason,
+    lastEscalatedAt,
+    blockedPromotionFingerprints: Array.isArray(previous.blockedPromotionFingerprints)
+      ? [...previous.blockedPromotionFingerprints]
+      : [],
     tabuRejectedFingerprints,
   };
 }
@@ -298,6 +361,18 @@ function normalizeSchedulerState(state = {}) {
       : base.lastNoNewCandidateAt,
     lastRotationTrigger: state.lastRotationTrigger ?? base.lastRotationTrigger,
     lastPromotionEligibleAt: state.lastPromotionEligibleAt ?? base.lastPromotionEligibleAt,
+    stagnationLevel: normalizeNonNegativeInteger(state.stagnationLevel, base.stagnationLevel),
+    stagnationReason: typeof state.stagnationReason === 'string' || state.stagnationReason === null
+      ? state.stagnationReason
+      : base.stagnationReason,
+    lastEscalatedAt: typeof state.lastEscalatedAt === 'string' || state.lastEscalatedAt === null
+      ? state.lastEscalatedAt
+      : base.lastEscalatedAt,
+    blockedPromotionFingerprints: Array.isArray(state.blockedPromotionFingerprints)
+      ? state.blockedPromotionFingerprints
+        .filter((fingerprint) => typeof fingerprint === 'string')
+        .map((fingerprint) => fingerprint)
+      : base.blockedPromotionFingerprints,
     tabuRejectedFingerprints: Array.isArray(state.tabuRejectedFingerprints)
       ? [...state.tabuRejectedFingerprints]
       : base.tabuRejectedFingerprints,

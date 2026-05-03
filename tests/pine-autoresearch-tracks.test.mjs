@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -363,4 +363,288 @@ test('nextTrackState resets the streak when rotation changes the active track', 
   assert.equal(rotated.noChangeStreak, 0);
   assert.equal(rotated.activeTrackId, 'track-c');
   assert.equal(rotated.lastRotationTrigger, 'rotation');
+});
+
+test('nextTrackState escalates stagnation level after repeated no-new-candidate runs', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noNewCandidateStreak: 2,
+      stagnationLevel: 0,
+    },
+    policy: {
+      stagnation: {
+        enabled: true,
+        noNewCandidateEscalateAfter: 3,
+        maxStagnationLevel: 3,
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T00:00:00.000Z',
+    },
+  });
+
+  assert.equal(next.noNewCandidateStreak, 3);
+  assert.equal(next.stagnationLevel, 1);
+  assert.equal(next.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(next.lastEscalatedAt, '2026-05-03T00:00:00.000Z');
+});
+
+test('nextTrackState escalates after repeated high-similarity holds', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noChangeStreak: 3,
+      lastCandidateFingerprint: 'fp-b',
+      stagnationLevel: 1,
+    },
+    policy: {
+      stagnation: {
+        enabled: true,
+        holdEscalateAfter: 4,
+        highSimilarityThreshold: 0.9,
+        maxStagnationLevel: 3,
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-b',
+      championFingerprint: 'fp-a',
+      topCandidateSimilarity: 0.94,
+      promotionEligible: false,
+      generatedAt: '2026-05-03T01:00:00.000Z',
+    },
+  });
+
+  assert.equal(next.stagnationLevel, 2);
+  assert.equal(next.stagnationReason, 'highSimilarityHold');
+});
+
+test('nextTrackState treats first observed candidate as changed and resets no-change streak', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noChangeStreak: 3,
+      lastCandidateFingerprint: null,
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-first',
+      championFingerprint: 'fp-champ',
+      noveltySignature: 'track-a|grid-a|fp-first|window-1|lab-1',
+    },
+  });
+
+  assert.equal(next.noChangeStreak, 0);
+  assert.equal(next.lastRotationTrigger, 'candidate-changed');
+});
+
+test('nextTrackState does not over-increment stagnation every cycle beyond threshold', () => {
+  const notYetBucketEdge = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noNewCandidateStreak: 3,
+      stagnationLevel: 1,
+      stagnationReason: 'noNewCandidateStreak',
+      lastEscalatedAt: '2026-05-03T00:00:00.000Z',
+    },
+    policy: {
+      stagnation: {
+        enabled: true,
+        noNewCandidateEscalateAfter: 3,
+        maxStagnationLevel: 5,
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T00:30:00.000Z',
+    },
+  });
+
+  assert.equal(notYetBucketEdge.noNewCandidateStreak, 4);
+  assert.equal(notYetBucketEdge.stagnationLevel, 1);
+  assert.equal(notYetBucketEdge.lastEscalatedAt, '2026-05-03T00:00:00.000Z');
+
+  const nextBucketEdge = nextTrackState({
+    state: notYetBucketEdge,
+    policy: {
+      stagnation: {
+        enabled: true,
+        noNewCandidateEscalateAfter: 3,
+        maxStagnationLevel: 5,
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T01:00:00.000Z',
+    },
+  });
+
+  assert.equal(nextBucketEdge.noNewCandidateStreak, 5);
+  assert.equal(nextBucketEdge.stagnationLevel, 1);
+
+  const thirdCycle = nextTrackState({
+    state: nextBucketEdge,
+    policy: {
+      stagnation: {
+        enabled: true,
+        noNewCandidateEscalateAfter: 3,
+        maxStagnationLevel: 5,
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T01:30:00.000Z',
+    },
+  });
+
+  assert.equal(thirdCycle.noNewCandidateStreak, 6);
+  assert.equal(thirdCycle.stagnationLevel, 2);
+  assert.equal(thirdCycle.lastEscalatedAt, '2026-05-03T01:30:00.000Z');
+});
+
+test('nextTrackState caps stagnation level at maxStagnationLevel', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noNewCandidateStreak: 2,
+      stagnationLevel: 2,
+      stagnationReason: 'noNewCandidateStreak',
+    },
+    policy: {
+      stagnation: {
+        enabled: true,
+        noNewCandidateEscalateAfter: 3,
+        maxStagnationLevel: 2,
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T03:00:00.000Z',
+    },
+  });
+
+  assert.equal(next.stagnationLevel, 2);
+  assert.equal(next.stagnationReason, 'noNewCandidateStreak');
+});
+
+test('nextTrackState does not escalate when stagnation policy disabled', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noNewCandidateStreak: 2,
+      noChangeStreak: 4,
+      stagnationLevel: 1,
+      stagnationReason: 'highSimilarityHold',
+    },
+    policy: {
+      stagnation: {
+        enabled: false,
+        noNewCandidateEscalateAfter: 3,
+        holdEscalateAfter: 5,
+        highSimilarityThreshold: 0.9,
+        maxStagnationLevel: 3,
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      promotionEligible: false,
+      topCandidateSimilarity: 0.95,
+      generatedAt: '2026-05-03T03:30:00.000Z',
+    },
+  });
+
+  assert.equal(next.stagnationLevel, 1);
+  assert.equal(next.stagnationReason, 'highSimilarityHold');
+});
+
+test('nextTrackState clones blocked promotion fingerprints output array', () => {
+  const blockedPromotionFingerprints = ['fp-1', 'fp-2'];
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      blockedPromotionFingerprints,
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'cand-1',
+      championFingerprint: 'champ-1',
+      noveltySignature: 'track-a|grid-a|cand-1|window-1|lab-1',
+    },
+  });
+
+  assert.notEqual(next.blockedPromotionFingerprints, blockedPromotionFingerprints);
+  assert.deepEqual(next.blockedPromotionFingerprints, blockedPromotionFingerprints);
+});
+
+test('readSchedulerState normalizes malformed persisted stagnation and blocked fingerprint fields', async () => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-tracks-normalize-'));
+  const filePath = path.join(dir, 'matrix-malformed.json');
+
+  const malformed = {
+    ...defaultSchedulerState(),
+    stagnationLevel: -2.75,
+    stagnationReason: ['bad'],
+    lastEscalatedAt: { bad: true },
+    blockedPromotionFingerprints: ['fp-1', 42, null, 'fp-2'],
+  };
+
+  try {
+    await writeSchedulerState(filePath, malformed);
+    const normalized = await readSchedulerState(filePath);
+    assert.equal(normalized.stagnationLevel, 0);
+    assert.equal(normalized.stagnationReason, null);
+    assert.equal(normalized.lastEscalatedAt, null);
+    assert.deepEqual(normalized.blockedPromotionFingerprints, ['fp-1', 'fp-2']);
+
+    await writeFile(filePath, `${JSON.stringify({ ...malformed, stagnationLevel: 4.9 })}\n`, 'utf8');
+    const decimalNormalized = await readSchedulerState(filePath);
+    assert.equal(decimalNormalized.stagnationLevel, 4);
+
+    await writeFile(filePath, `${JSON.stringify({ ...malformed, stagnationLevel: '9' })}\n`, 'utf8');
+    const stringNormalized = await readSchedulerState(filePath);
+    assert.equal(stringNormalized.stagnationLevel, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('nextTrackState decays stagnation after promotion-eligible candidate appears', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      stagnationLevel: 2,
+      stagnationReason: 'highSimilarityHold',
+    },
+    policy: { stagnation: { enabled: true } },
+    manifest: {
+      activeTrackId: 'track-b',
+      candidateFingerprint: 'fp-c',
+      championFingerprint: 'fp-a',
+      promotionEligible: true,
+      generatedAt: '2026-05-03T02:00:00.000Z',
+    },
+  });
+
+  assert.equal(next.stagnationLevel, 0);
+  assert.equal(next.stagnationReason, null);
 });

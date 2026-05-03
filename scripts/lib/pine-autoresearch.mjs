@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { computeExpectancy, evaluateExpectancyGuard } from './pine-expectancy.mjs';
+import { decideLineagePromotionGate, summarizePromotionLineage } from './pine-autoresearch-lineage.mjs';
 
 function round(value, digits = 2) {
   if (!Number.isFinite(value)) return 0;
@@ -495,16 +496,31 @@ export function partitionLabs({ primaryLab, shadowLabs = [], blindHoldoutLabs = 
 
 
 export function decideAutoPromotionAction({ latestManifest, historyEvents = [], championState, policy = {}, now = isoNow() }) {
-  const enabled = policy.enabled ?? false;
-  const cooldownHours = policy.cooldownHours ?? 24;
-  const maxPromotionsPerDay = policy.maxPromotionsPerDay ?? 1;
-  const requireMatrixPromotion = policy.requireMatrixPromotion ?? true;
+  const safePolicy = policy && typeof policy === 'object' ? policy : {};
+  const safeHistoryEvents = Array.isArray(historyEvents) ? historyEvents : [];
+  const enabled = safePolicy.enabled ?? false;
+  const cooldownHours = safePolicy.cooldownHours ?? 24;
+  const maxPromotionsPerDay = safePolicy.maxPromotionsPerDay ?? 1;
+  const requireMatrixPromotion = safePolicy.requireMatrixPromotion ?? true;
   const decision = latestManifest?.matrixDecision || latestManifest?.decision || null;
   const candidate = latestManifest?.challenger || null;
   const candidateChanged = !sameConfig(championState?.config, candidate?.config);
   const matrixReady = requireMatrixPromotion ? decision?.recommendation === 'promote' : Boolean(candidate);
+  const lineageGate = decideLineagePromotionGate({
+    candidateFingerprint: latestManifest?.candidateFingerprint ?? latestManifest?.challenger?.candidateFingerprint ?? null,
+    candidateFamilyKey: latestManifest?.candidateFamilyKey ?? latestManifest?.challenger?.familyKey ?? null,
+    currentChampionFingerprint: latestManifest?.championFingerprint ?? championState?.configFingerprint ?? null,
+    currentChampionFamilyKey: latestManifest?.championFamilyKey ?? championState?.familyKey ?? null,
+    lineage: summarizePromotionLineage({
+      historyEvents: safeHistoryEvents,
+      limit: safePolicy.lineagePolicy?.lookbackPromotions ?? 12,
+    }),
+    matrixDecision: decision,
+    robustness: latestManifest?.robustness ?? latestManifest?.selectedCandidate?.robustness ?? {},
+    policy: safePolicy.lineagePolicy ?? { enabled: false },
+  });
 
-  const promotionEvents = historyEvents.filter((event) => event.type === 'promote' || event.type === 'autopromote');
+  const promotionEvents = safeHistoryEvents.filter((event) => event?.type === 'promote' || event?.type === 'autopromote');
   const lastPromotion = promotionEvents.at(-1) || null;
   const nowMs = Date.parse(now);
   const cooldownPassed = !lastPromotion
@@ -518,6 +534,7 @@ export function decideAutoPromotionAction({ latestManifest, historyEvents = [], 
   const gates = {
     enabled,
     matrixReady,
+    lineage: lineageGate.passed,
     candidateChanged,
     cooldown: cooldownPassed,
     dailyQuota: dailyQuotaPassed,
@@ -537,6 +554,7 @@ export function decideAutoPromotionAction({ latestManifest, historyEvents = [], 
     summary,
     gates,
     failedGates,
+    lineage: lineageGate,
     policy: {
       enabled,
       cooldownHours,

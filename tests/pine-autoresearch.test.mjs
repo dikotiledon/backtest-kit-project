@@ -975,6 +975,87 @@ test('decideAutoPromotionAction requires matrix pass, change, cooldown, and quot
   assert.equal(result.recommendation, 'promote');
 });
 
+test('decideAutoPromotionAction tolerates non-array historyEvents and preserves legacy promote outcome', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+      matrixDecision: { recommendation: 'promote' },
+    },
+    championState: { configId: 'champion', config: { minPredSum: 2 } },
+    historyEvents: null,
+    policy: {
+      enabled: true,
+      cooldownHours: 24,
+      maxPromotionsPerDay: 1,
+      requireMatrixPromotion: true,
+    },
+    now: '2026-04-21T02:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.deepEqual(result.failedGates, []);
+});
+
+test('decideAutoPromotionAction ignores malformed historyEvents entries and preserves legacy promote outcome', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+      matrixDecision: { recommendation: 'promote' },
+    },
+    championState: { configId: 'champion', config: { minPredSum: 2 } },
+    historyEvents: [null, 42, 'bad', {}, { type: 'noop' }],
+    policy: {
+      enabled: true,
+      cooldownHours: 24,
+      maxPromotionsPerDay: 1,
+      requireMatrixPromotion: true,
+    },
+    now: '2026-04-21T02:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.deepEqual(result.failedGates, []);
+});
+
+test('decideAutoPromotionAction tolerates null policy and defaults to disabled hold', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+      matrixDecision: { recommendation: 'promote' },
+    },
+    championState: { configId: 'champion', config: { minPredSum: 2 } },
+    historyEvents: [],
+    policy: null,
+    now: '2026-04-21T02:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.gates.enabled, false);
+  assert.equal(result.failedGates.includes('enabled'), true);
+});
+
+test('decideAutoPromotionAction keeps legacy promote when lineagePolicy is missing', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+      matrixDecision: { recommendation: 'promote' },
+    },
+    championState: { configId: 'champion', config: { minPredSum: 2 } },
+    historyEvents: [],
+    policy: {
+      enabled: true,
+      cooldownHours: 24,
+      maxPromotionsPerDay: 1,
+      requireMatrixPromotion: true,
+    },
+    now: '2026-04-21T02:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.gates.lineage, true);
+  assert.equal(result.lineage.risk.level, 'disabled');
+});
+
 test('decideAutoPromotionAction blocks when candidate is unchanged', () => {
   const result = decideAutoPromotionAction({
     latestManifest: {
@@ -994,6 +1075,99 @@ test('decideAutoPromotionAction blocks when candidate is unchanged', () => {
 
   assert.equal(result.recommendation, 'hold');
   assert.deepEqual(result.failedGates, ['candidateChanged']);
+});
+
+test('decideAutoPromotionAction blocks direct ping-pong reversal without extra margin', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'old-b', config: { minPredSum: 1.6 } },
+      candidateFingerprint: 'fp-b',
+      candidateFamilyKey: 'family-b',
+      championFingerprint: 'fp-c',
+      championFamilyKey: 'family-c',
+      matrixDecision: {
+        recommendation: 'promote',
+        counts: { shadowPassCount: 3, shadowPassRatio: 0.6 },
+      },
+      robustness: { aggregateScoreDelta: 2, aggregateRoiDeltaPct: 1, aggregateProfitFactorDelta: 0.03 },
+    },
+    championState: { configId: 'current-c', config: { minPredSum: 1.8 }, configFingerprint: 'fp-c' },
+    historyEvents: [
+      {
+        type: 'autopromote',
+        timestamp: '2026-05-03T00:00:00.000Z',
+        fromFingerprint: 'fp-b',
+        toFingerprint: 'fp-c',
+        fromFamilyKey: 'family-b',
+        toFamilyKey: 'family-c',
+      },
+    ],
+    policy: {
+      enabled: true,
+      cooldownHours: 0,
+      maxPromotionsPerDay: 10,
+      requireMatrixPromotion: true,
+      lineagePolicy: {
+        enabled: true,
+        lookbackPromotions: 5,
+        baseShadowPassCount: 3,
+        directReversalExtraShadowPasses: 1,
+        minExtraAggregateScoreDelta: 5,
+      },
+    },
+    now: '2026-05-03T06:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.gates.lineage, false);
+  assert.equal(result.failedGates.includes('lineage'), true);
+  assert.equal(result.lineage.risk.level, 'direct-reversal');
+});
+
+test('decideAutoPromotionAction allows direct reversal with extra matrix margin', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'old-b', config: { minPredSum: 1.6 } },
+      candidateFingerprint: 'fp-b',
+      candidateFamilyKey: 'family-b',
+      championFingerprint: 'fp-c',
+      championFamilyKey: 'family-c',
+      matrixDecision: {
+        recommendation: 'promote',
+        counts: { shadowPassCount: 5, shadowPassRatio: 1 },
+      },
+      robustness: { aggregateScoreDelta: 8, aggregateRoiDeltaPct: 6, aggregateProfitFactorDelta: 0.2 },
+    },
+    championState: { configId: 'current-c', config: { minPredSum: 1.8 }, configFingerprint: 'fp-c' },
+    historyEvents: [
+      {
+        type: 'autopromote',
+        timestamp: '2026-05-03T00:00:00.000Z',
+        fromFingerprint: 'fp-b',
+        toFingerprint: 'fp-c',
+        fromFamilyKey: 'family-b',
+        toFamilyKey: 'family-c',
+      },
+    ],
+    policy: {
+      enabled: true,
+      cooldownHours: 0,
+      maxPromotionsPerDay: 10,
+      requireMatrixPromotion: true,
+      lineagePolicy: {
+        enabled: true,
+        lookbackPromotions: 5,
+        baseShadowPassCount: 3,
+        directReversalExtraShadowPasses: 1,
+        minExtraAggregateScoreDelta: 5,
+      },
+    },
+    now: '2026-05-03T06:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.gates.lineage, true);
+  assert.equal(result.lineage.risk.level, 'direct-reversal');
 });
 
 test('extractChampionBootstrapCandidate accepts direct seed payloads', () => {

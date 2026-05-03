@@ -152,3 +152,41 @@ npm run pine:autoresearch:llm:review-resolve -- --item-id <itemId> --status arch
 ```
 
 Supported terminal resolution statuses are `rejected`, `stale`, `superseded`, and `archived`. `accepted_for_manual_promotion` is intentionally still a blocking review status until the item is archived or otherwise resolved.
+
+## Candidate quality preflight
+
+The LLM lane treats provider output as an untrusted proposal, not a decision.
+
+Validation order:
+
+1. provider returns exactly one JSON object
+2. JSON/schema parser accepts it
+3. allowlist/range/fingerprint validation accepts it
+4. quality preflight scores it against current champion, latest matrix blocker, recent failures, and generic-pattern rules
+5. low-quality candidates can be re-asked once with feedback
+6. only accepted candidates reach matrix evaluation
+
+The quality gate is intentionally local and deterministic. It catches candidates that are syntactically valid but research-weak, such as generic lower-threshold + higher-RR + tighter-stop patches that do not reference matrix evidence.
+
+```json
+{
+  "quality": {
+    "enabled": true,
+    "minScore": 70,
+    "maxAttempts": 2
+  },
+  "provider": {
+    "maxQualityAttempts": 2
+  }
+}
+```
+
+## Provider retry vs candidate retry
+
+| Retry type | Handles | Does not handle |
+|---|---|---|
+| Provider retry | timeout, 429, 502, 503, 504, transient network/provider failures | auth errors, missing key, unsupported provider, schema/config errors |
+| Candidate JSON retry | malformed JSON, schema-invalid output | provider failures |
+| Quality re-ask | valid but generic/low-quality candidate | matrix hold after real evaluation |
+
+Matrix `hold` is not a provider failure. It means the candidate was evaluated and did not earn promotion.

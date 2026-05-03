@@ -175,11 +175,69 @@ function normalizeMaxCandidateAttempts(provider = {}) {
   return Math.max(1, Math.min(5, Math.floor(value)));
 }
 
+function normalizeMaxProviderAttempts(provider = {}) {
+  const value = Number(provider.maxProviderAttempts ?? 1);
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(5, Math.floor(value)));
+}
+
+function isTransientProviderError(proposal) {
+  const text = `${proposal?.reason ?? ''} ${proposal?.error ?? ''}`.toLowerCase();
+  if (/401|403|unauthorized|forbidden|invalid api key|missing api key|schema|unsupported/.test(text)) return false;
+  return /timeout|timed out|429|rate limit|temporar|502|503|504|bad gateway|service unavailable|econnreset|network/.test(text);
+}
+
+function delay(ms) {
+  const value = Number(ms);
+  if (!Number.isFinite(value) || value <= 0) return Promise.resolve();
+  return new Promise((resolve) => setTimeout(resolve, Math.min(value, 30000)));
+}
+
 function normalizeMaxQualityAttempts(provider = {}, quality = {}) {
   if (quality?.enabled === false) return 1;
   const value = Number(provider?.maxQualityAttempts ?? quality?.maxAttempts ?? 1);
   if (!Number.isFinite(value)) return 1;
   return Math.max(1, Math.min(3, Math.floor(value)));
+}
+
+async function proposeCandidateWithProviderRetry({
+  provider,
+  repoRoot,
+  configDir,
+  scheduled,
+  prompt,
+  allowlist,
+  allowGuarded,
+  proposeOpenAi,
+}) {
+  const maxProviderAttempts = normalizeMaxProviderAttempts(provider);
+  const providerRetryDelayMs = Number(provider?.providerRetryDelayMs ?? 0);
+
+  for (let providerAttempt = 1; providerAttempt <= maxProviderAttempts; providerAttempt += 1) {
+    const proposal = await proposeCandidate({
+      provider: {
+        ...provider,
+        candidateFile: await resolveRelative(provider.candidateFile, [repoRoot, configDir]),
+      },
+      scheduled,
+      prompt,
+      allowlist,
+      allowGuarded,
+      proposeOpenAi,
+    });
+
+    if (proposal?.ok || !isTransientProviderError(proposal) || providerAttempt >= maxProviderAttempts) {
+      return proposal;
+    }
+
+    await delay(providerRetryDelayMs);
+  }
+
+  return {
+    ok: false,
+    reason: 'proposal_failed',
+    error: 'provider retry attempts exhausted',
+  };
 }
 
 function buildRetryPrompt(basePrompt, { attempt, maxAttempts, lastError, lastRawPreview }) {
@@ -753,11 +811,10 @@ export async function runLlmAutoresearch({
   let lastRawPreview = null;
 
   for (let attempt = 1; attempt <= maxCandidateAttempts; attempt += 1) {
-    proposal = await proposeCandidate({
-      provider: {
-        ...baseProvider,
-        candidateFile: await resolveRelative(baseProvider.candidateFile, [repoRoot, configDir]),
-      },
+    proposal = await proposeCandidateWithProviderRetry({
+      provider: baseProvider,
+      repoRoot,
+      configDir,
       scheduled,
       prompt: buildRetryPrompt(context.prompt, {
         attempt,
@@ -900,11 +957,10 @@ export async function runLlmAutoresearch({
         };
       }
 
-      proposal = await proposeCandidate({
-        provider: {
-          ...baseProvider,
-          candidateFile: await resolveRelative(baseProvider.candidateFile, [repoRoot, configDir]),
-        },
+      proposal = await proposeCandidateWithProviderRetry({
+        provider: baseProvider,
+        repoRoot,
+        configDir,
         scheduled,
         prompt: buildQualityFeedbackPrompt(context.prompt, { quality, candidate: normalizeApiCandidate(parsed) }),
         allowlist,

@@ -26,7 +26,10 @@
     "topP": 1,
     "maxOutputTokens": 1200,
     "organizationEnv": null,
-    "projectEnv": null
+    "projectEnv": null,
+    "maxProviderAttempts": 2,
+    "providerRetryDelayMs": 1500,
+    "maxQualityAttempts": 2
   },
   "candidate": {
     "maxChangedParams": 4,
@@ -41,6 +44,11 @@
     "topWinners": 10,
     "archiveRetentionDays": 14,
     "keepLatestRuns": 12
+  },
+  "quality": {
+    "enabled": true,
+    "minScore": 70,
+    "maxAttempts": 2
   },
   "review": {
     "blockScheduledWhenUnresolved": true

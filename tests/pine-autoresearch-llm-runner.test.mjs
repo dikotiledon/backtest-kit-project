@@ -1127,6 +1127,96 @@ test('openai quality re-ask provider failure does not execute stale candidate', 
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+test('openai transient provider failure retries before candidate validation', async () => {
+  const { dir, configPath } = await openAiFixture();
+
+  try {
+    const baseConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({
+      ...baseConfig,
+      provider: {
+        ...baseConfig.provider,
+        maxProviderAttempts: 2,
+        providerRetryDelayMs: 0,
+      },
+      quality: { ...baseConfig.quality, enabled: false },
+    }), 'utf8');
+
+    let calls = 0;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async () => {
+        calls += 1;
+        if (calls === 1) {
+          return {
+            ok: false,
+            reason: 'proposal_failed',
+            error: 'HTTP 502 Bad Gateway',
+            source: 'openai-responses',
+          };
+        }
+
+        return {
+          ok: true,
+          raw: JSON.stringify({
+            params: { minPredSum: 1.8 },
+            rationale: 'recovered provider call',
+          }),
+          source: 'openai-responses',
+        };
+      },
+      executeCandidate: async () => ({ ok: true, runId: 'provider-retry-success' }),
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(calls, 2);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('openai auth provider failure does not retry', async () => {
+  const { dir, configPath } = await openAiFixture();
+
+  try {
+    const baseConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({
+      ...baseConfig,
+      provider: {
+        ...baseConfig.provider,
+        maxProviderAttempts: 3,
+        providerRetryDelayMs: 0,
+      },
+    }), 'utf8');
+
+    let calls = 0;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async () => {
+        calls += 1;
+        return {
+          ok: false,
+          reason: 'proposal_failed',
+          error: '401 Unauthorized invalid API key',
+          source: 'openai-responses',
+        };
+      },
+      executeCandidate: async () => ({ ok: true, runId: 'must-not-run' }),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(calls, 1);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('openai provider failure is not retried as candidate invalid', async () => {
   const { dir, configPath } = await openAiFixture();
 

@@ -46,6 +46,29 @@ test('buildPromotionQueueItem captures exact manifest identity and champion fing
   assert.equal(item.createdAt, '2026-04-30T00:01:00.000Z');
 });
 
+test('buildPromotionQueueItem captures lineage family keys and robustness snapshot', () => {
+  const manifest = {
+    runId: 'run-lineage-queue',
+    generatedAt: '2026-05-03T00:00:00.000Z',
+    manifestPath: '/tmp/run-lineage-queue.json',
+    candidateFingerprint: 'fp-b',
+    championFingerprint: 'fp-a',
+    candidateFamilyKey: 'family-b',
+    championFamilyKey: 'family-a',
+    robustness: { aggregateScoreDelta: 8 },
+    challenger: { configId: 'challenger-b' },
+    champion: { configId: 'champion-a' },
+    matrixDecision: { recommendation: 'promote' },
+  };
+  const item = buildPromotionQueueItem({ manifest });
+
+  manifest.robustness.aggregateScoreDelta = 99;
+
+  assert.equal(item.candidateFamilyKey, 'family-b');
+  assert.equal(item.championFamilyKeyAtDecision, 'family-a');
+  assert.deepEqual(item.robustness, { aggregateScoreDelta: 8 });
+});
+
 test('readPromotionQueue returns empty queue when file is missing', async () => {
   const dir = await makeTempDir();
   const queuePath = path.join(dir, 'missing.jsonl');

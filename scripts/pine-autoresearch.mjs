@@ -106,6 +106,12 @@ export function decideQueuedPromotionAction({ queuedItem, manifest, championStat
   const currentChampionFingerprint = championState?.configFingerprint || configFingerprint(championState?.config || {});
   if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Queued champion fingerprint missing at decision' };
   if (currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Current champion changed since queued decision' };
+  if (queuedItem.candidateFamilyKey && manifest.candidateFamilyKey && queuedItem.candidateFamilyKey !== manifest.candidateFamilyKey) {
+    return { recommendation: 'hold', status: 'failed', reason: 'Queued candidate family does not match manifest family' };
+  }
+  if (queuedItem.championFamilyKeyAtDecision && manifest.championFamilyKey && queuedItem.championFamilyKeyAtDecision !== manifest.championFamilyKey) {
+    return { recommendation: 'hold', status: 'failed', reason: 'Queued champion family does not match manifest family' };
+  }
   if (autoAction?.recommendation !== 'promote') return { recommendation: 'hold', status: 'blocked', reason: autoAction?.summary || 'Autopromote gates did not pass' };
   return { recommendation: 'promote', status: 'promoted', reason: 'Queued promotion guards passed' };
 }

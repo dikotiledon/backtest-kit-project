@@ -27,6 +27,14 @@ function normalizePendingItem(item, at) {
   };
 }
 
+function cloneJsonValue(value) {
+  if (value == null) {
+    return null;
+  }
+
+  return JSON.parse(JSON.stringify(value));
+}
+
 export function promotionQueuePath({ researchRoot }) {
   return path.join(researchRoot, 'state', 'promotion-queue.jsonl');
 }
@@ -53,6 +61,9 @@ export function buildPromotionQueueItem({ manifest, createdAt } = {}) {
     manifestPath: manifest.manifestPath,
     candidateFingerprint,
     championFingerprintAtDecision: manifest.championFingerprint ?? null,
+    candidateFamilyKey: manifest.candidateFamilyKey ?? null,
+    championFamilyKeyAtDecision: manifest.championFamilyKey ?? null,
+    robustness: cloneJsonValue(manifest.robustness),
     candidateConfigId: manifest.challenger?.configId ?? null,
     championConfigIdAtDecision: manifest.champion?.configId ?? null,
     createdAt: toIso(createdAt ?? manifest.generatedAt),

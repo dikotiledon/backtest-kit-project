@@ -635,6 +635,89 @@ test('decideQueuedPromotionAction marks stale when champion changed since queued
   assert.equal(result.reason, 'Current champion changed since queued decision');
 });
 
+test('decideQueuedPromotionAction fails when queued family identity differs from manifest', () => {
+  const result = decideQueuedPromotionAction({
+    queuedItem: {
+      itemId: 'run-a:fp-b',
+      runId: 'run-a',
+      candidateFingerprint: 'fp-b',
+      championFingerprintAtDecision: 'fp-a',
+      candidateFamilyKey: 'family-b-original',
+      championFamilyKeyAtDecision: 'family-a',
+    },
+    manifest: {
+      runId: 'run-a',
+      candidateFingerprint: 'fp-b',
+      championFingerprint: 'fp-a',
+      candidateFamilyKey: 'family-b-mutated',
+      championFamilyKey: 'family-a',
+      challenger: { config: { minPredSum: 1.6 } },
+      matrixDecision: { recommendation: 'promote' },
+    },
+    championState: { config: { minPredSum: 1.8 }, configFingerprint: 'fp-a' },
+    autoAction: { recommendation: 'promote' },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason, /family/);
+});
+
+test('decideQueuedPromotionAction fails on champion family mismatch between queued and manifest', () => {
+  const result = decideQueuedPromotionAction({
+    queuedItem: {
+      itemId: 'run-a:fp-b',
+      runId: 'run-a',
+      candidateFingerprint: 'fp-b',
+      championFingerprintAtDecision: 'fp-a',
+      candidateFamilyKey: 'family-b',
+      championFamilyKeyAtDecision: 'family-a-original',
+    },
+    manifest: {
+      runId: 'run-a',
+      candidateFingerprint: 'fp-b',
+      championFingerprint: 'fp-a',
+      candidateFamilyKey: 'family-b',
+      championFamilyKey: 'family-a-mutated',
+      challenger: { config: { minPredSum: 1.6 } },
+      matrixDecision: { recommendation: 'promote' },
+    },
+    championState: { config: { minPredSum: 1.8 }, configFingerprint: 'fp-a' },
+    autoAction: { recommendation: 'promote' },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.status, 'failed');
+  assert.match(result.reason, /champion family/i);
+});
+
+test('decideQueuedPromotionAction promotes when queued lineage fields missing for backward compatibility', () => {
+  const result = decideQueuedPromotionAction({
+    queuedItem: {
+      itemId: 'run-a:candidate-fp',
+      runId: 'run-a',
+      championFingerprintAtDecision: 'champion-fp',
+    },
+    manifest: {
+      runId: 'run-a',
+      candidateFingerprint: 'candidate-fp',
+      championFingerprint: 'champion-fp',
+      candidateFamilyKey: 'family-b',
+      championFamilyKey: 'family-a',
+      matrixDecision: { recommendation: 'promote' },
+      challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+    },
+    championState: {
+      config: { useTrailingStop: false },
+      configFingerprint: 'champion-fp',
+    },
+    autoAction: { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' },
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.status, 'promoted');
+});
+
 test('decideQueuedPromotionAction holds stale when queued champion fingerprint is missing', () => {
   const manifest = {
     runId: 'run-a',

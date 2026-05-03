@@ -20,8 +20,30 @@ function trimToCount(values, limit) {
   return values.slice(values.length - limit);
 }
 
+function safeSerialize(value, fallback = '[unserializable params]') {
+  try {
+    const seen = new WeakSet();
+    return JSON.stringify(value, (_key, currentValue) => {
+      if (typeof currentValue === 'bigint') {
+        return `${currentValue.toString()}n`;
+      }
+
+      if (currentValue && typeof currentValue === 'object') {
+        if (seen.has(currentValue)) {
+          return '[Circular]';
+        }
+        seen.add(currentValue);
+      }
+
+      return currentValue;
+    });
+  } catch {
+    return fallback;
+  }
+}
+
 function hotMemorySize(memory) {
-  return Buffer.byteLength(JSON.stringify(memory), 'utf8');
+  return Buffer.byteLength(safeSerialize(memory, '{}') ?? '{}', 'utf8');
 }
 
 function pruneForBytes(memory, maxHotMemoryBytes) {
@@ -66,7 +88,7 @@ function compactCandidateParams(candidate) {
 
 function capText(text, max = 500) {
   if (typeof text !== 'string') {
-    return text;
+    return text == null ? '' : String(text);
   }
 
   if (text.length <= max) {
@@ -97,7 +119,7 @@ function compactMatrixBlocker(event) {
 function buildFailureLesson(event) {
   if (event?.type === 'candidate_invalid') {
     const reason = event?.reason ?? 'unknown reason';
-    const paramsPreview = JSON.stringify(compactCandidateParams(event?.candidate));
+    const paramsPreview = safeSerialize(compactCandidateParams(event?.candidate), '[unserializable params]');
     return capText(`Candidate invalid: ${reason} for params ${paramsPreview}`);
   }
 
@@ -119,7 +141,7 @@ export function pruneResearchMemory(memory, caps = {}) {
   next.recentCandidates = trimToCount(next.recentCandidates, caps.recentCandidates ?? 20);
   next.topWinners = trimToCount(next.topWinners, caps.topWinners ?? 10);
   next.rejectedFingerprints = trimToCount(next.rejectedFingerprints, caps.tabuFingerprints ?? 50);
-  next.failureLessons = trimToCount(next.failureLessons, caps.failureLessons ?? 20);
+  next.failureLessons = trimToCount(next.failureLessons.slice().reverse(), caps.failureLessons ?? 20).reverse();
   return pruneForBytes(next, caps.maxHotMemoryBytes);
 }
 

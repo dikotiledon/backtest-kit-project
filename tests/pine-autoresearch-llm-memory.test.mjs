@@ -76,3 +76,85 @@ test('updateResearchMemory records duplicate invalid response lesson', () => {
   assert.match(next.failureLessons[0], /duplicate candidate fingerprint/);
   assert.equal(next.recentCandidates[0].outcome, 'candidate_invalid');
 });
+
+test('candidate_invalid with BigInt params does not throw and records lesson', () => {
+  const next = updateResearchMemory({}, {
+    type: 'candidate_invalid',
+    reason: 'bad schema',
+    candidate: { params: { x: 1n } },
+  });
+
+  assert.equal(next.failureLessons.length, 1);
+  assert.match(next.failureLessons[0], /Candidate invalid: bad schema/);
+  assert.match(next.failureLessons[0], /1n/);
+});
+
+test('candidate_invalid with circular params does not throw and records lesson', () => {
+  const params = { x: 1 };
+  params.self = params;
+
+  const next = updateResearchMemory({}, {
+    type: 'candidate_invalid',
+    reason: 'circular input',
+    candidate: { params },
+  });
+
+  assert.equal(next.failureLessons.length, 1);
+  assert.match(next.failureLessons[0], /circular input/);
+  assert.match(next.failureLessons[0], /\[Circular\]/);
+});
+
+test('candidate_invalid with null params does not throw and returns structured memory', () => {
+  assert.doesNotThrow(() => {
+    const next = updateResearchMemory(null, {
+      type: 'candidate_invalid',
+      reason: 'missing params',
+      candidate: { params: null },
+    });
+
+    assert.ok(next);
+    assert.ok(Array.isArray(next.recentCandidates));
+    assert.ok(Array.isArray(next.topWinners));
+    assert.ok(Array.isArray(next.rejectedFingerprints));
+    assert.ok(Array.isArray(next.failureLessons));
+    assert.equal(next.failureLessons.length, 1);
+  });
+});
+
+test('duplicate lesson repeated keeps single entry at index 0', () => {
+  const event = {
+    type: 'candidate_invalid',
+    reason: 'duplicate candidate fingerprint',
+    candidate: { params: { minPredSum: 1.2, riskRewardRatio: 2, stopLossPct: 1 } },
+  };
+
+  const first = updateResearchMemory({}, event, { failureLessons: 20 });
+  const second = updateResearchMemory(first, event, { failureLessons: 20 });
+
+  assert.equal(second.failureLessons.length, 1);
+  assert.match(second.failureLessons[0], /duplicate candidate fingerprint/);
+});
+
+test('failureLessons cap keeps newest and bounded length', () => {
+  let next = updateResearchMemory({}, {
+    type: 'candidate_invalid',
+    reason: 'reason-1',
+    candidate: { params: { a: 1 } },
+  }, { failureLessons: 2 });
+
+  next = updateResearchMemory(next, {
+    type: 'candidate_invalid',
+    reason: 'reason-2',
+    candidate: { params: { b: 2 } },
+  }, { failureLessons: 2 });
+
+  next = updateResearchMemory(next, {
+    type: 'candidate_invalid',
+    reason: 'reason-3',
+    candidate: { params: { c: 3 } },
+  }, { failureLessons: 2 });
+
+  assert.equal(next.failureLessons.length, 2);
+  assert.match(next.failureLessons[0], /reason-3/);
+  assert.match(next.failureLessons[1], /reason-2/);
+});

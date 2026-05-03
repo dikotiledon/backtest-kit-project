@@ -290,6 +290,6 @@ This prevents A → B → A → B churn caused by micro-regime noise.
 
 ### N-run escape
 
-Repeated no-new-candidate, high-similarity hold, or same-track stagnation increases `stagnationLevel` in scheduler state. Higher stagnation level widens fallback families and raises mutation temperature.
+Repeated no-new-candidate or high-similarity hold cycles increase `stagnationLevel` in scheduler state. Higher stagnation level widens fallback families and raises mutation temperature.
 
 Stagnation escape changes search pressure only. It never weakens matrix, expectancy, queue, cooldown, or lineage promotion gates.

@@ -899,6 +899,153 @@ test('openai malformed candidate stops after configured attempts', async () => {
   }
 });
 
+test('openai low-quality candidate re-asks once and executes improved candidate', async () => {
+  const { dir, configPath, allowlistPath } = await openAiFixture();
+
+  try {
+    await fs.writeFile(allowlistPath, JSON.stringify({
+      version: 1,
+      freezeArchitecture: true,
+      maxChangedParams: 3,
+      parameters: [
+        { key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1, mutability: 'tunable', family: 'signal' },
+        { key: 'riskRewardRatio', type: 'float', min: 0.5, max: 10, step: 0.1, mutability: 'tunable', family: 'risk' },
+        { key: 'stopLossPct', type: 'float', min: 0.1, max: 10, step: 0.1, mutability: 'tunable', family: 'risk' },
+        { key: 'divRsiLen', type: 'int', min: 2, max: 100, step: 1, mutability: 'tunable', family: 'signal' },
+      ],
+    }), 'utf8');
+
+    const baseConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({
+      ...baseConfig,
+      provider: {
+        ...baseConfig.provider,
+        maxCandidateAttempts: 1,
+        maxQualityAttempts: 2,
+      },
+      champion: {
+        minPredSum: 1.7,
+        riskRewardRatio: 2.0,
+        stopLossPct: 0.6,
+        divRsiLen: 14,
+      },
+      quality: {
+        enabled: true,
+        minScore: 70,
+      },
+      candidate: { maxChangedParams: 3 },
+    }), 'utf8');
+
+    const prompts = [];
+    let executedCandidate = null;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async (options) => {
+        prompts.push(options.prompt);
+        if (prompts.length === 1) {
+          return {
+            ok: true,
+            raw: JSON.stringify({
+              params: { minPredSum: 1.2, riskRewardRatio: 2.5, stopLossPct: 0.5 },
+              rationale: 'test',
+            }),
+            source: 'openai-responses',
+          };
+        }
+        return {
+          ok: true,
+          raw: JSON.stringify({
+            params: { minPredSum: 1.6, riskRewardRatio: 2.2, divRsiLen: 18 },
+            rationale: 'Champion baseline minPredSum 1.7 and riskRewardRatio 2.0 underperform ROI/trade count in matrix primary vs shadow, so raise divRsiLen to 18 while keeping threshold near baseline to improve quality.',
+          }),
+          source: 'openai-responses',
+        };
+      },
+      executeCandidate: async ({ candidate }) => {
+        executedCandidate = candidate;
+        return { ok: true, runId: 'quality-reask', promotable: false, metricsDelta: { score: 1 } };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(prompts.length, 2);
+    assert.match(prompts[1], /failed quality preflight/);
+    assert.deepEqual(executedCandidate.params, { minPredSum: 1.6, riskRewardRatio: 2.2, divRsiLen: 18 });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('openai low-quality candidate stops after configured quality attempts', async () => {
+  const { dir, configPath, allowlistPath } = await openAiFixture();
+
+  try {
+    await fs.writeFile(allowlistPath, JSON.stringify({
+      version: 1,
+      freezeArchitecture: true,
+      maxChangedParams: 3,
+      parameters: [
+        { key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1, mutability: 'tunable', family: 'signal' },
+        { key: 'riskRewardRatio', type: 'float', min: 0.5, max: 10, step: 0.1, mutability: 'tunable', family: 'risk' },
+        { key: 'stopLossPct', type: 'float', min: 0.1, max: 10, step: 0.1, mutability: 'tunable', family: 'risk' },
+      ],
+    }), 'utf8');
+
+    const baseConfig = JSON.parse(await fs.readFile(configPath, 'utf8'));
+    await fs.writeFile(configPath, JSON.stringify({
+      ...baseConfig,
+      provider: {
+        ...baseConfig.provider,
+        maxCandidateAttempts: 1,
+        maxQualityAttempts: 2,
+      },
+      champion: {
+        minPredSum: 1.7,
+        riskRewardRatio: 2.0,
+        stopLossPct: 0.6,
+      },
+      quality: {
+        enabled: true,
+        minScore: 70,
+      },
+      candidate: { maxChangedParams: 3 },
+    }), 'utf8');
+
+    let calls = 0;
+    let executeCalled = false;
+    const result = await runLlmAutoresearch({
+      configPath,
+      repoRoot: dir,
+      command: 'run',
+      scheduled: false,
+      proposeOpenAi: async () => {
+        calls += 1;
+        return {
+          ok: true,
+          raw: JSON.stringify({
+            params: { minPredSum: 1.2, riskRewardRatio: 2.5, stopLossPct: 0.5 },
+            rationale: 'test',
+          }),
+          source: 'openai-responses',
+        };
+      },
+      executeCandidate: async () => {
+        executeCalled = true;
+        return { ok: true, runId: 'must-not-run' };
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.reason, 'candidate_low_quality');
+    assert.equal(calls, 2);
+    assert.equal(executeCalled, false);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
 test('openai provider failure is not retried as candidate invalid', async () => {
   const { dir, configPath } = await openAiFixture();
 

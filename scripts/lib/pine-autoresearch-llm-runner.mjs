@@ -7,6 +7,7 @@ import { buildLlmResearchContext } from './pine-autoresearch-llm-context.mjs';
 import { proposeCandidate } from './pine-autoresearch-llm-provider.mjs';
 import { executeLlmMatrixCandidate } from './pine-autoresearch-llm-evaluator.mjs';
 import { parseCandidateJson, validateCandidate, fingerprintCandidate } from './pine-autoresearch-llm-schema.mjs';
+import { buildQualityFeedbackPrompt, scoreCandidateQuality } from './pine-autoresearch-llm-quality.mjs';
 import { appendReviewQueueEvent, buildReviewQueueItem, readReviewQueue, resolveReviewItem, unresolvedReviewItems } from './pine-autoresearch-llm-review-queue.mjs';
 import { reserveCandidate, finalizeReservation } from './pine-autoresearch-llm-reservation.mjs';
 import { readLlmLedger, summarizeLlmLedgerFingerprints } from './pine-autoresearch-llm-ledger.mjs';
@@ -172,6 +173,13 @@ function normalizeMaxCandidateAttempts(provider = {}) {
   const value = Number(provider.maxCandidateAttempts ?? 1);
   if (!Number.isFinite(value)) return 1;
   return Math.max(1, Math.min(5, Math.floor(value)));
+}
+
+function normalizeMaxQualityAttempts(provider = {}, quality = {}) {
+  if (quality?.enabled === false) return 1;
+  const value = Number(provider?.maxQualityAttempts ?? quality?.maxAttempts ?? 1);
+  if (!Number.isFinite(value)) return 1;
+  return Math.max(1, Math.min(3, Math.floor(value)));
 }
 
 function buildRetryPrompt(basePrompt, { attempt, maxAttempts, lastError, lastRawPreview }) {
@@ -850,6 +858,120 @@ export async function runLlmAutoresearch({
       status,
       reviewSummary,
     };
+  }
+
+  const qualityConfig = config?.quality ?? {};
+  let quality = null;
+  if (qualityConfig.enabled) {
+    const maxQualityAttempts = normalizeMaxQualityAttempts(baseProvider, qualityConfig);
+
+    for (let qualityAttempt = 1; qualityAttempt <= maxQualityAttempts; qualityAttempt += 1) {
+      quality = scoreCandidateQuality({
+        candidate: normalizeApiCandidate(parsed),
+        champion: config.champion ?? {},
+        memory,
+        config,
+      });
+
+      if (quality?.ok) {
+        break;
+      }
+
+      if (qualityAttempt >= maxQualityAttempts) {
+        const status = await writeProviderStatus(paths, buildStatus({
+          ok: false,
+          reason: 'candidate_low_quality',
+          command,
+          scheduled,
+          matrixId: paths.matrixId,
+          providerMode: config?.provider?.mode,
+          details: {
+            reviewSummary,
+            quality,
+          },
+        }));
+
+        return {
+          ok: false,
+          reason: 'candidate_low_quality',
+          quality,
+          status,
+          reviewSummary,
+        };
+      }
+
+      proposal = await proposeCandidate({
+        provider: {
+          ...baseProvider,
+          candidateFile: await resolveRelative(baseProvider.candidateFile, [repoRoot, configDir]),
+        },
+        scheduled,
+        prompt: buildQualityFeedbackPrompt(context.prompt, { quality, candidate: normalizeApiCandidate(parsed) }),
+        allowlist,
+        allowGuarded: Boolean(config?.candidate?.allowGuarded),
+        proposeOpenAi,
+      });
+
+      if (!proposal.ok) {
+        break;
+      }
+
+      try {
+        const attemptMemory = await loadMemory(paths.memory);
+        const attemptResult = parseAndValidateProposal({
+          proposal,
+          allowlist,
+          config,
+          ledger: await readLlmLedger(paths.ledger),
+          memory: attemptMemory,
+        });
+        parsed = attemptResult.parsed;
+        validation = attemptResult.validation;
+      } catch (error) {
+        lastError = String(error?.message ?? error);
+        lastRawPreview = byteBoundedPreview(proposal.raw);
+        invalidAttempts.push(await appendInvalidResponse(paths, {
+          attempt: qualityAttempt + 1,
+          maxAttempts: maxQualityAttempts,
+          command,
+          scheduled,
+          matrixId: paths.matrixId,
+          providerMode: baseProvider.mode,
+          source: proposal.source ?? null,
+          reason: 'candidate_invalid',
+          error: lastError,
+          raw: proposal.raw,
+        }));
+
+        parsed = null;
+        validation = null;
+        break;
+      }
+    }
+
+    if (proposal?.ok && (!parsed || !validation)) {
+      const status = await writeProviderStatus(paths, buildStatus({
+        ok: false,
+        reason: 'candidate_invalid',
+        command,
+        scheduled,
+        matrixId: paths.matrixId,
+        providerMode: config?.provider?.mode,
+        details: {
+          reviewSummary,
+          invalidAttempts,
+          error: lastError,
+        },
+      }));
+
+      return {
+        ok: false,
+        reason: 'candidate_invalid',
+        error: lastError,
+        status,
+        reviewSummary,
+      };
+    }
   }
 
   const identity = buildCandidateIdentity({ championFingerprint, validation });

@@ -42,6 +42,7 @@ import {
   selectPromotionManifestSource,
   shouldQueuePromotionManifest,
   withManifestPath,
+  applySchedulerStateToManifest,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -1275,7 +1276,7 @@ test('decideAutoPromotionAction falls back to history lineage when policy.lineag
   assert.equal(result.recommendation, 'promote');
   assert.deepEqual(result.failedGates, []);
 });
-test('decideAutoPromotionAction uses precomputed policy lineage when provided', () => {
+test('decideAutoPromotionAction ignores injected policy lineage and derives lineage from history events', () => {
   const result = decideAutoPromotionAction({
     latestManifest: {
       challenger: { configId: 'old-b', config: { minPredSum: 1.6 } },
@@ -1290,25 +1291,27 @@ test('decideAutoPromotionAction uses precomputed policy lineage when provided', 
       robustness: { aggregateScoreDelta: 2, aggregateRoiDeltaPct: 1, aggregateProfitFactorDelta: 0.03 },
     },
     championState: { configId: 'current-c', config: { minPredSum: 1.8 }, configFingerprint: 'fp-c' },
-    historyEvents: [],
+    historyEvents: [
+      {
+        type: 'autopromote',
+        timestamp: '2026-05-03T00:00:00.000Z',
+        fromFingerprint: 'fp-b',
+        toFingerprint: 'fp-c',
+        fromFamilyKey: 'family-b',
+        toFamilyKey: 'family-c',
+      },
+    ],
     policy: {
       enabled: true,
       cooldownHours: 0,
       maxPromotionsPerDay: 10,
       requireMatrixPromotion: true,
       lineage: {
-        recentTransitions: [
-          {
-            fromFingerprint: 'fp-b',
-            toFingerprint: 'fp-c',
-            fromFamilyKey: 'family-b',
-            toFamilyKey: 'family-c',
-          },
-        ],
-        recentPromotedFingerprints: ['fp-c'],
-        recentDemotedFingerprints: ['fp-b'],
-        recentPromotedFamilies: ['family-c'],
-        recentDemotedFamilies: ['family-b'],
+        recentTransitions: [],
+        recentPromotedFingerprints: [],
+        recentDemotedFingerprints: [],
+        recentPromotedFamilies: [],
+        recentDemotedFamilies: [],
       },
       lineagePolicy: {
         enabled: true,
@@ -1821,6 +1824,27 @@ test('pine script exports regime-facing features for asymmetry diagnostics', asy
   assert.match(source, /plot\(featureCautionDensity, "Feature_CautionDensity", display=display\.data_window\)/);
 });
 
+
+test('applySchedulerStateToManifest overwrites persisted stagnation metadata with post-cycle scheduler state', () => {
+  const manifest = {
+    noNewCandidateStreak: 1,
+    stagnationLevel: 0,
+    stagnationReason: null,
+    lastEscalatedAt: null,
+  };
+
+  const updated = applySchedulerStateToManifest(manifest, {
+    noNewCandidateStreak: 2,
+    stagnationLevel: 1,
+    stagnationReason: 'noNewCandidateStreak',
+    lastEscalatedAt: '2026-05-04T00:00:00.000Z',
+  });
+
+  assert.equal(updated.noNewCandidateStreak, 2);
+  assert.equal(updated.stagnationLevel, 1);
+  assert.equal(updated.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(updated.lastEscalatedAt, '2026-05-04T00:00:00.000Z');
+});
 
 test('buildScoutRegimeAnalysisArtifact aggregates all selected-candidate lab analyses', () => {
   const result = buildScoutRegimeAnalysisArtifact({

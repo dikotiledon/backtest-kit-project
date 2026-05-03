@@ -380,6 +380,16 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
   };
 }
 
+export function applySchedulerStateToManifest(manifest = {}, schedulerState = {}) {
+  return {
+    ...manifest,
+    noNewCandidateStreak: schedulerState?.noNewCandidateStreak ?? manifest?.noNewCandidateStreak ?? 0,
+    stagnationLevel: schedulerState?.stagnationLevel ?? manifest?.stagnationLevel ?? 0,
+    stagnationReason: schedulerState?.stagnationReason ?? manifest?.stagnationReason ?? null,
+    lastEscalatedAt: schedulerState?.lastEscalatedAt ?? manifest?.lastEscalatedAt ?? null,
+  };
+}
+
 export function buildScoutRegimeAnalysisArtifact({ matrixId, runId, selectedCandidate = null, matrixCandidates = [] } = {}) {
   const candidatePool = selectedCandidate ? [selectedCandidate] : matrixCandidates;
   const sourceLabResults = candidatePool.flatMap((candidate) => (
@@ -1252,45 +1262,6 @@ async function runScout(config) {
   const manifestPath = path.join(manifestsDir(trackedConfig), manifestName);
   const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
 
-  await writeJson(manifestPath, manifest);
-  await writeJson(latestManifestPath(trackedConfig), { ...manifest, manifestPath });
-
-  if (shouldQueuePromotionManifest(manifest)) {
-    const queueItem = buildPromotionQueueItem({
-      manifest: { ...manifest, manifestPath },
-      createdAt: manifest.generatedAt,
-    });
-    await appendPromotionQueueEvent(promotionQueueFilePath(trackedConfig), {
-      type: 'pending',
-      item: queueItem,
-      at: manifest.generatedAt,
-    });
-  }
-
-  await appendJsonl(historyPath(trackedConfig), {
-    timestamp: manifest.generatedAt,
-    type: 'cycle',
-    runId,
-    championConfigId: manifest.champion?.configId,
-    challengerConfigId: manifest.challenger?.configId,
-    recommendation: manifest.matrixDecision.recommendation,
-    summary: manifest.matrixDecision.summary,
-    steadyState,
-    noChangeStreak,
-    activeTrackId: manifest.activeTrackId,
-    windowSetId: manifest.windowSetId,
-    noveltySignature: manifest.noveltySignature,
-    rotationTrigger: manifest.rotationTrigger,
-    rotationReason: manifest.rotationReason,
-    sameTrackCycleStreak: manifest.sameTrackCycleStreak,
-    topCandidateSimilarity: manifest.topCandidateSimilarity,
-    promotionEligible: manifest.promotionEligible,
-    promotionEligibleReason: manifest.promotionEligibleReason,
-    noNewCandidate: manifest.noNewCandidate,
-    noNewCandidateStreak: manifest.noNewCandidateStreak,
-    rejectedCandidateFingerprint: manifest.rejectedCandidateFingerprint,
-  });
-
   const updatedSchedulerState = nextTrackState({
     state: schedulerState,
     policy: rotationPolicy,
@@ -1318,7 +1289,51 @@ async function runScout(config) {
   });
   await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
 
-  await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest }));
+  const finalManifest = applySchedulerStateToManifest(manifest, updatedSchedulerState);
+
+  await writeJson(manifestPath, finalManifest);
+  await writeJson(latestManifestPath(trackedConfig), { ...finalManifest, manifestPath });
+
+  if (shouldQueuePromotionManifest(finalManifest)) {
+    const queueItem = buildPromotionQueueItem({
+      manifest: { ...finalManifest, manifestPath },
+      createdAt: finalManifest.generatedAt,
+    });
+    await appendPromotionQueueEvent(promotionQueueFilePath(trackedConfig), {
+      type: 'pending',
+      item: queueItem,
+      at: finalManifest.generatedAt,
+    });
+  }
+
+  await appendJsonl(historyPath(trackedConfig), {
+    timestamp: finalManifest.generatedAt,
+    type: 'cycle',
+    runId,
+    championConfigId: finalManifest.champion?.configId,
+    challengerConfigId: finalManifest.challenger?.configId,
+    recommendation: finalManifest.matrixDecision.recommendation,
+    summary: finalManifest.matrixDecision.summary,
+    steadyState,
+    noChangeStreak,
+    activeTrackId: finalManifest.activeTrackId,
+    windowSetId: finalManifest.windowSetId,
+    noveltySignature: finalManifest.noveltySignature,
+    rotationTrigger: finalManifest.rotationTrigger,
+    rotationReason: finalManifest.rotationReason,
+    sameTrackCycleStreak: finalManifest.sameTrackCycleStreak,
+    topCandidateSimilarity: finalManifest.topCandidateSimilarity,
+    promotionEligible: finalManifest.promotionEligible,
+    promotionEligibleReason: finalManifest.promotionEligibleReason,
+    noNewCandidate: finalManifest.noNewCandidate,
+    noNewCandidateStreak: finalManifest.noNewCandidateStreak,
+    stagnationLevel: finalManifest.stagnationLevel,
+    stagnationReason: finalManifest.stagnationReason,
+    lastEscalatedAt: finalManifest.lastEscalatedAt,
+    rejectedCandidateFingerprint: finalManifest.rejectedCandidateFingerprint,
+  });
+
+  await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest: finalManifest }));
 
   const asymmetryAnalysis = buildScoutRegimeAnalysisArtifact({
     matrixId: trackedConfig.matrixId,
@@ -1332,10 +1347,10 @@ async function runScout(config) {
 
   const updatedHistoryEvents = await rebuildHistoryArtifacts(trackedConfig, championState);
   const previousManifest = await readPreviousManifest(trackedConfig, manifestName);
-  const liveDigestPath = await writeCurrentDigest(trackedConfig, { ...manifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);
+  const liveDigestPath = await writeCurrentDigest(trackedConfig, { ...finalManifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);
   const pruneResult = await pruneRunArtifacts(trackedConfig);
 
-  return { manifest, manifestPath, scoutPath, liveDigestPath, pruneResult };
+  return { manifest: finalManifest, manifestPath, scoutPath, liveDigestPath, pruneResult };
 }
 
 async function runDigest(config) {

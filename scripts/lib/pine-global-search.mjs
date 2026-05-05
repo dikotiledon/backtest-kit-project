@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+
+const GENERATOR_VERSION = 'global-search-v1';
 const DEFAULT_FAMILIES = ['entry', 'filters', 'risk', 'fusion-weight', 'asymmetry', 'exit-state'];
 const POSITIVE_KEYS = new Set([
   'minPredSum',
@@ -14,7 +17,9 @@ const BOOLEAN_KEYS = new Set([
   'useSupertrendFilter',
   'useSupertrendEntryConfirm',
   'useTrailingStop',
+  'useFusionV4',
 ]);
+const ARCHITECTURE_BOOLEAN_KEYS = new Set(['useFusionV4']);
 const KNOWN_KEYS = new Set([
   ...POSITIVE_KEYS,
   ...BOOLEAN_KEYS,
@@ -51,7 +56,12 @@ function hasFrozenKey(patch, frozenKeys) {
   return Object.keys(patch).some((key) => frozen.has(key));
 }
 
-export function validateGlobalMutationPatch(patch, { frozenKeys } = {}) {
+function buildCandidateId({ lane, mutationFamily, patch }) {
+  const canonicalPatch = JSON.stringify(Object.fromEntries(toPatchEntries(patch || {})));
+  return createHash('sha1').update(`${lane}|${mutationFamily}|${canonicalPatch}`).digest('hex').slice(0, 20);
+}
+
+export function validateGlobalMutationPatch(patch, { frozenKeys, allowArchitectureKeys = false } = {}) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     return { ok: false, reason: 'patch must be object' };
   }
@@ -62,6 +72,10 @@ export function validateGlobalMutationPatch(patch, { frozenKeys } = {}) {
 
   for (const [key, value] of Object.entries(patch)) {
     if (!KNOWN_KEYS.has(key)) return { ok: false, reason: 'unknown key', key };
+
+    if (ARCHITECTURE_BOOLEAN_KEYS.has(key) && !allowArchitectureKeys) {
+      return { ok: false, reason: 'architecture key blocked', key };
+    }
 
     if (BOOLEAN_KEYS.has(key)) {
       if (typeof value !== 'boolean') return { ok: false, reason: 'boolean key must be boolean', key };
@@ -123,6 +137,7 @@ export function buildGlobalMutationBatch({ incumbent, maxConfigs, frozenKeys, fa
   const limit = normalizeMaxConfigs(maxConfigs);
   if (limit === 0) return [];
 
+  const originConfigId = incumbent?.configId ?? incumbent?.config?.configId ?? null;
   const out = [];
   for (const family of selectedFamilies) {
     const patch = buildFamilyPatch({ family, config });
@@ -133,11 +148,19 @@ export function buildGlobalMutationBatch({ incumbent, maxConfigs, frozenKeys, fa
     const validation = validateGlobalMutationPatch(normalizedPatch, { frozenKeys });
     if (!validation.ok) continue;
 
+    const lane = 'global-all-parameter';
     out.push({
-      lane: 'global-all-parameter',
+      candidateId: buildCandidateId({ lane, mutationFamily: family, patch: normalizedPatch }),
+      lane,
       mutationFamily: family,
+      axis: family,
       patch: normalizedPatch,
       touchedKeys: Object.keys(normalizedPatch),
+      metadata: {
+        originConfigId,
+        generatorVersion: GENERATOR_VERSION,
+        mutationFamily: family,
+      },
     });
 
     if (out.length >= limit) break;

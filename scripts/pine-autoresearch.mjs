@@ -56,6 +56,7 @@ import {
   writeSchedulerState,
 } from './lib/pine-autoresearch-tracks.mjs';
 import { buildCandidateFamilyKey, summarizePromotionLineage } from './lib/pine-autoresearch-lineage.mjs';
+import { normalizeRegimeExitResearchConfig } from './lib/pine-regime-exit-config.mjs';
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -689,6 +690,7 @@ export async function loadConfig(cwd, configPath, overrides = {}) {
       pruneEvaluationRuns: raw.retention?.pruneEvaluationRuns ?? true,
       prunePartialRuns: raw.retention?.prunePartialRuns ?? true,
     },
+    regimeExitResearch: normalizeRegimeExitResearchConfig(raw.regimeExitResearch || {}),
   };
 
   return config;

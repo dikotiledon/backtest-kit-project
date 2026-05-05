@@ -40,7 +40,8 @@ import {
   buildRegimeAnalysisArtifact,
   summarizeSideMetrics,
 } from './lib/pine-autoresearch.mjs';
-import { stagePinnedDatasetForLab } from './lib/pine-dataset.mjs';
+import { stagePinnedDatasetForLab, validatePinnedCacheComplete } from './lib/pine-dataset.mjs';
+import { buildOfflineDataPlan, summarizeOfflineDataPlan } from './lib/pine-offline-data-plan.mjs';
 import {
   acquireAutoresearchLock,
   releaseAutoresearchLock,
@@ -721,6 +722,71 @@ async function stagePinnedData(config, labs) {
   return staged;
 }
 
+async function buildOfflineDataPreflight(config) {
+  const partitions = partitionLabs(config);
+  const labs = [
+    config.primaryLab,
+    ...(partitions.trainingLabs || []),
+    ...(partitions.selectionLabs || []),
+    ...(partitions.blindHoldoutLabs || []),
+  ];
+  const uniqueLabs = new Map();
+  for (const lab of labs) {
+    if (lab?.labId && !uniqueLabs.has(lab.labId)) uniqueLabs.set(lab.labId, lab);
+  }
+
+  const plan = buildOfflineDataPlan({
+    matrixId: config.matrixId,
+    pinnedData: config.pinnedData,
+    labs: [...uniqueLabs.values()],
+    offline: config.regimeExitResearch?.offline,
+  });
+
+  const requiredLabs = await Promise.all((plan.requiredLabs || []).map(async (lab) => {
+    if (!lab.requiresCacheComplete) return lab;
+    if (!config.pinnedData?.cacheRoot) {
+      return {
+        ...lab,
+        complete: false,
+        missingCount: Number(lab.limit || 1),
+      };
+    }
+    const validation = await validatePinnedCacheComplete({
+      cacheRoot: config.pinnedData.cacheRoot,
+      exchangeName: lab.exchangeName,
+      symbol: lab.symbol,
+      timeframe: lab.timeframe,
+      limit: lab.limit,
+      when: lab.when,
+    });
+    return {
+      ...lab,
+      complete: validation.complete,
+      missingCount: validation.missingCount,
+      missingTimestamps: validation.missingTimestamps,
+    };
+  }));
+
+  const checkedPlan = { ...plan, requiredLabs };
+  return {
+    plan: checkedPlan,
+    summary: summarizeOfflineDataPlan(checkedPlan),
+  };
+}
+
+async function appendOfflineDataMissingEvent(config, runId, offlineDataSummary) {
+  await appendJsonl(historyPath(config), {
+    timestamp: isoNow(),
+    type: 'cycle',
+    runId,
+    promotionEligible: false,
+    promotionEligibleReason: 'offlineDataMissing',
+    offlineDataSummary,
+    recommendation: 'hold',
+    summary: 'offlineDataMissing',
+  });
+}
+
 function buildRunId(config) {
   return `${slug(config.matrixId)}-${timestampId()}`;
 }
@@ -1112,6 +1178,19 @@ async function runScout(config) {
   }
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
+  if (config.regimeExitResearch?.enabled) {
+    const { summary: offlineDataSummary } = await buildOfflineDataPreflight(config);
+    if (!offlineDataSummary.ok && offlineDataSummary.mode === 'offline-strict') {
+      await appendOfflineDataMissingEvent(config, runId, offlineDataSummary);
+      return {
+        skipped: true,
+        reason: 'offlineDataMissing',
+        promotionEligible: false,
+        promotionEligibleReason: 'offlineDataMissing',
+        offlineDataSummary,
+      };
+    }
+  }
   const historyEventsBefore = await loadHistoryEvents(config);
   const schedulerStatePath = resolveSchedulerStatePath({ researchRoot: config.researchRoot, matrixId: config.matrixId });
   const loadedSchedulerState = await readSchedulerState(schedulerStatePath);

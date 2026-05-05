@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
-  "generatedAt": "2026-04-22T04:49:06.953Z",
-  "source": "local-cache",
+  "generatedAt": "2026-05-05T22:21:21.372Z",
+  "source": "ccxt",
   "exchangeName": "ccxt-exchange",
   "exchangeId": "binance",
   "lab": {
@@ -9,8 +9,8 @@
     "symbol": "ETHUSDT",
     "timeframe": "15m",
     "limit": 2500,
-    "when": "2026-02-14T10:30:00.000Z",
-    "exchange": "ccxt-exchange"
+    "when": "2026-02-14T10:30:00Z",
+    "exchange": "default_exchange"
   },
   "candleCount": 2500,
   "window": {

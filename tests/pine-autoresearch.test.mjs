@@ -35,6 +35,7 @@ import {
   loadConfig,
   manifestsDir,
   resolveAutopromoteQueueStatus,
+  resolveEffectiveRuntimeExchange,
   mergeSchedulerTabuFingerprints,
   resolvePromotionManifestPath,
   resolveTrackSelectionState,
@@ -840,6 +841,21 @@ test('decideCycleStartAction runs when no pending promotion exists', () => {
   assert.equal(result.reason, 'no_pending_promotion');
   assert.equal(result.pendingPromotion, null);
   assert.equal(result.summary, undefined);
+});
+
+test('resolveEffectiveRuntimeExchange uses pinned cache exchange for pinned runs', () => {
+  assert.equal(resolveEffectiveRuntimeExchange({
+    pinnedData: { enabled: true, exchangeName: 'ccxt-exchange' },
+    lab: { exchange: 'default_exchange' },
+  }), 'ccxt-exchange');
+  assert.equal(resolveEffectiveRuntimeExchange({
+    pinnedData: { enabled: false, exchangeName: 'ccxt-exchange' },
+    lab: { exchange: 'default_exchange' },
+  }), 'default_exchange');
+  assert.equal(resolveEffectiveRuntimeExchange({
+    pinnedData: { enabled: true },
+    lab: { exchange: 'default_exchange' },
+  }), 'default_exchange');
 });
 
 test('buildPromotionQueueItem accepts a promote manifest from autoresearch output', () => {

@@ -930,6 +930,10 @@ export function buildOfflineDataMissingCycleEvent({ runId, offlineDataSummary } 
   };
 }
 
+export function resolveEffectiveRuntimeExchange({ pinnedData = {}, lab = {} } = {}) {
+  return pinnedData?.enabled ? (pinnedData.exchangeName || lab.exchange || null) : (lab.exchange || null);
+}
+
 // Exported as pure test seam for runScout offline-missing payload shape.
 export function buildOfflineDataMissingSkipResult({ offlineDataSummary } = {}) {
   return {
@@ -1155,7 +1159,7 @@ export async function ensureChampionState(config) {
 
 async function runPrimarySweep(config, runId, { sweepOffset = 0, totalCombos = null, variantFilePath = null } = {}) {
   const lab = config.primaryLab;
-  const effectiveExchange = lab.exchange || (config.pinnedData?.enabled ? config.pinnedData.exchangeName : null);
+  const effectiveExchange = resolveEffectiveRuntimeExchange({ pinnedData: config.pinnedData, lab });
   await stagePinnedData(config, [lab]);
 
   const sweepArgs = [
@@ -1205,7 +1209,7 @@ async function runPrimarySweep(config, runId, { sweepOffset = 0, totalCombos = n
 
 async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }) {
   const evalDir = path.join(evaluationsRoot(config), runId, lab.labId);
-  const effectiveExchange = lab.exchange || (config.pinnedData?.enabled ? config.pinnedData.exchangeName : null);
+  const effectiveExchange = resolveEffectiveRuntimeExchange({ pinnedData: config.pinnedData, lab });
   await fs.mkdir(evalDir, { recursive: true });
   await stagePinnedData(config, [lab]);
 

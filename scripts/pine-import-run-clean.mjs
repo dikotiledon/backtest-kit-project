@@ -197,7 +197,7 @@ async function main() {
   if (when) {
     runArgs.push('--when', when);
   }
-  if (exchange) {
+  if (exchange && !noCache) {
     runArgs.push('--exchange', exchange);
   }
   if (noCache) {

@@ -43,6 +43,7 @@ import {
   shouldQueuePromotionManifest,
   withManifestPath,
   applySchedulerStateToManifest,
+  collectOfflinePreflightLabs,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -2576,6 +2577,16 @@ test('loadConfig preserves stagnation defaults when raw overrides subset of fiel
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('collectOfflinePreflightLabs includes primary + shadow + blind holdout once by labId', () => {
+  const labs = collectOfflinePreflightLabs({
+    primaryLab: { labId: 'primary' },
+    shadowLabs: [{ labId: 'shadow-1' }, { labId: 'primary' }],
+    blindHoldoutLabs: [{ labId: 'blind-1' }, { labId: 'shadow-1' }],
+  });
+
+  assert.deepEqual(labs.map((lab) => lab.labId), ['primary', 'shadow-1', 'blind-1']);
 });
 
 test('partitionLabs keeps blind holdout out of selection labs', () => {

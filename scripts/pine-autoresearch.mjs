@@ -722,23 +722,24 @@ async function stagePinnedData(config, labs) {
   return staged;
 }
 
-async function buildOfflineDataPreflight(config) {
-  const partitions = partitionLabs(config);
+export function collectOfflinePreflightLabs(config = {}) {
   const labs = [
     config.primaryLab,
-    ...(partitions.trainingLabs || []),
-    ...(partitions.selectionLabs || []),
-    ...(partitions.blindHoldoutLabs || []),
+    ...(config.shadowLabs || []),
+    ...(config.blindHoldoutLabs || []),
   ];
   const uniqueLabs = new Map();
   for (const lab of labs) {
     if (lab?.labId && !uniqueLabs.has(lab.labId)) uniqueLabs.set(lab.labId, lab);
   }
+  return [...uniqueLabs.values()];
+}
 
+async function buildOfflineDataPreflight(config) {
   const plan = buildOfflineDataPlan({
     matrixId: config.matrixId,
     pinnedData: config.pinnedData,
-    labs: [...uniqueLabs.values()],
+    labs: collectOfflinePreflightLabs(config),
     offline: config.regimeExitResearch?.offline,
   });
 

@@ -14,13 +14,20 @@ async function writeFixture(rows) {
   return file;
 }
 
+async function writeRawFixture(contents) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-streaming-metrics-'));
+  const file = path.join(dir, 'fixture.jsonl');
+  await fs.writeFile(file, contents, 'utf8');
+  return file;
+}
+
 test('analyzeJsonlFileStreaming matches full analyzer on compact fixture', async () => {
   const rows = [
-    { timestamp: 1, Close: 100, Signal_Long: 1, SL: 95, TP: 110 },
-    { timestamp: 2, Close: 105 },
-    { timestamp: 3, Close: 110 },
-    { timestamp: 4, Close: 120, Signal_Short: 1, SL: 130, TP: 100 },
-    { timestamp: 5, Close: 100 },
+    { timestamp: '2026-01-01T00:00:00.000Z', Close: 100, Signal: 1, StopLoss: 95, TakeProfit: 110 },
+    { timestamp: '2026-01-01T00:15:00.000Z', Close: 105 },
+    { timestamp: '2026-01-01T00:30:00.000Z', Close: 110 },
+    { timestamp: '2026-01-01T00:45:00.000Z', Close: 120, Signal: -1, StopLoss: 130, TakeProfit: 100 },
+    { timestamp: '2026-01-01T01:00:00.000Z', Close: 100 },
   ];
   const file = await writeFixture(rows);
 
@@ -28,6 +35,60 @@ test('analyzeJsonlFileStreaming matches full analyzer on compact fixture', async
   const streaming = await analyzeJsonlFileStreaming(file, { minTrades: 0 });
 
   assert.equal(streaming.rowCount, full.rowCount);
+  assert.equal(streaming.metrics.tradeCount, full.metrics.tradeCount);
+  assert.equal(Number(streaming.metrics.roiPct.toFixed(6)), Number(full.metrics.roiPct.toFixed(6)));
+  assert.equal(Number(streaming.score.toFixed(6)), Number(full.score.toFixed(6)));
+});
+
+test('streaming rowCount parity with mixed-validity rows and matching metrics', async () => {
+  const rows = [
+    { timestamp: '2026-01-01T00:00:00.000Z', Close: 100, Signal: 1, StopLoss: 90, TakeProfit: 130 },
+    { timestamp: '2026-01-01T00:15:00.000Z', Close: 105 },
+    { timestamp: '2026-01-01T00:30:00.000Z' },
+    { Close: 111 },
+    { timestamp: '2026-01-01T00:45:00.000Z', Close: 110, Signal: -1 },
+    { timestamp: '2026-01-01T01:00:00.000Z', Close: 102 },
+  ];
+  const file = await writeFixture(rows);
+
+  const full = await analyzeJsonlFile(file, { minTrades: 0 });
+  const streaming = await analyzeJsonlFileStreaming(file, { minTrades: 0 });
+
+  assert.equal(streaming.rowCount, full.rowCount);
+  assert.equal(streaming.rowCount, rows.length);
+  assert.equal(streaming.metrics.tradeCount, full.metrics.tradeCount);
+  assert.equal(Number(streaming.metrics.roiPct.toFixed(6)), Number(full.metrics.roiPct.toFixed(6)));
+  assert.equal(Number(streaming.score.toFixed(6)), Number(full.score.toFixed(6)));
+});
+
+test('streaming malformed JSONL throws contextual file and line error', async () => {
+  const file = await writeRawFixture([
+    JSON.stringify({ timestamp: '2026-01-01T00:00:00.000Z', Close: 100 }),
+    '{"timestamp": "2026-01-01T00:15:00.000Z", "Close": }',
+    JSON.stringify({ timestamp: '2026-01-01T00:30:00.000Z', Close: 101 }),
+  ].join('\n'));
+
+  await assert.rejects(
+    () => analyzeJsonlFileStreaming(file, { minTrades: 0 }),
+    (error) => {
+      assert.match(error.message, new RegExp(`Invalid JSONL at .*fixture\\.jsonl:2$`));
+      return true;
+    },
+  );
+});
+
+test('streaming/full parity on same-bar flip and end-of-data forced close edge', async () => {
+  const rows = [
+    { timestamp: '2026-01-01T00:00:00.000Z', Close: 100, Signal: 1, EstimatedTime: 9999 },
+    { timestamp: '2026-01-01T00:15:00.000Z', Close: 102, Signal: -1, EstimatedTime: 9999 },
+    { timestamp: '2026-01-01T00:30:00.000Z', Close: 99, Signal: 1, EstimatedTime: 9999 },
+    { timestamp: '2026-01-01T00:45:00.000Z', Close: 105 },
+  ];
+  const file = await writeFixture(rows);
+
+  const full = await analyzeJsonlFile(file, { minTrades: 0 });
+  const streaming = await analyzeJsonlFileStreaming(file, { minTrades: 0 });
+
   assert.equal(streaming.metrics.tradeCount, full.metrics.tradeCount);
   assert.equal(Number(streaming.metrics.roiPct.toFixed(6)), Number(full.metrics.roiPct.toFixed(6)));
   assert.equal(Number(streaming.score.toFixed(6)), Number(full.score.toFixed(6)));

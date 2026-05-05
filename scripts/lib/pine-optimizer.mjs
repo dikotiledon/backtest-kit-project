@@ -325,7 +325,8 @@ export function summarizeSignalDiagnostics(rows) {
 }
 
 export async function analyzeJsonlFile(filePath, options = {}) {
-  const rows = normalizeRows(await loadJsonlRows(filePath));
+  const parsedRows = await loadJsonlRows(filePath);
+  const rows = normalizeRows(parsedRows);
   const trades = simulateTrades(rows, options);
   const metrics = calculateMetrics(trades);
   const score = scoreMetrics(metrics, options);
@@ -333,7 +334,7 @@ export async function analyzeJsonlFile(filePath, options = {}) {
 
   return {
     filePath: path.resolve(filePath),
-    rowCount: rows.length,
+    rowCount: parsedRows.length,
     timeframeMinutes: options.timeframeMinutes || inferTimeframeMinutes(rows),
     rows,
     trades,

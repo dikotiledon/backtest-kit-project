@@ -45,12 +45,18 @@ function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
 export async function* iterateJsonlRows(filePath) {
   const stream = fs.createReadStream(filePath, { encoding: 'utf8' });
   const rl = readline.createInterface({ input: stream, crlfDelay: Infinity });
+  let lineNumber = 0;
 
   try {
     for await (const line of rl) {
+      lineNumber += 1;
       const trimmed = line.trim();
       if (!trimmed) continue;
-      yield JSON.parse(trimmed);
+      try {
+        yield JSON.parse(trimmed);
+      } catch (error) {
+        throw new Error(`Invalid JSONL at ${filePath}:${lineNumber}`, { cause: error });
+      }
     }
   } finally {
     rl.close();
@@ -268,7 +274,7 @@ export function createIncrementalTradeSimulator(options = {}) {
       }
       return {
         trades,
-        rowCount: index,
+        rowCount,
         diagnostics: diagnostics.result(),
         timeframeMinutes: inferTimeframe(),
       };

@@ -69,6 +69,40 @@ test('buildPromotionQueueItem captures lineage family keys and robustness snapsh
   assert.deepEqual(item.robustness, { aggregateScoreDelta: 8 });
 });
 
+test('buildPromotionQueueItem keeps queue payload compact and ignores heavy regime-exit manifest fields', () => {
+  const manifest = {
+    runId: 'run-regime-queue',
+    generatedAt: '2026-05-04T00:00:00.000Z',
+    manifestPath: '/tmp/run-regime-queue.json',
+    candidateFingerprint: 'fp-regime-b',
+    championFingerprint: 'fp-regime-a',
+    candidateFamilyKey: 'family-regime-b',
+    championFamilyKey: 'family-regime-a',
+    robustness: { aggregateScoreDelta: 4.2 },
+    challenger: { configId: 'challenger-regime-b' },
+    champion: { configId: 'champion-regime-a' },
+    matrixDecision: { recommendation: 'promote' },
+    researchBudgetMode: 'regime-exit',
+    resourceBudget: { maxConcurrentLabWorkers: 2 },
+    objectiveBreakdown: { minRoiPct: 25 },
+    offlineDataSummary: { ok: true, mode: 'offline-strict' },
+    shadowRegimeScoreboard: {
+      selectedLane: 'exitRegime',
+      laneBudgetAllocation: { exitRegime: 0.35 },
+      heavyRows: Array.from({ length: 2500 }, (_, i) => ({ i, value: `x-${i}` })),
+    },
+  };
+
+  const item = buildPromotionQueueItem({ manifest });
+
+  assert.equal('researchBudgetMode' in item, false);
+  assert.equal('resourceBudget' in item, false);
+  assert.equal('objectiveBreakdown' in item, false);
+  assert.equal('offlineDataSummary' in item, false);
+  assert.equal('shadowRegimeScoreboard' in item, false);
+  assert.equal(JSON.stringify(item).includes('heavyRows'), false);
+});
+
 test('readPromotionQueue returns empty queue when file is missing', async () => {
   const dir = await makeTempDir();
   const queuePath = path.join(dir, 'missing.jsonl');

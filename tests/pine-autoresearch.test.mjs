@@ -868,6 +868,80 @@ test('buildPromotionQueueItem accepts a promote manifest from autoresearch outpu
   assert.equal(queueItem.createdAt, '2026-04-30T00:00:00.000Z');
 });
 
+test('legacy promote manifests without regime-exit fields remain queueable and promotable', () => {
+  const manifest = {
+    runId: 'run-legacy',
+    generatedAt: '2026-05-01T00:00:00.000Z',
+    manifestPath: 'research/manifests/run-legacy.json',
+    matrixDecision: { recommendation: 'promote' },
+    candidateFingerprint: 'candidate-legacy-fp',
+    championFingerprint: 'champion-legacy-fp',
+    challenger: { configId: 'candidate-legacy', config: { useTrailingStop: true } },
+    champion: { configId: 'champion-legacy' },
+  };
+
+  assert.equal(manifest.researchBudgetMode, undefined);
+  assert.equal(manifest.shadowRegimeScoreboard, undefined);
+  assert.equal(shouldQueuePromotionManifest(manifest), true);
+
+  const queuedItem = buildPromotionQueueItem({ manifest, createdAt: manifest.generatedAt });
+  const action = decideQueuedPromotionAction({
+    queuedItem,
+    manifest,
+    championState: {
+      config: { useTrailingStop: false },
+      configFingerprint: manifest.championFingerprint,
+    },
+    autoAction: { recommendation: 'promote', summary: 'All legacy gates passed.' },
+  });
+
+  assert.equal(action.recommendation, 'promote');
+  assert.equal(action.status, 'promoted');
+  assert.equal(action.reason, 'Queued promotion guards passed');
+});
+
+test('regime-exit manifest shadow signals stay advisory and cannot bypass existing autopromote gates', () => {
+  const manifest = {
+    runId: 'run-regime',
+    generatedAt: '2026-05-01T00:00:00.000Z',
+    manifestPath: 'research/manifests/run-regime.json',
+    matrixDecision: { recommendation: 'promote' },
+    candidateFingerprint: 'candidate-regime-fp',
+    championFingerprint: 'champion-regime-fp',
+    challenger: { configId: 'candidate-regime', config: { useTrailingStop: true } },
+    champion: { configId: 'champion-regime' },
+    researchBudgetMode: 'regime-exit',
+    shadowRegimeScoreboard: {
+      selectedLane: 'exitRegime',
+      recommendation: 'switch-now',
+      score: 0.99,
+    },
+    promotion: {
+      allowAutomaticRegimeSwitching: false,
+      requireGlobalChampionAnchor: true,
+    },
+  };
+
+  const queuedItem = buildPromotionQueueItem({ manifest, createdAt: manifest.generatedAt });
+  const blocked = decideQueuedPromotionAction({
+    queuedItem,
+    manifest,
+    championState: {
+      config: { useTrailingStop: false },
+      configFingerprint: manifest.championFingerprint,
+    },
+    autoAction: {
+      recommendation: 'hold',
+      summary: 'Auto-promote hold: failed matrix/expectancy/trade/roi guard and global champion anchor gate.',
+    },
+  });
+
+  assert.equal(blocked.recommendation, 'hold');
+  assert.equal(blocked.status, 'blocked');
+  assert.match(blocked.reason, /global champion anchor gate/i);
+  assert.equal(canForceQueuedPromotion(blocked), true);
+});
+
 test('decideAutoresearchOutcome holds when expectancy regresses despite a higher win rate', () => {
   const incumbent = makeResult({
     configId: 'champion',

@@ -1045,11 +1045,11 @@ test('pine test script defaults to the current tuned fusion v4 profile', async (
   assert.match(source, /useDivergenceContext\s*=\s*input\.bool\(true,\s+title="Use Divergence Context"/);
   assert.match(source, /divPivotLeft\s*=\s*input\.int\(3,\s+title="Divergence Pivot Left"/);
   assert.match(source, /divPivotRight\s*=\s*input\.int\(3,\s+title="Divergence Pivot Right"/);
-  assert.match(source, /divLongBoostValue\s*=\s*input\.float\(0\.25,\s+title="Divergence Long Boost"/);
-  assert.match(source, /divShortBoostValue\s*=\s*input\.float\(0\.25,\s+title="Divergence Short Boost"/);
+  assert.match(source, /divLongBoostValue\s*=\s*input\.float\(0\.7,\s+title="Divergence Long Boost"/);
+  assert.match(source, /divShortBoostValue\s*=\s*input\.float\(0\.7,\s+title="Divergence Short Boost"/);
   assert.match(source, /divCautionPenaltyValue\s*=\s*input\.float\(0(?:\.0)?,\s+title="Divergence Caution Penalty"/);
   assert.match(source, /slAtrMult\s*=\s*input\.float\(0\.5,\s+title="SL ATR x"/);
-  assert.match(source, /tpAtrMult\s*=\s*input\.float\(5\.5,\s+title="TP ATR x \(1:1 R:R by default\)"/);
+  assert.match(source, /tpAtrMult\s*=\s*input\.float\(7\.6,\s+title="TP ATR x \(1:1 R:R by default\)"/);
 });
 
 test('normalizeVariantRecords accepts metadata-backed search variants', () => {

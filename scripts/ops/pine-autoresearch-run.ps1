@@ -62,8 +62,11 @@ function Test-ProcessOwnsLock {
 
   try {
     $processStart = [DateTimeOffset]$process.StartTime.ToUniversalTime()
-    $delta = [Math]::Abs(($processStart.UtcDateTime - $StartedAt.UtcDateTime).TotalSeconds)
-    return $delta -le 5
+    # The lock timestamp is written when the already-running scheduler process acquires
+    # the file lock. A valid owner can therefore start well before StartedAt. Treat it
+    # as stale only when the current process started after the lock timestamp, which
+    # indicates PID reuse.
+    return $processStart.UtcDateTime -le $StartedAt.UtcDateTime.AddSeconds(5)
   } catch {
     return $true
   }

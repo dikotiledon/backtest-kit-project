@@ -7,11 +7,15 @@ function toNumberOr(value, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+function round4(value) {
+  return Math.round(value * 10000) / 10000;
+}
+
 export function freezeRegimeThresholds(raw = {}) {
   return {
-    atrPctMedian: toFiniteOr(toNumberOr(raw.atrPctMedian), 0),
-    trendStrengthMedian: toFiniteOr(toNumberOr(raw.trendStrengthMedian), 0),
-    longShortEdgeDelta: toFiniteOr(toNumberOr(raw.longShortEdgeDelta), 0)
+    atrPctMedian: toFiniteOr(Number(raw.atrPctMedian), Number.POSITIVE_INFINITY),
+    trendStrengthMedian: toFiniteOr(Number(raw.trendStrengthMedian), Number.POSITIVE_INFINITY),
+    longShortEdgeDelta: toFiniteOr(Number(raw.longShortEdgeDelta), Number.POSITIVE_INFINITY)
   };
 }
 
@@ -27,7 +31,8 @@ export function classifyRegimeSlice(row = {}, thresholds = {}) {
 
   const longEdge = toNumberOr(row.longEdge);
   const shortEdge = toNumberOr(row.shortEdge);
-  const sideEdge = Number.isFinite(row.sideEdge) ? Number(row.sideEdge) : longEdge - shortEdge;
+  const sideEdgeParsed = Number(row.sideEdge);
+  const sideEdge = Number.isFinite(sideEdgeParsed) ? sideEdgeParsed : longEdge - shortEdge;
 
   if (row.side === 'long' && sideEdge >= frozen.longShortEdgeDelta) {
     labels.push('long-favored');
@@ -45,25 +50,38 @@ export function summarizeRegimeSliceMetrics({ regimeSliceId, trades = [], minTra
   const tradeCount = normalizedTrades.length;
 
   let totalPnl = 0;
+  let validPnlCount = 0;
+  let invalidPnlCount = 0;
   let wins = 0;
 
   for (const trade of normalizedTrades) {
-    const pnl = toNumberOr(trade?.pnl);
+    const pnlRaw = trade?.pnl;
+    const pnl = Number(pnlRaw);
+
+    if (pnlRaw === null || pnlRaw === undefined || pnlRaw === '' || !Number.isFinite(pnl)) {
+      invalidPnlCount += 1;
+      continue;
+    }
+
+    validPnlCount += 1;
     totalPnl += pnl;
     if (pnl > 0) wins += 1;
   }
 
-  const avgPnl = tradeCount > 0 ? totalPnl / tradeCount : 0;
-  const winRatePct = tradeCount > 0 ? (wins / tradeCount) * 100 : 0;
+  const avgPnl = validPnlCount > 0 ? totalPnl / validPnlCount : 0;
+  // Contract: winRatePct uses percent scale [0, 100], not fraction [0, 1].
+  const winRatePct = validPnlCount > 0 ? (wins / validPnlCount) * 100 : 0;
   const requiredTrades = toNumberOr(minTrades, 30);
   const promotionEligible = tradeCount >= requiredTrades;
 
   return {
     regimeSliceId: regimeSliceId ?? null,
     tradeCount,
-    totalPnl,
-    avgPnl,
-    winRatePct,
+    validPnlCount,
+    invalidPnlCount,
+    totalPnl: round4(totalPnl),
+    avgPnl: round4(avgPnl),
+    winRatePct: round4(winRatePct),
     promotionEligible,
     reason: promotionEligible ? null : 'insufficientRegimeTrades'
   };

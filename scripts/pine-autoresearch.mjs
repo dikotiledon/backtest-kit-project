@@ -58,6 +58,9 @@ import {
 } from './lib/pine-autoresearch-tracks.mjs';
 import { buildCandidateFamilyKey, summarizePromotionLineage } from './lib/pine-autoresearch-lineage.mjs';
 import { normalizeRegimeExitResearchConfig } from './lib/pine-regime-exit-config.mjs';
+import { allocateRegimeExitLaneBudget, selectNextResearchLane } from './lib/pine-regime-exit-scheduler.mjs';
+import { buildExitFamilyCandidates } from './lib/pine-exit-generators.mjs';
+import { buildGlobalMutationBatch } from './lib/pine-global-search.mjs';
 
 const DEFAULT_REGIME_EXIT_STATE = {
   enabled: false,
@@ -71,6 +74,132 @@ const DEFAULT_REGIME_EXIT_STATE = {
   offlineDataSummary: null,
   shadowRegimeScoreboard: null,
 };
+
+
+function summarizeRegimeLaneGenerator({ selectedLane, championState, config, searchBatch }) {
+  const laneMap = {
+    exploit: ['exploit'],
+    exitRegime: ['exitRegime', 'exit-regime'],
+    globalAllParameter: ['globalAllParameter', 'global-all-parameter'],
+    robustness: ['robustness'],
+  };
+  const laneAliases = laneMap[selectedLane] || [];
+  const searchBatchCount = Array.isArray(searchBatch)
+    ? searchBatch.filter((item) => laneAliases.includes(item?.lane)).length
+    : 0;
+
+  const summary = {
+    lane: selectedLane || null,
+    laneKind: selectedLane || null,
+    candidateCount: searchBatchCount,
+  };
+
+  if (selectedLane === 'exitRegime') {
+    const generated = buildExitFamilyCandidates({
+      incumbent: championState,
+      regimeSliceId: 'scout-preview',
+      maxConfigs: Math.max(1, Number(config?.maxConfigs) || 1),
+    });
+    summary.candidateCount = generated.length;
+    summary.blockedFamilyCount = Array.isArray(generated[0]?.metadata?.blockedFamilies)
+      ? generated[0].metadata.blockedFamilies.length
+      : 0;
+  } else if (selectedLane === 'globalAllParameter') {
+    const generated = buildGlobalMutationBatch({
+      incumbent: championState,
+      maxConfigs: Math.max(1, Number(config?.maxConfigs) || 1),
+    });
+    summary.candidateCount = generated.length;
+    summary.blockedFamilyCount = 0;
+  }
+
+  return summary;
+}
+
+export function buildRegimeExitStateForScout({
+  config,
+  championState,
+  historyEventsBefore = [],
+  searchBatch = [],
+  offlineDataSummary = null,
+  schedulerState = {},
+} = {}) {
+  if (!config?.regimeExitResearch?.enabled) return null;
+
+  const regimeConfig = config.regimeExitResearch || {};
+  const resourceConfig = regimeConfig.resource || {};
+  const objectiveConfig = regimeConfig.objective || {};
+  const laneBudgetAllocation = allocateRegimeExitLaneBudget({
+    maxConfigs: config.maxConfigs,
+    lanes: regimeConfig.lanes,
+  });
+  const selectedLane = selectNextResearchLane({
+    stagnationLevel: schedulerState?.stagnationLevel ?? 0,
+    budgetDebt: schedulerState?.budgetDebt || {},
+    lanesEnabled: {
+      exploit: true,
+      exitRegime: regimeConfig.exitRegimeEnabled !== false,
+      globalAllParameter: regimeConfig.globalAllParameterEnabled !== false,
+      robustness: regimeConfig.robustnessLadderEnabled !== false,
+    },
+  });
+
+  const generatorSummary = summarizeRegimeLaneGenerator({
+    selectedLane,
+    championState,
+    config,
+    searchBatch,
+  });
+
+  const mode = regimeConfig.offline?.mode || null;
+  const compactOfflineDataSummary = offlineDataSummary
+    ? {
+        ok: offlineDataSummary.ok === true,
+        mode: offlineDataSummary.mode || mode,
+        requiredLabCount: Array.isArray(offlineDataSummary.requiredLabs) ? offlineDataSummary.requiredLabs.length : undefined,
+        missingLabCount: Array.isArray(offlineDataSummary.missingLabs) ? offlineDataSummary.missingLabs.length : undefined,
+      }
+    : mode
+      ? { ok: null, mode }
+      : null;
+
+  return {
+    enabled: true,
+    researchBudgetMode: 'regime-exit',
+    resourceBudget: {
+      maxConcurrentLabWorkers: Math.max(1, Number(resourceConfig.maxConcurrentLabWorkers) || 1),
+      maxCandidateBatchSize: Math.max(1, Number(resourceConfig.maxCandidateBatchSize) || 1),
+      maxRowsLoadedPerWorker: Math.max(100, Number(resourceConfig.maxRowsLoadedPerWorker) || 100),
+    },
+    resourceUsageSummary: {
+      workerModel: regimeConfig.childWorkerIsolationEnabled === false ? 'shared' : 'isolated',
+      streamingMetricsEnabled: regimeConfig.streamingMetricsEnabled !== false,
+      searchBatchSize: Array.isArray(searchBatch) ? searchBatch.length : 0,
+    },
+    checkpointState: {
+      historyEventCount: Array.isArray(historyEventsBefore) ? historyEventsBefore.length : 0,
+      schedulerStagnationLevel: schedulerState?.stagnationLevel ?? 0,
+    },
+    objectiveBreakdown: {
+      minRoiPct: objectiveConfig.minRoiPct ?? null,
+      minExpectancyDelta: objectiveConfig.minExpectancyDelta ?? null,
+      maxDrawdownDeltaPct: objectiveConfig.maxDrawdownDeltaPct ?? null,
+      minTradeRatioVsIncumbent: objectiveConfig.minTradeRatioVsIncumbent ?? null,
+    },
+    multipleTestingPenalty: {
+      base: objectiveConfig.multipleTestingPenaltyBase ?? null,
+      step: objectiveConfig.multipleTestingPenaltyStep ?? null,
+    },
+    holdoutVerdict: null,
+    offlineDataSummary: compactOfflineDataSummary,
+    shadowRegimeScoreboard: {
+      selectedLane,
+      laneBudgetAllocation,
+      generatorSummary,
+      stagnationLevel: schedulerState?.stagnationLevel ?? 0,
+    },
+  };
+}
 
 function parseArgs(argv) {
   const out = { _: [] };
@@ -1221,8 +1350,9 @@ export async function runScout(config) {
   }
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
+  let offlineDataSummary = null;
   if (config.regimeExitResearch?.enabled) {
-    const offlineDataSummary = await buildOfflineDataPreflight(config);
+    offlineDataSummary = await buildOfflineDataPreflight(config);
     if (!offlineDataSummary.ok && offlineDataSummary.mode === 'offline-strict') {
       await appendOfflineDataMissingEvent(config, runId, offlineDataSummary);
       return buildOfflineDataMissingSkipResult({ offlineDataSummary });
@@ -1347,6 +1477,15 @@ export async function runScout(config) {
       ? 1
       : 0;
 
+  const regimeExitState = buildRegimeExitStateForScout({
+    config: trackedConfig,
+    championState,
+    historyEventsBefore,
+    searchBatch: searchVariants,
+    offlineDataSummary,
+    schedulerState,
+  });
+
   const orchestration = buildScoutOrchestrationState({
     config: trackedConfig,
     runId,
@@ -1373,6 +1512,7 @@ export async function runScout(config) {
       labSetId,
       gridName,
     },
+    regimeExitState,
   });
   const { steadyState, noChangeStreak, manifest } = orchestration;
 

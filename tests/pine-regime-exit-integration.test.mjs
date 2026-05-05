@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildScoutOrchestrationState } from '../scripts/pine-autoresearch.mjs';
+import { buildRegimeExitStateForScout, buildScoutOrchestrationState } from '../scripts/pine-autoresearch.mjs';
 
 function baseInput() {
   return {
@@ -56,4 +56,66 @@ test('regime-exit enabled surfaces compact manifest fields', () => {
   assert.equal(result.manifest.objectiveBreakdown !== undefined, true);
   assert.equal(result.manifest.offlineDataSummary !== undefined, true);
   assert.equal(result.manifest.shadowRegimeScoreboard !== undefined, true);
+});
+
+
+test('buildRegimeExitStateForScout returns compact staged summaries and manifest-ready enabled fields', () => {
+  const seed = baseInput();
+  seed.config.regimeExitResearch = {
+    enabled: true,
+    lanes: {
+      exploitRatio: 0.25,
+      exitRegimeRatio: 0.35,
+      globalAllParameterRatio: 0.25,
+      robustnessRatio: 0.15,
+    },
+    resource: { maxConcurrentLabWorkers: 2, maxCandidateBatchSize: 6, maxRowsLoadedPerWorker: 120000 },
+    objective: {
+      minRoiPct: 25,
+      minExpectancyDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeRatioVsIncumbent: 0.8,
+      multipleTestingPenaltyBase: 0.25,
+      multipleTestingPenaltyStep: 0.05,
+    },
+    offline: { mode: 'offline-strict' },
+    exitRegimeEnabled: true,
+    globalAllParameterEnabled: true,
+    robustnessLadderEnabled: true,
+    streamingMetricsEnabled: true,
+    childWorkerIsolationEnabled: true,
+  };
+
+  const regimeExitState = buildRegimeExitStateForScout({
+    config: seed.config,
+    championState: seed.championState,
+    historyEventsBefore: seed.historyEventsBefore,
+    searchBatch: seed.searchBatch,
+    offlineDataSummary: { ok: true, mode: 'offline-strict' },
+    schedulerState: { stagnationLevel: 1, budgetDebt: { globalAllParameter: 2 } },
+  });
+
+  assert.equal(regimeExitState.enabled, true);
+  assert.equal(regimeExitState.researchBudgetMode, 'regime-exit');
+  assert.equal(regimeExitState.resourceBudget.maxConcurrentLabWorkers >= 1, true);
+  assert.equal(typeof regimeExitState.resourceUsageSummary.searchBatchSize, 'number');
+  assert.equal(typeof regimeExitState.checkpointState.historyEventCount, 'number');
+  assert.equal(regimeExitState.objectiveBreakdown.minRoiPct, 25);
+  assert.equal(regimeExitState.multipleTestingPenalty.base, 0.25);
+  assert.equal(regimeExitState.holdoutVerdict, null);
+  assert.equal(regimeExitState.offlineDataSummary.mode, 'offline-strict');
+  assert.equal(typeof regimeExitState.shadowRegimeScoreboard.selectedLane, 'string');
+  assert.equal(regimeExitState.shadowRegimeScoreboard.laneBudgetAllocation.exitRegime >= 0, true);
+  assert.equal(typeof regimeExitState.shadowRegimeScoreboard.generatorSummary.candidateCount, 'number');
+
+  const orchestration = buildScoutOrchestrationState({
+    ...seed,
+    regimeExitState,
+  });
+
+  assert.equal(orchestration.manifest.researchBudgetMode, 'regime-exit');
+  assert.equal(orchestration.manifest.resourceBudget.maxConcurrentLabWorkers >= 1, true);
+  assert.equal(orchestration.manifest.objectiveBreakdown.minRoiPct, 25);
+  assert.equal(orchestration.manifest.offlineDataSummary.mode, 'offline-strict');
+  assert.equal(orchestration.manifest.shadowRegimeScoreboard !== undefined, true);
 });

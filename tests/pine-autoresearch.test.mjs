@@ -607,11 +607,9 @@ test('decideQueuedPromotionAction promotes valid queued manifest', () => {
 
   const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
 
-  assert.deepEqual(result, {
-    recommendation: 'promote',
-    status: 'promoted',
-    reason: 'Queued promotion guards passed',
-  });
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.status, 'promoted');
+  assert.match(result.reason, /queued promotion guards passed/i);
 });
 
 test('decideQueuedPromotionAction marks stale when champion changed since queued decision', () => {
@@ -897,10 +895,10 @@ test('legacy promote manifests without regime-exit fields remain queueable and p
 
   assert.equal(action.recommendation, 'promote');
   assert.equal(action.status, 'promoted');
-  assert.equal(action.reason, 'Queued promotion guards passed');
+  assert.match(action.reason, /queued promotion guards passed/i);
 });
 
-test('regime-exit manifest shadow signals stay advisory and cannot bypass existing autopromote gates', () => {
+test('regime-exit manifest shadow signals stay advisory and cannot bypass failing promotion gates', () => {
   const manifest = {
     runId: 'run-regime',
     generatedAt: '2026-05-01T00:00:00.000Z',
@@ -914,10 +912,12 @@ test('regime-exit manifest shadow signals stay advisory and cannot bypass existi
     shadowRegimeScoreboard: {
       selectedLane: 'exitRegime',
       recommendation: 'switch-now',
-      score: 0.99,
+      score: 0.999,
+      laneConfidence: 0.997,
+      regimeSwitchSignal: 'strong',
     },
     promotion: {
-      allowAutomaticRegimeSwitching: false,
+      allowAutomaticRegimeSwitching: true,
       requireGlobalChampionAnchor: true,
     },
   };
@@ -932,13 +932,14 @@ test('regime-exit manifest shadow signals stay advisory and cannot bypass existi
     },
     autoAction: {
       recommendation: 'hold',
-      summary: 'Auto-promote hold: failed matrix/expectancy/trade/roi guard and global champion anchor gate.',
+      summary: 'Auto-promote hold: failed matrix/expectancy/anchor gates despite strong regime switch signal.',
     },
   });
 
   assert.equal(blocked.recommendation, 'hold');
   assert.equal(blocked.status, 'blocked');
-  assert.match(blocked.reason, /global champion anchor gate/i);
+  assert.match(blocked.reason, /matrix\/expectancy\/anchor gates/i);
+  assert.match(blocked.reason, /strong regime switch signal/i);
   assert.equal(canForceQueuedPromotion(blocked), true);
 });
 

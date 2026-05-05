@@ -103,6 +103,48 @@ test('buildPromotionQueueItem keeps queue payload compact and ignores heavy regi
   assert.equal(JSON.stringify(item).includes('heavyRows'), false);
 });
 
+test('appendPromotionQueueEvent persists compact queue item without heavy regime fields end-to-end', async () => {
+  const dir = await makeTempDir();
+  const queuePath = path.join(dir, 'queue.jsonl');
+  const manifest = {
+    runId: 'run-regime-e2e',
+    generatedAt: '2026-05-04T00:00:00.000Z',
+    manifestPath: '/tmp/run-regime-e2e.json',
+    candidateFingerprint: 'fp-regime-e2e-b',
+    championFingerprint: 'fp-regime-e2e-a',
+    candidateFamilyKey: 'family-regime-e2e-b',
+    championFamilyKey: 'family-regime-e2e-a',
+    robustness: { aggregateScoreDelta: 6.4 },
+    challenger: { configId: 'challenger-regime-e2e-b' },
+    champion: { configId: 'champion-regime-e2e-a' },
+    matrixDecision: { recommendation: 'promote' },
+    shadowRegimeScoreboard: {
+      selectedLane: 'exitRegime',
+      heavyRows: Array.from({ length: 1200 }, (_, i) => ({ i, value: `heavy-${i}` })),
+      rawMatrix: Array.from({ length: 500 }, (_, i) => [i, i + 1, i + 2]),
+    },
+    rawRegimeSeries: Array.from({ length: 2000 }, (_, i) => ({ ts: i, signal: `s-${i}` })),
+  };
+
+  const item = buildPromotionQueueItem({ manifest, createdAt: '2026-05-04T00:01:00.000Z' });
+  await appendPromotionQueueEvent(queuePath, {
+    type: 'pending',
+    item,
+    at: '2026-05-04T00:01:00.000Z',
+  });
+
+  const raw = await fs.readFile(queuePath, 'utf8');
+  const firstLine = raw.trim().split('\n')[0];
+
+  assert.equal(firstLine.includes('heavyRows'), false);
+  assert.equal(firstLine.includes('rawRegimeSeries'), false);
+  assert.equal(firstLine.includes('rawMatrix'), false);
+  assert.equal(firstLine.includes('heavy-1199'), false);
+  assert.equal(firstLine.includes('itemId'), true);
+  assert.equal(firstLine.includes('candidateFamilyKey'), true);
+  assert.equal(firstLine.includes('robustness'), true);
+});
+
 test('readPromotionQueue returns empty queue when file is missing', async () => {
   const dir = await makeTempDir();
   const queuePath = path.join(dir, 'missing.jsonl');

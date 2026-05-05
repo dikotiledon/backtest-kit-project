@@ -17,6 +17,11 @@ test('normalizeRegimeExitResearchConfig defaults to safe disabled mode', () => {
   assert.equal(config.lanes.robustnessRatio, 0.15);
   assert.equal(config.resource.maxManifestBytes > 0, true);
   assert.equal(config.resource.maxConcurrentLabWorkers >= 1, true);
+  assert.equal(config.resourceBudget.maxRowsPerAnalysisChunk, 5000);
+  assert.equal(config.resourceBudget.maxRetainedCandidatesPerLane, 25);
+  assert.equal(config.resourceBudget.writeFullDebugArtifacts, false);
+  assert.equal(config.promotion.allowAutomaticRegimeSwitching, false);
+  assert.equal(config.promotion.requireGlobalChampionAnchor, true);
 });
 
 test('isRegimeExitResearchEnabled requires strict boolean true', () => {
@@ -114,4 +119,34 @@ test('normalizeRegimeExitResearchConfig allows emergency reduced matrix only for
     });
     assert.equal(config.offline.allowEmergencyReducedMatrix, expected);
   }
+});
+
+test('normalizeRegimeExitResearchConfig supports budget/resourceBudget aliases', () => {
+  const config = normalizeRegimeExitResearchConfig({
+    budget: {
+      exploitRatio: 5,
+      exitRegimeRatio: 1,
+      globalAllParameterRatio: 1,
+      robustnessRatio: 1,
+    },
+    resourceBudget: {
+      maxConcurrentLabWorkers: 2,
+      maxRowsPerAnalysisChunk: 7000,
+      maxRetainedCandidatesPerLane: 30,
+      writeFullDebugArtifacts: true,
+    },
+    promotion: {
+      allowAutomaticRegimeSwitching: true,
+      requireGlobalChampionAnchor: false,
+    },
+  });
+
+  assert.equal(config.resourceBudget.maxConcurrentLabWorkers, 2);
+  assert.equal(config.resourceBudget.maxRowsPerAnalysisChunk, 7000);
+  assert.equal(config.resourceBudget.maxRetainedCandidatesPerLane, 30);
+  assert.equal(config.resourceBudget.writeFullDebugArtifacts, true);
+  assert.equal(config.promotion.allowAutomaticRegimeSwitching, true);
+  assert.equal(config.promotion.requireGlobalChampionAnchor, false);
+  const budgetSum = config.budget.exploitRatio + config.budget.exitRegimeRatio + config.budget.globalAllParameterRatio + config.budget.robustnessRatio;
+  assert.equal(Math.abs(budgetSum - 1) < 0.000001, true);
 });

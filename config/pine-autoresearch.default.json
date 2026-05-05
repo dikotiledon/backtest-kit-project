@@ -349,38 +349,21 @@
   ],
   "regimeExitResearch": {
     "enabled": false,
-    "exitRegimeEnabled": true,
-    "globalAllParameterEnabled": true,
-    "robustnessLadderEnabled": true,
-    "streamingMetricsEnabled": true,
-    "childWorkerIsolationEnabled": true,
-    "offline": {
-      "mode": "offline-strict",
-      "allowEmergencyReducedMatrix": false
-    },
-    "lanes": {
+    "budget": {
       "exploitRatio": 0.25,
       "exitRegimeRatio": 0.35,
       "globalAllParameterRatio": 0.25,
       "robustnessRatio": 0.15
     },
-    "resource": {
-      "maxCandidateBatchSize": 8,
+    "resourceBudget": {
       "maxConcurrentLabWorkers": 1,
-      "maxRowsLoadedPerWorker": 250000,
-      "maxManifestBytes": 512000,
-      "maxRetainedJsonlPerRun": 4,
-      "softLaneTimeoutMs": 900000,
-      "hardWorkerTimeoutMs": 300000,
-      "maxWorkerOldSpaceMb": 512
+      "maxRowsPerAnalysisChunk": 5000,
+      "maxRetainedCandidatesPerLane": 25,
+      "writeFullDebugArtifacts": false
     },
-    "objective": {
-      "minRoiPct": 25,
-      "minExpectancyDelta": 0,
-      "maxDrawdownDeltaPct": 0.75,
-      "minTradeRatioVsIncumbent": 0.8,
-      "multipleTestingPenaltyBase": 0.25,
-      "multipleTestingPenaltyStep": 0.05
+    "promotion": {
+      "allowAutomaticRegimeSwitching": false,
+      "requireGlobalChampionAnchor": true
     }
   }
 }

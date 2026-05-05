@@ -1,0 +1,64 @@
+{
+  "lane": "llm",
+  "createdAt": "2026-05-03T12:43:37.566Z",
+  "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-03T12-33-54-019Z-0ecff5511c42",
+  "matrixId": "pine-fusion-v4-core-15m-locked-window",
+  "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:0ecff5511c42855181e0abd27f8ba8bc800f938c77d12c68a571e1f2c9ecd133",
+  "candidateFingerprint": "0ecff5511c42855181e0abd27f8ba8bc800f938c77d12c68a571e1f2c9ecd133",
+  "parentChampionFingerprint": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "candidate": {
+    "params": {
+      "minPredSum": 2.2,
+      "riskRewardRatio": 2,
+      "stopLossPct": 1
+    },
+    "rationale": "Current champions use minPredSum{ffaffafafafafafafafafafafafafafafafafafafafafafafafafafafafafafa}=1.8 and fail primaryPromote despite decent ROI. Raising the entry threshold modestly should filter marginal signals, improving primaryPromote and shadow pass ratios without sacrificing trade count. Simultaneously increasing riskRewardRatio to 2.0 and tightening stopLossPct to 1.0% targets a better ROI/drawdown balance, a novel combination not tried in recent candidates which only tweaked one risk parameter at a time.",
+    "patch": {
+      "minPredSum": 2.2,
+      "riskRewardRatio": 2,
+      "stopLossPct": 1
+    }
+  },
+  "provider": {
+    "mode": "openai-chat-completions"
+  },
+  "metricsDelta": {
+    "recommendation": "hold",
+    "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+    "labCount": 6,
+    "promotedLabCount": 0,
+    "aggregateScoreDelta": -73.68,
+    "aggregateRoiDeltaPct": -85.31,
+    "aggregateProfitFactorDelta": 0.85,
+    "aggregateDrawdownDeltaPct": -2.79
+  },
+  "matrixDecision": {
+    "recommendation": "hold",
+    "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+    "gates": {
+      "candidateChanged": true,
+      "primaryPromote": false,
+      "shadowPassCount": false,
+      "shadowPassRatio": false
+    },
+    "failedGates": [
+      "primaryPromote",
+      "shadowPassCount",
+      "shadowPassRatio"
+    ],
+    "counts": {
+      "totalLabs": 6,
+      "shadowLabs": 5,
+      "allPassCount": 0,
+      "shadowPassCount": 0,
+      "shadowPassRatio": 0
+    },
+    "policy": {
+      "requirePrimaryPromote": true,
+      "minShadowPassCount": 3,
+      "minShadowPassRatio": 0.6,
+      "requireCandidateChange": true
+    }
+  },
+  "evaluationManifestPath": "D:\\Code\\Experiment\\backtest-kit-project\\pine\\autoresearch\\pine-fusion-v4-core-15m-locked-window\\manifests\\llm-pine-fusion-v4-core-15m-locked-window-2026-05-03T12-33-54-019Z-0ecff5511c42.json"
+}

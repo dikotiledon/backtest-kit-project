@@ -1,0 +1,62 @@
+{
+  "lane": "llm",
+  "createdAt": "2026-05-04T07:33:30.149Z",
+  "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T07-20-00-701Z-bc26bad3dd78",
+  "matrixId": "pine-fusion-v4-core-15m-locked-window",
+  "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:bc26bad3dd78d96785bba6fa5fc525a868d3b565c40216ee5077e86b43affd01",
+  "candidateFingerprint": "bc26bad3dd78d96785bba6fa5fc525a868d3b565c40216ee5077e86b43affd01",
+  "parentChampionFingerprint": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "candidate": {
+    "params": {
+      "minPredSum": 2,
+      "divRsiLen": 14
+    },
+    "rationale": "Shifting from the champion baseline of minPredSum=1.8 and divRsiLen=21. By reducing the divergence RSI length to 14, we generate signals faster, while raising minPredSum to 2.0 ensures stricter architectural confirmation. This hypothesis aims to increase total viable trade count without degrading profit factor, addressing recent primaryPromote gate failures.",
+    "patch": {
+      "minPredSum": 2,
+      "divRsiLen": 14
+    }
+  },
+  "provider": {
+    "mode": "openai-chat-completions"
+  },
+  "metricsDelta": {
+    "recommendation": "hold",
+    "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+    "labCount": 6,
+    "promotedLabCount": 2,
+    "aggregateScoreDelta": -4.09,
+    "aggregateRoiDeltaPct": -6.68,
+    "aggregateProfitFactorDelta": 0.24,
+    "aggregateDrawdownDeltaPct": -0.09
+  },
+  "matrixDecision": {
+    "recommendation": "hold",
+    "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+    "gates": {
+      "candidateChanged": true,
+      "primaryPromote": false,
+      "shadowPassCount": false,
+      "shadowPassRatio": false
+    },
+    "failedGates": [
+      "primaryPromote",
+      "shadowPassCount",
+      "shadowPassRatio"
+    ],
+    "counts": {
+      "totalLabs": 6,
+      "shadowLabs": 5,
+      "allPassCount": 2,
+      "shadowPassCount": 2,
+      "shadowPassRatio": 0.4
+    },
+    "policy": {
+      "requirePrimaryPromote": true,
+      "minShadowPassCount": 3,
+      "minShadowPassRatio": 0.6,
+      "requireCandidateChange": true
+    }
+  },
+  "evaluationManifestPath": "D:\\Code\\Experiment\\backtest-kit-project\\pine\\autoresearch\\pine-fusion-v4-core-15m-locked-window\\manifests\\llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T07-20-00-701Z-bc26bad3dd78.json"
+}

@@ -28,7 +28,8 @@
     "pine:ops:install-llm-tasks": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-llm-tasks.ps1",
     "pine:ops:remove-llm-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-llm-tasks.ps1",
     "pine:ops:install-tasks": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-tasks.ps1",
-    "pine:ops:remove-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-tasks.ps1"
+    "pine:ops:remove-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-tasks.ps1",
+    "pine:ops:install-force-cycle-task": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-tasks.ps1 -EnableForceCycle -DisableMicro -DisableDigest"
   },
   "keywords": [],
   "author": "",

@@ -1,15 +1,15 @@
 {
   "ok": true,
-  "reason": "completed",
-  "command": "run",
+  "reason": "validated",
+  "command": "validate",
   "scheduled": false,
   "matrixId": "pine-fusion-v4-core-15m-locked-window",
   "providerMode": "openai-chat-completions",
-  "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:99748a25c58ad9170d4e874a11da26f37cb19391610a22dc22066b3f63c9509a",
-  "candidateFingerprint": "99748a25c58ad9170d4e874a11da26f37cb19391610a22dc22066b3f63c9509a",
-  "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-03T09-17-18-483Z-99748a25c58a",
-  "manifestPath": "D:\\Code\\Experiment\\backtest-kit-project\\pine\\autoresearch-llm\\llm-pine-fusion-v4-core-15m-locked-window\\manifests\\2026-05-03T09-29-05-684Z-99748a25c58ad9170d4e874a11da26f37cb19391610a22dc22066b3f63c9509a.json",
-  "evaluationManifestPath": "D:\\Code\\Experiment\\backtest-kit-project\\pine\\autoresearch\\pine-fusion-v4-core-15m-locked-window\\manifests\\llm-pine-fusion-v4-core-15m-locked-window-2026-05-03T09-17-18-483Z-99748a25c58a.json",
+  "candidateId": null,
+  "candidateFingerprint": null,
+  "runId": null,
+  "manifestPath": null,
+  "evaluationManifestPath": null,
   "details": {
     "reviewSummary": {
       "unresolvedCount": 0,
@@ -18,16 +18,7 @@
       "hasBlockers": false,
       "blockerStatuses": []
     },
-    "metricsDelta": {
-      "recommendation": "hold",
-      "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote gate(s).",
-      "labCount": 6,
-      "promotedLabCount": 3,
-      "aggregateScoreDelta": 10.87,
-      "aggregateRoiDeltaPct": 14.33,
-      "aggregateProfitFactorDelta": 0.01,
-      "aggregateDrawdownDeltaPct": 1.49
-    }
+    "allowlistVersion": 1
   },
-  "at": "2026-05-03T09:29:05.692Z"
+  "at": "2026-05-04T08:10:20.087Z"
 }

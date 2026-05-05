@@ -117,6 +117,45 @@ test('buildLlmResearchContext hard caps oversized champion and allowlist', () =>
 });
 
 
+
+
+test('buildLlmResearchContext overflow fallback preserves actionable schema and allowlist', () => {
+  const result = buildLlmResearchContext({
+    champion: {},
+    allowlist: {
+      version: 1,
+      parameters: [
+        { key: 'minPredSum', type: 'float', min: 0, max: 5, step: 0.1, mutability: 'tunable', family: 'signal' },
+      ],
+    },
+    memory: {
+      recentCandidates: Array.from({ length: 5 }, (_, index) => ({
+        candidateId: `c${index}`,
+        params: { minPredSum: 1 + index },
+        rationale: 'x'.repeat(400),
+      })),
+      topWinners: Array.from({ length: 10 }, (_, index) => ({
+        runId: `r${index}`,
+        candidateId: `w${index}`,
+        metricsDelta: { aggregateScoreDelta: index },
+        notes: 'y'.repeat(120),
+      })),
+    },
+    maxPromptBytes: 4096,
+  });
+
+  assert.equal(result.truncated, true);
+  assert.equal(result.overflow, true);
+  assert.ok(Buffer.byteLength(result.prompt, 'utf8') <= 4096);
+
+  const parsed = JSON.parse(result.prompt);
+  assert.equal(parsed.requiredOutput.params, 'Object of changed parameter values only. Keep same keys/types as allowlist. Prefer <=3 changed params unless strong matrix evidence justifies 4.');
+  assert.equal(parsed.allowlist.parameters[0].key, 'minPredSum');
+  assert.deepEqual(parsed.champion, {});
+  assert.equal(parsed.memorySummary.truncated, true);
+  assert.ok(Array.isArray(parsed.researchContext.recentCandidates));
+});
+
 test('buildLlmResearchContext honors tiny caps', () => {
   for (const cap of [1, 0]) {
     const result = buildLlmResearchContext({

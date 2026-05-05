@@ -6,7 +6,10 @@ param(
   [int]$FullEveryHours = 1,
   [string]$DigestStart = '08:10',
   [string]$AutopromoteStart = '08:20',
+  [string]$ForceCycleStart = '00:07',
+  [int]$ForceCycleEveryHours = 1,
   [switch]$EnableFull,
+  [switch]$EnableForceCycle,
   [switch]$EnableAutopromote,
   [switch]$DisableMicro,
   [switch]$DisableDigest,
@@ -22,6 +25,7 @@ if (-not $RepoRoot) {
 $pwshPath = (Get-Command pwsh).Source
 $microScript = Join-Path $PSScriptRoot 'pine-autoresearch-micro.ps1'
 $fullScript = Join-Path $PSScriptRoot 'pine-autoresearch-full.ps1'
+$forceCycleScript = Join-Path $PSScriptRoot 'pine-autoresearch-force-cycle.ps1'
 $digestScript = Join-Path $PSScriptRoot 'pine-autoresearch-digest.ps1'
 $autopromoteScript = Join-Path $PSScriptRoot 'pine-autoresearch-autopromote.ps1'
 
@@ -63,6 +67,13 @@ if ($EnableFull) {
     throw 'FullEveryHours must be >= 1'
   }
   Register-Task 'Full' @('/SC', 'HOURLY', '/MO', "$FullEveryHours", '/ST', $FullStart) $fullScript
+}
+
+if ($EnableForceCycle) {
+  if ($ForceCycleEveryHours -lt 1) {
+    throw 'ForceCycleEveryHours must be >= 1'
+  }
+  Register-Task 'ForceCycle' @('/SC', 'HOURLY', '/MO', "$ForceCycleEveryHours", '/ST', $ForceCycleStart) $forceCycleScript
 }
 
 if ($EnableAutopromote) {

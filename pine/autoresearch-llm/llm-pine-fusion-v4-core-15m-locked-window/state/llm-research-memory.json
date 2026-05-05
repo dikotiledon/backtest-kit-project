@@ -23,6 +23,42 @@
       "candidateFingerprint": "99748a25c58ad9170d4e874a11da26f37cb19391610a22dc22066b3f63c9509a",
       "status": "completed",
       "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-03T09-17-18-483Z-99748a25c58a"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:0ecff5511c42855181e0abd27f8ba8bc800f938c77d12c68a571e1f2c9ecd133",
+      "candidateFingerprint": "0ecff5511c42855181e0abd27f8ba8bc800f938c77d12c68a571e1f2c9ecd133",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-03T12-33-54-019Z-0ecff5511c42"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:506f5b6cf2c22d227b2a7d0ee93b253021742ab9d6616f395ea609abed6b05fe",
+      "candidateFingerprint": "506f5b6cf2c22d227b2a7d0ee93b253021742ab9d6616f395ea609abed6b05fe",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T06-25-29-640Z-506f5b6cf2c2"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:ce12eaebf03c55b19afab3684e8369926bd66b7bd27bb4d9c5ea3b78b01f1ef3",
+      "candidateFingerprint": "ce12eaebf03c55b19afab3684e8369926bd66b7bd27bb4d9c5ea3b78b01f1ef3",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T07-03-36-297Z-ce12eaebf03c"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:bc26bad3dd78d96785bba6fa5fc525a868d3b565c40216ee5077e86b43affd01",
+      "candidateFingerprint": "bc26bad3dd78d96785bba6fa5fc525a868d3b565c40216ee5077e86b43affd01",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T07-20-00-701Z-bc26bad3dd78"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:e845d02444704d2b219a53880d410b04dc0207557489c891bd68de434c074a03",
+      "candidateFingerprint": "e845d02444704d2b219a53880d410b04dc0207557489c891bd68de434c074a03",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T07-40-47-819Z-e845d0244470"
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:d8d2ac51f789093be527c0603d621a28e6261a1ff4ca39d68efa96b1b69a1582",
+      "candidateFingerprint": "d8d2ac51f789093be527c0603d621a28e6261a1ff4ca39d68efa96b1b69a1582",
+      "status": "completed",
+      "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T07-55-49-227Z-d8d2ac51f789"
     }
   ],
   "topWinners": [
@@ -81,8 +117,93 @@
         "aggregateProfitFactorDelta": 0.01,
         "aggregateDrawdownDeltaPct": 1.49
       }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:0ecff5511c42855181e0abd27f8ba8bc800f938c77d12c68a571e1f2c9ecd133",
+      "candidateFingerprint": "0ecff5511c42855181e0abd27f8ba8bc800f938c77d12c68a571e1f2c9ecd133",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 0,
+        "aggregateScoreDelta": -73.68,
+        "aggregateRoiDeltaPct": -85.31,
+        "aggregateProfitFactorDelta": 0.85,
+        "aggregateDrawdownDeltaPct": -2.79
+      }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:506f5b6cf2c22d227b2a7d0ee93b253021742ab9d6616f395ea609abed6b05fe",
+      "candidateFingerprint": "506f5b6cf2c22d227b2a7d0ee93b253021742ab9d6616f395ea609abed6b05fe",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 2,
+        "aggregateScoreDelta": -4.09,
+        "aggregateRoiDeltaPct": -6.68,
+        "aggregateProfitFactorDelta": 0.24,
+        "aggregateDrawdownDeltaPct": -0.09
+      }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:ce12eaebf03c55b19afab3684e8369926bd66b7bd27bb4d9c5ea3b78b01f1ef3",
+      "candidateFingerprint": "ce12eaebf03c55b19afab3684e8369926bd66b7bd27bb4d9c5ea3b78b01f1ef3",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 2,
+        "aggregateScoreDelta": -4.09,
+        "aggregateRoiDeltaPct": -6.68,
+        "aggregateProfitFactorDelta": 0.24,
+        "aggregateDrawdownDeltaPct": -0.09
+      }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:bc26bad3dd78d96785bba6fa5fc525a868d3b565c40216ee5077e86b43affd01",
+      "candidateFingerprint": "bc26bad3dd78d96785bba6fa5fc525a868d3b565c40216ee5077e86b43affd01",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 2,
+        "aggregateScoreDelta": -4.09,
+        "aggregateRoiDeltaPct": -6.68,
+        "aggregateProfitFactorDelta": 0.24,
+        "aggregateDrawdownDeltaPct": -0.09
+      }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:e845d02444704d2b219a53880d410b04dc0207557489c891bd68de434c074a03",
+      "candidateFingerprint": "e845d02444704d2b219a53880d410b04dc0207557489c891bd68de434c074a03",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 0,
+        "aggregateScoreDelta": -72.01,
+        "aggregateRoiDeltaPct": -84.71,
+        "aggregateProfitFactorDelta": 0.85,
+        "aggregateDrawdownDeltaPct": -2.93
+      }
+    },
+    {
+      "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:d8d2ac51f789093be527c0603d621a28e6261a1ff4ca39d68efa96b1b69a1582",
+      "candidateFingerprint": "d8d2ac51f789093be527c0603d621a28e6261a1ff4ca39d68efa96b1b69a1582",
+      "metricsDelta": {
+        "recommendation": "hold",
+        "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+        "labCount": 6,
+        "promotedLabCount": 2,
+        "aggregateScoreDelta": -0.18,
+        "aggregateRoiDeltaPct": 1.75,
+        "aggregateProfitFactorDelta": -0.04,
+        "aggregateDrawdownDeltaPct": 0.88
+      }
     }
   ],
   "rejectedFingerprints": [],
-  "pendingReviewCount": 0
+  "pendingReviewCount": 0,
+  "failureLessons": []
 }

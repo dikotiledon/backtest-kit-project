@@ -1,0 +1,62 @@
+{
+  "lane": "llm",
+  "createdAt": "2026-05-04T07:53:48.807Z",
+  "runId": "llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T07-40-47-819Z-e845d0244470",
+  "matrixId": "pine-fusion-v4-core-15m-locked-window",
+  "candidateId": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a:e845d02444704d2b219a53880d410b04dc0207557489c891bd68de434c074a03",
+  "candidateFingerprint": "e845d02444704d2b219a53880d410b04dc0207557489c891bd68de434c074a03",
+  "parentChampionFingerprint": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "candidate": {
+    "params": {
+      "minPredSum": 2.1,
+      "divRsiLen": 28
+    },
+    "rationale": "Increasing minPredSum from the champion baseline of 1.8 to 2.1 imposes stricter entry thresholds to address recent primaryPromote failures caused by low edge retention across shadow labs. Concurrently, extending divRsiLen from the champion baseline of 21 to 28 calculates divergences over a longer lookback, smoothing momentum and filtering out premature reversal signals without altering risk parameters.",
+    "patch": {
+      "minPredSum": 2.1,
+      "divRsiLen": 28
+    }
+  },
+  "provider": {
+    "mode": "openai-chat-completions"
+  },
+  "metricsDelta": {
+    "recommendation": "hold",
+    "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+    "labCount": 6,
+    "promotedLabCount": 0,
+    "aggregateScoreDelta": -72.01,
+    "aggregateRoiDeltaPct": -84.71,
+    "aggregateProfitFactorDelta": 0.85,
+    "aggregateDrawdownDeltaPct": -2.93
+  },
+  "matrixDecision": {
+    "recommendation": "hold",
+    "summary": "Hold champion 0002__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20__minPredSum-1.8__useTrendXConf-true__minBarsBetween-1__slAtrMult-0.5__tpAtrMult-6.85__useSignalFusion-true__useFusionV2-false__useFusionV3-false__useFusionV4-true__fusionV4MinAbsPrediction-2__fusionV4MaxAbsPrediction-4__useAtrFlipConfirm-true__use3LineConfirm-false__useEngulfingConfirm-true__useEmaCrossConfirm-false__fusionV4LongAtrWeight--0.25__fusionV4LongEngulfWeight--0.25__fusionV4LongEmaWeight-0__fusionV4ShortAtrWeight--0.5__fusionV4ShortEngulfWeight--0.1__fusionV4ShortEmaWeight-0__useSupertrendFilter-true__useSupertrendEntryConfirm-false__supertrendAtrLen-10__supertrendFactor-1.5__useTrailingStop-true__trailAtrLen-14__trailAtrMult-1__trailActivateR-0.5__useStopsTP-true__useDivergenceContext-true__divFreshBars-8__divPivotLeft-3__divPivotRight-3__divRsiLen-21__divLongBoostValue-0.7__divShortBoostValue-0.7: matrix failed primaryPromote, shadowPassCount, shadowPassRatio gate(s).",
+    "gates": {
+      "candidateChanged": true,
+      "primaryPromote": false,
+      "shadowPassCount": false,
+      "shadowPassRatio": false
+    },
+    "failedGates": [
+      "primaryPromote",
+      "shadowPassCount",
+      "shadowPassRatio"
+    ],
+    "counts": {
+      "totalLabs": 6,
+      "shadowLabs": 5,
+      "allPassCount": 0,
+      "shadowPassCount": 0,
+      "shadowPassRatio": 0
+    },
+    "policy": {
+      "requirePrimaryPromote": true,
+      "minShadowPassCount": 3,
+      "minShadowPassRatio": 0.6,
+      "requireCandidateChange": true
+    }
+  },
+  "evaluationManifestPath": "D:\\Code\\Experiment\\backtest-kit-project\\pine\\autoresearch\\pine-fusion-v4-core-15m-locked-window\\manifests\\llm-pine-fusion-v4-core-15m-locked-window-2026-05-04T07-40-47-819Z-e845d0244470.json"
+}

@@ -7,7 +7,8 @@ param(
 
   [string]$RepoRoot,
   [string]$LockName = 'Global\BacktestKit-Pine-Autoresearch',
-  [switch]$DryRun
+  [switch]$DryRun,
+  [switch]$StreamOutput
 )
 
 $ErrorActionPreference = 'Stop'
@@ -117,9 +118,8 @@ function Test-SchedulerLockStale {
     }
 
     if ($startedAt -and $pidValue) {
-      $age = (Get-Date).ToUniversalTime() - $startedAt.UtcDateTime
       $ownerAlive = Test-ProcessOwnsLock -ProcessId $pidValue -StartedAt $startedAt
-      return ($age -ge $StaleAfter) -and (-not $ownerAlive)
+      return -not $ownerAlive
     }
   }
 
@@ -224,26 +224,31 @@ try {
     Write-Host "[$TaskName] lock=$LockName"
 
     Set-Content -LiteralPath $commandScriptPath -Value $Command -Encoding UTF8
-    $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
-    $processInfo.FileName = $pwshPath
-    [void]$processInfo.ArgumentList.Add('-NoProfile')
-    [void]$processInfo.ArgumentList.Add('-File')
-    [void]$processInfo.ArgumentList.Add($commandScriptPath)
-    $processInfo.WorkingDirectory = (Get-Location).Path
-    $processInfo.RedirectStandardOutput = $true
-    $processInfo.RedirectStandardError = $true
-    $processInfo.UseShellExecute = $false
-
-    $childProcess = [System.Diagnostics.Process]::Start($processInfo)
-    $stdout = $childProcess.StandardOutput.ReadToEnd()
-    $stderr = $childProcess.StandardError.ReadToEnd()
-    $childProcess.WaitForExit()
-    $childExitCode = $childProcess.ExitCode
-    $output = ($stdout, $stderr -join '')
-    if (-not [string]::IsNullOrEmpty($output)) {
-      $output | Tee-Object -FilePath $logPath
+    if ($StreamOutput) {
+      & $commandScriptPath 2>&1 | Tee-Object -FilePath $logPath
+      $childExitCode = $LASTEXITCODE
     } else {
-      Set-Content -LiteralPath $logPath -Value '' -Encoding UTF8
+      $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+      $processInfo.FileName = $pwshPath
+      [void]$processInfo.ArgumentList.Add('-NoProfile')
+      [void]$processInfo.ArgumentList.Add('-File')
+      [void]$processInfo.ArgumentList.Add($commandScriptPath)
+      $processInfo.WorkingDirectory = (Get-Location).Path
+      $processInfo.RedirectStandardOutput = $true
+      $processInfo.RedirectStandardError = $true
+      $processInfo.UseShellExecute = $false
+
+      $childProcess = [System.Diagnostics.Process]::Start($processInfo)
+      $stdout = $childProcess.StandardOutput.ReadToEnd()
+      $stderr = $childProcess.StandardError.ReadToEnd()
+      $childProcess.WaitForExit()
+      $childExitCode = $childProcess.ExitCode
+      $output = ($stdout, $stderr -join '')
+      if (-not [string]::IsNullOrEmpty($output)) {
+        $output | Tee-Object -FilePath $logPath
+      } else {
+        Set-Content -LiteralPath $logPath -Value '' -Encoding UTF8
+      }
     }
 
     if ($childExitCode -ne 0) {

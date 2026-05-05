@@ -86,6 +86,8 @@
     "maxCyclesPerTrack": 6,
     "preferCurrentChampionUntil": 2,
     "cooldownCyclesAfterPromote": 1,
+    "tabuLimit": 1000,
+    "tabuBootstrapManifestLimit": 200,
     "stagnation": {
       "enabled": true,
       "noNewCandidateEscalateAfter": 3,

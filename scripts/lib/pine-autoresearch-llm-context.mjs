@@ -127,16 +127,16 @@ function buildFullPromptPayload({ champion, allowlist, memory, maxPromptBytes })
 function buildOverflowPromptPayload({ champion, allowlist, memory, maxPromptBytes }) {
   return {
     instructions: buildHardRules(maxPromptBytes),
-    requiredOutput: summarizeSection(buildRequiredOutput()),
+    requiredOutput: buildRequiredOutput(),
     budget: {
       maxPromptBytes,
     },
     overflow: true,
     truncated: true,
-    champion: summarizeSection(champion),
-    allowlist: summarizeSection(allowlist),
-    memory: summarizeSection(memory),
-    researchContext: summarizeSection(buildResearchContext(memory)),
+    champion: isPlainObject(champion) ? { ...champion } : {},
+    allowlist: isPlainObject(allowlist) ? { ...allowlist } : {},
+    memorySummary: summarizeSection(memory),
+    researchContext: buildResearchContext(memory),
   };
 }
 

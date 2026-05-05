@@ -110,3 +110,67 @@ test('worker entrypoint unknown command produces structured failure via runner',
   assert.equal(result.reason, 'workerFailed');
   assert.equal(result.summary?.reason, 'unknownCommand');
 });
+
+test('worker entrypoint empty object payload returns structured failure', async () => {
+  const workerPath = path.resolve('scripts/pine-evaluate-candidate-worker.mjs');
+
+  const result = await runEvaluationWorker({
+    workerPath,
+    payload: {},
+    timeoutMs: 5000,
+    maxOldSpaceMb: 128
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.equal(result.summary?.reason, 'unknownCommand');
+});
+
+test('worker entrypoint analyze-jsonl-streaming missing filePath returns structured failure', async () => {
+  const workerPath = path.resolve('scripts/pine-evaluate-candidate-worker.mjs');
+
+  const result = await runEvaluationWorker({
+    workerPath,
+    payload: { command: 'analyze-jsonl-streaming' },
+    timeoutMs: 5000,
+    maxOldSpaceMb: 128
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.equal(result.summary?.reason, 'invalidPayload');
+  assert.match(result.summary?.message ?? '', /filePath/i);
+});
+
+test('runEvaluationWorker handles stdin EPIPE path without crashing', async () => {
+  const worker = await makeWorker('process.exit(0)');
+
+  const result = await runEvaluationWorker({
+    workerPath: worker,
+    payload: { x: 'y'.repeat(10000) },
+    timeoutMs: 5000,
+    maxOldSpaceMb: 128
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+});
+
+test('runEvaluationWorker normalizes invalid numeric options to safe bounds', async () => {
+  const worker = await makeWorker([
+    "console.log('x'.repeat(3000))",
+    "console.log(JSON.stringify({ ok: true, done: true }))"
+  ].join('\n'));
+
+  const result = await runEvaluationWorker({
+    workerPath: worker,
+    payload: {},
+    timeoutMs: 10,
+    maxOldSpaceMb: 1,
+    maxOutputBytes: 1
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.match(result.stdout ?? '', /truncated/i);
+});

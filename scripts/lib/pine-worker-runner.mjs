@@ -12,7 +12,7 @@ function normalizeMinInt(value, minValue, fallback) {
   }
   const normalized = Math.floor(value);
   if (normalized < minValue) {
-    return fallback;
+    return minValue;
   }
   return normalized;
 }

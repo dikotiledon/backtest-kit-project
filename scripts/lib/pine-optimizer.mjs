@@ -1,6 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
+export { analyzeJsonlFileStreaming } from './pine-streaming-metrics.mjs';
+
 export async function loadJsonlRows(filePath) {
   const raw = await fs.readFile(filePath, 'utf8');
   return raw

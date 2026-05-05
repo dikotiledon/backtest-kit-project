@@ -43,7 +43,8 @@ import {
   shouldQueuePromotionManifest,
   withManifestPath,
   applySchedulerStateToManifest,
-  collectOfflinePreflightLabs,
+  buildOfflineDataMissingCycleEvent,
+  buildOfflineDataMissingSkipResult,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -2579,14 +2580,44 @@ test('loadConfig preserves stagnation defaults when raw overrides subset of fiel
   }
 });
 
-test('collectOfflinePreflightLabs includes primary + shadow + blind holdout once by labId', () => {
-  const labs = collectOfflinePreflightLabs({
-    primaryLab: { labId: 'primary' },
-    shadowLabs: [{ labId: 'shadow-1' }, { labId: 'primary' }],
-    blindHoldoutLabs: [{ labId: 'blind-1' }, { labId: 'shadow-1' }],
-  });
+test('offline strict missing path builds skip result + history payload with compact lab timestamps', () => {
+  const offlineDataSummary = {
+    ok: false,
+    reason: 'offlineDataMissing',
+    mode: 'offline-strict',
+    missingLabs: [{
+      labId: 'primary',
+      missingCount: 9,
+      missingTimestamps: [
+        '2026-05-01T00:00:00.000Z',
+        '2026-05-01T00:15:00.000Z',
+        '2026-05-01T00:30:00.000Z',
+        '2026-05-01T00:45:00.000Z',
+        '2026-05-01T01:00:00.000Z',
+      ],
+    }],
+  };
 
-  assert.deepEqual(labs.map((lab) => lab.labId), ['primary', 'shadow-1', 'blind-1']);
+  const skipResult = buildOfflineDataMissingSkipResult({ offlineDataSummary });
+  assert.equal(skipResult.skipped, true);
+  assert.equal(skipResult.reason, 'offlineDataMissing');
+  assert.equal(skipResult.promotionEligible, false);
+  assert.equal(skipResult.promotionEligibleReason, 'offlineDataMissing');
+  assert.equal(skipResult.offlineDataSummary.reason, 'offlineDataMissing');
+
+  const event = buildOfflineDataMissingCycleEvent({
+    runId: 'run-offline-missing',
+    offlineDataSummary: skipResult.offlineDataSummary,
+  });
+  assert.equal(event.type, 'cycle');
+  assert.equal(event.runId, 'run-offline-missing');
+  assert.equal(event.recommendation, 'hold');
+  assert.equal(event.summary, 'offlineDataMissing');
+  assert.equal(event.promotionEligible, false);
+  assert.equal(event.promotionEligibleReason, 'offlineDataMissing');
+  assert.equal(event.offlineDataSummary.reason, 'offlineDataMissing');
+  assert.equal(event.offlineDataSummary.missingLabs[0].missingCount, 9);
+  assert.equal(event.offlineDataSummary.missingLabs[0].missingTimestamps.length, 5);
 });
 
 test('partitionLabs keeps blind holdout out of selection labs', () => {

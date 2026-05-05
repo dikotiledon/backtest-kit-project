@@ -722,7 +722,7 @@ async function stagePinnedData(config, labs) {
   return staged;
 }
 
-export function collectOfflinePreflightLabs(config = {}) {
+function collectOfflinePreflightLabs(config = {}) {
   const labs = [
     config.primaryLab,
     ...(config.shadowLabs || []),
@@ -769,14 +769,11 @@ async function buildOfflineDataPreflight(config) {
   }));
 
   const checkedPlan = { ...plan, requiredLabs };
-  return {
-    plan: checkedPlan,
-    summary: summarizeOfflineDataPlan(checkedPlan),
-  };
+  return summarizeOfflineDataPlan(checkedPlan);
 }
 
-async function appendOfflineDataMissingEvent(config, runId, offlineDataSummary) {
-  await appendJsonl(historyPath(config), {
+export function buildOfflineDataMissingCycleEvent({ runId, offlineDataSummary } = {}) {
+  return {
     timestamp: isoNow(),
     type: 'cycle',
     runId,
@@ -785,7 +782,21 @@ async function appendOfflineDataMissingEvent(config, runId, offlineDataSummary) 
     offlineDataSummary,
     recommendation: 'hold',
     summary: 'offlineDataMissing',
-  });
+  };
+}
+
+export function buildOfflineDataMissingSkipResult({ offlineDataSummary } = {}) {
+  return {
+    skipped: true,
+    reason: 'offlineDataMissing',
+    promotionEligible: false,
+    promotionEligibleReason: 'offlineDataMissing',
+    offlineDataSummary,
+  };
+}
+
+async function appendOfflineDataMissingEvent(config, runId, offlineDataSummary) {
+  await appendJsonl(historyPath(config), buildOfflineDataMissingCycleEvent({ runId, offlineDataSummary }));
 }
 
 function buildRunId(config) {
@@ -1180,16 +1191,10 @@ async function runScout(config) {
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
   if (config.regimeExitResearch?.enabled) {
-    const { summary: offlineDataSummary } = await buildOfflineDataPreflight(config);
+    const offlineDataSummary = await buildOfflineDataPreflight(config);
     if (!offlineDataSummary.ok && offlineDataSummary.mode === 'offline-strict') {
       await appendOfflineDataMissingEvent(config, runId, offlineDataSummary);
-      return {
-        skipped: true,
-        reason: 'offlineDataMissing',
-        promotionEligible: false,
-        promotionEligibleReason: 'offlineDataMissing',
-        offlineDataSummary,
-      };
+      return buildOfflineDataMissingSkipResult({ offlineDataSummary });
     }
   }
   const historyEventsBefore = await loadHistoryEvents(config);

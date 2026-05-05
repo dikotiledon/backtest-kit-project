@@ -28,3 +28,34 @@ test('summarizeOfflineDataPlan records missing cache as offlineDataMissing', () 
   assert.equal(summary.reason, 'offlineDataMissing');
   assert.equal(summary.missingLabs[0].labId, 'primary');
 });
+
+test('summarizeOfflineDataPlan compacts missing timestamps preview to first five', () => {
+  const summary = summarizeOfflineDataPlan({
+    mode: 'offline-strict',
+    networkAllowed: false,
+    requiredLabs: [{
+      labId: 'primary',
+      symbol: 'XRPUSDT',
+      timeframe: '15m',
+      complete: false,
+      missingCount: 8,
+      missingTimestamps: [
+        '2026-05-01T00:00:00.000Z',
+        '2026-05-01T00:15:00.000Z',
+        '2026-05-01T00:30:00.000Z',
+        '2026-05-01T00:45:00.000Z',
+        '2026-05-01T01:00:00.000Z',
+        '2026-05-01T01:15:00.000Z',
+      ],
+    }],
+  });
+
+  assert.equal(summary.missingLabs[0].missingCount, 8);
+  assert.deepEqual(summary.missingLabs[0].missingTimestamps, [
+    '2026-05-01T00:00:00.000Z',
+    '2026-05-01T00:15:00.000Z',
+    '2026-05-01T00:30:00.000Z',
+    '2026-05-01T00:45:00.000Z',
+    '2026-05-01T01:00:00.000Z',
+  ]);
+});

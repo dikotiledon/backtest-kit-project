@@ -22,8 +22,28 @@ export function buildOfflineDataPlan({ matrixId, pinnedData = {}, labs = [], off
   };
 }
 
+function compactMissingLab(lab = {}, maxPreview = 5) {
+  const missingTimestamps = Array.isArray(lab.missingTimestamps)
+    ? lab.missingTimestamps.slice(0, Math.max(0, maxPreview))
+    : [];
+  return {
+    labId: lab.labId,
+    symbol: lab.symbol,
+    timeframe: lab.timeframe,
+    limit: lab.limit,
+    when: lab.when,
+    exchangeName: lab.exchangeName,
+    requiresCacheComplete: lab.requiresCacheComplete,
+    complete: lab.complete,
+    missingCount: Number(lab.missingCount || 0),
+    missingTimestamps,
+  };
+}
+
 export function summarizeOfflineDataPlan(plan = {}) {
-  const missingLabs = (plan.requiredLabs || []).filter((lab) => lab.complete === false || Number(lab.missingCount || 0) > 0);
+  const missingLabs = (plan.requiredLabs || [])
+    .filter((lab) => lab.complete === false || Number(lab.missingCount || 0) > 0)
+    .map((lab) => compactMissingLab(lab));
   return {
     ok: missingLabs.length === 0,
     reason: missingLabs.length ? 'offlineDataMissing' : 'offlineDataReady',

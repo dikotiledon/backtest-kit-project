@@ -772,6 +772,7 @@ async function buildOfflineDataPreflight(config) {
   return summarizeOfflineDataPlan(checkedPlan);
 }
 
+// Exported as pure test seam for runScout offline-missing payload shape.
 export function buildOfflineDataMissingCycleEvent({ runId, offlineDataSummary } = {}) {
   return {
     timestamp: isoNow(),
@@ -785,6 +786,7 @@ export function buildOfflineDataMissingCycleEvent({ runId, offlineDataSummary } 
   };
 }
 
+// Exported as pure test seam for runScout offline-missing payload shape.
 export function buildOfflineDataMissingSkipResult({ offlineDataSummary } = {}) {
   return {
     skipped: true,
@@ -1176,7 +1178,7 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
   };
 }
 
-async function runScout(config) {
+export async function runScout(config) {
   await ensureDirs(config);
   const queue = await readPromotionQueue(promotionQueueFilePath(config));
   const pendingPromotion = selectNextPendingPromotion(queue);

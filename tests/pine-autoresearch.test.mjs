@@ -2620,6 +2620,84 @@ test('offline strict missing path builds skip result + history payload with comp
   assert.equal(event.offlineDataSummary.missingLabs[0].missingTimestamps.length, 5);
 });
 
+
+
+test('runScout offline-strict missing branch appends cycle history and returns skipped payload', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-offline-missing-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    const cacheRoot = path.join(dir, 'cache-empty');
+    await fs.mkdir(cacheRoot, { recursive: true });
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'offline-runscout-test',
+      scriptPath,
+      outputs: {
+        researchRoot,
+        digestRoot,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: {
+        enabled: true,
+        datasetsRoot: path.join(dir, 'datasets'),
+        cacheRoot,
+        exchangeName: 'ccxt-exchange',
+      },
+      regimeExitResearch: {
+        enabled: true,
+        offline: {
+          mode: 'offline-strict',
+        },
+      },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    await fs.mkdir(config.researchRoot, { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      configId: 'champion-seed',
+      config: { minPredSum: 1.8 },
+      configFingerprint: 'seed-fp',
+    }), 'utf8');
+
+    const result = await autoresearchCli.runScout(config);
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'offlineDataMissing');
+    assert.equal(result.promotionEligibleReason, 'offlineDataMissing');
+
+    const historyPath = path.join(config.researchRoot, 'history.jsonl');
+    const historyRaw = await fs.readFile(historyPath, 'utf8');
+    const historyEvents = historyRaw.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line));
+    const cycleEvent = historyEvents.find((event) => event.type === 'cycle');
+
+    assert.ok(cycleEvent);
+    assert.equal(cycleEvent.promotionEligible, false);
+    assert.equal(cycleEvent.promotionEligibleReason, 'offlineDataMissing');
+    assert.equal(cycleEvent.offlineDataSummary.reason, 'offlineDataMissing');
+
+    const missingLab = cycleEvent.offlineDataSummary.missingLabs[0];
+    assert.ok(missingLab);
+    assert.ok(Array.isArray(missingLab.missingTimestamps));
+    assert.ok(missingLab.missingTimestamps.length <= 5);
+    if (missingLab.missingCount > 5) {
+      assert.equal(missingLab.missingTimestamps.length, 5);
+    }
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('partitionLabs keeps blind holdout out of selection labs', () => {
   const tiers = partitionLabs({
     primaryLab: { labId: 'train-primary' },

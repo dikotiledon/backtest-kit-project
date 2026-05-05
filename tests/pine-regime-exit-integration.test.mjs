@@ -59,6 +59,11 @@ test('regime-exit enabled surfaces compact manifest fields', () => {
 });
 
 
+test('buildRegimeExitStateForScout returns null for missing input without throw', () => {
+  assert.doesNotThrow(() => buildRegimeExitStateForScout({}));
+  assert.equal(buildRegimeExitStateForScout({}), null);
+});
+
 test('buildRegimeExitStateForScout returns compact staged summaries and manifest-ready enabled fields', () => {
   const seed = baseInput();
   seed.config.regimeExitResearch = {
@@ -99,6 +104,12 @@ test('buildRegimeExitStateForScout returns compact staged summaries and manifest
   assert.equal(regimeExitState.researchBudgetMode, 'regime-exit');
   assert.equal(regimeExitState.resourceBudget.maxConcurrentLabWorkers >= 1, true);
   assert.equal(typeof regimeExitState.resourceUsageSummary.searchBatchSize, 'number');
+  assert.equal(regimeExitState.resourceUsageSummary.configuredWorkerModel, 'isolated');
+  assert.equal(regimeExitState.resourceUsageSummary.workerModelSource, 'configured');
+  assert.equal(regimeExitState.resourceUsageSummary.configuredStreamingMetricsEnabled, true);
+  assert.equal(regimeExitState.resourceUsageSummary.streamingMetricsSource, 'configured');
+  assert.equal('workerModel' in regimeExitState.resourceUsageSummary, false);
+  assert.equal('streamingMetricsEnabled' in regimeExitState.resourceUsageSummary, false);
   assert.equal(typeof regimeExitState.checkpointState.historyEventCount, 'number');
   assert.equal(regimeExitState.objectiveBreakdown.minRoiPct, 25);
   assert.equal(regimeExitState.multipleTestingPenalty.base, 0.25);
@@ -107,6 +118,8 @@ test('buildRegimeExitStateForScout returns compact staged summaries and manifest
   assert.equal(typeof regimeExitState.shadowRegimeScoreboard.selectedLane, 'string');
   assert.equal(regimeExitState.shadowRegimeScoreboard.laneBudgetAllocation.exitRegime >= 0, true);
   assert.equal(typeof regimeExitState.shadowRegimeScoreboard.generatorSummary.candidateCount, 'number');
+  assert.equal(regimeExitState.shadowRegimeScoreboard.generatorSummary.previewOnly, true);
+  assert.equal(regimeExitState.shadowRegimeScoreboard.generatorSummary.countSource, 'searchBatch');
 
   const orchestration = buildScoutOrchestrationState({
     ...seed,
@@ -118,4 +131,30 @@ test('buildRegimeExitStateForScout returns compact staged summaries and manifest
   assert.equal(orchestration.manifest.objectiveBreakdown.minRoiPct, 25);
   assert.equal(orchestration.manifest.offlineDataSummary.mode, 'offline-strict');
   assert.equal(orchestration.manifest.shadowRegimeScoreboard !== undefined, true);
+
+  const compactBlock = {
+    researchBudgetMode: orchestration.manifest.researchBudgetMode,
+    resourceBudget: orchestration.manifest.resourceBudget,
+    resourceUsageSummary: orchestration.manifest.resourceUsageSummary,
+    checkpointState: orchestration.manifest.checkpointState,
+    objectiveBreakdown: orchestration.manifest.objectiveBreakdown,
+    multipleTestingPenalty: orchestration.manifest.multipleTestingPenalty,
+    holdoutVerdict: orchestration.manifest.holdoutVerdict,
+    offlineDataSummary: orchestration.manifest.offlineDataSummary,
+    shadowRegimeScoreboard: orchestration.manifest.shadowRegimeScoreboard,
+  };
+  const compactJson = JSON.stringify(compactBlock);
+
+  assert.equal(compactJson.includes('"requiredLabs"'), false);
+  assert.equal(compactJson.includes('"missingLabs"'), false);
+  assert.equal(compactJson.includes('"searchBatch":['), false);
+  assert.equal(compactJson.includes('"analysis"'), false);
+  assert.equal(compactJson.includes('"rows"'), false);
+  assert.equal(compactJson.includes('"labResults"'), false);
+  assert.equal(compactJson.includes('"matrixCandidates"'), false);
+
+  assert.equal('workerModel' in orchestration.manifest.resourceUsageSummary, false);
+  assert.equal('streamingMetricsEnabled' in orchestration.manifest.resourceUsageSummary, false);
+  assert.equal(orchestration.manifest.resourceUsageSummary.workerModelSource, 'configured');
+  assert.equal(orchestration.manifest.resourceUsageSummary.streamingMetricsSource, 'configured');
 });

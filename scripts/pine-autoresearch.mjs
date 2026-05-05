@@ -92,26 +92,10 @@ function summarizeRegimeLaneGenerator({ selectedLane, championState, config, sea
     lane: selectedLane || null,
     laneKind: selectedLane || null,
     candidateCount: searchBatchCount,
+    previewOnly: true,
+    countSource: 'searchBatch',
+    blockedFamilyCount: null,
   };
-
-  if (selectedLane === 'exitRegime') {
-    const generated = buildExitFamilyCandidates({
-      incumbent: championState,
-      regimeSliceId: 'scout-preview',
-      maxConfigs: Math.max(1, Number(config?.maxConfigs) || 1),
-    });
-    summary.candidateCount = generated.length;
-    summary.blockedFamilyCount = Array.isArray(generated[0]?.metadata?.blockedFamilies)
-      ? generated[0].metadata.blockedFamilies.length
-      : 0;
-  } else if (selectedLane === 'globalAllParameter') {
-    const generated = buildGlobalMutationBatch({
-      incumbent: championState,
-      maxConfigs: Math.max(1, Number(config?.maxConfigs) || 1),
-    });
-    summary.candidateCount = generated.length;
-    summary.blockedFamilyCount = 0;
-  }
 
   return summary;
 }
@@ -172,8 +156,10 @@ export function buildRegimeExitStateForScout({
       maxRowsLoadedPerWorker: Math.max(100, Number(resourceConfig.maxRowsLoadedPerWorker) || 100),
     },
     resourceUsageSummary: {
-      workerModel: regimeConfig.childWorkerIsolationEnabled === false ? 'shared' : 'isolated',
-      streamingMetricsEnabled: regimeConfig.streamingMetricsEnabled !== false,
+      configuredWorkerModel: regimeConfig.childWorkerIsolationEnabled === false ? 'shared' : 'isolated',
+      workerModelSource: 'configured',
+      configuredStreamingMetricsEnabled: regimeConfig.streamingMetricsEnabled !== false,
+      streamingMetricsSource: 'configured',
       searchBatchSize: Array.isArray(searchBatch) ? searchBatch.length : 0,
     },
     checkpointState: {

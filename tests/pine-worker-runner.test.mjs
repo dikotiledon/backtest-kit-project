@@ -76,6 +76,20 @@ test('runEvaluationWorker handles non-zero worker with structured JSON failure',
   assert.match(result.stderr, /bad data/i);
 });
 
+test('runEvaluationWorker handles non-zero worker with structured JSON failure on stderr', async () => {
+  const worker = await makeWorker([
+    "console.error(JSON.stringify({ ok: false, reason: 'analysisFailed', message: 'stderr bad data' }))",
+    'process.exit(1)'
+  ].join('\n'));
+
+  const result = await runEvaluationWorker({ workerPath: worker, payload: {}, timeoutMs: 5000, maxOldSpaceMb: 128 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.equal(result.summary?.reason, 'analysisFailed');
+  assert.match(result.stderr, /stderr bad data/i);
+});
+
 test('runEvaluationWorker caps output buffers and marks truncation', async () => {
   const worker = await makeWorker([
     "console.log('x'.repeat(6000))",

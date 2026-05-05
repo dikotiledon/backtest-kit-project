@@ -12,6 +12,9 @@ async function readStdin() {
 
 function emitFailure(reason, message) {
   console.log(JSON.stringify({ ok: false, reason, message }));
+  if (message) {
+    console.error(message);
+  }
   process.exitCode = 1;
 }
 

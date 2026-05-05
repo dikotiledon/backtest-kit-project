@@ -172,7 +172,9 @@ export async function runEvaluationWorker({ workerPath, payload, timeoutMs, maxO
         return;
       }
 
-      const summary = tryParseLastJsonLine(stdout);
+      const stdoutSummary = tryParseLastJsonLine(stdout);
+      const stderrSummary = tryParseLastJsonLine(stderr);
+      const summary = code === 0 ? stdoutSummary : (stdoutSummary ?? stderrSummary);
       const stdoutPreview = previewOutput(stdout);
       const stderrPreview = previewOutput(stderr);
       const stdinErrorMessage = stdinError ? `stdin: ${stdinError}` : '';
@@ -183,7 +185,7 @@ export async function runEvaluationWorker({ workerPath, payload, timeoutMs, maxO
           reason: 'workerFailed',
           stderr: stderrPreview || stdinErrorMessage || (summary?.message ?? 'Worker exited with non-zero status'),
           stdout: stdoutPreview,
-          summary
+          ...(summary ? { summary } : {})
         });
         return;
       }

@@ -1863,8 +1863,15 @@ test('buildScoutOrchestrationState keeps heavy lab analysis out of the persisted
         challenger: { configId: 'c1' },
         decision: { recommendation: 'promote' },
         analysis: {
-          incumbent: { trades: [{ pnl: 1 }], rows: [{ timestamp: '2026-01-01T00:00:00.000Z', Close: 1 }] },
-          challenger: { trades: [{ pnl: 2 }], rows: [{ timestamp: '2026-01-01T00:15:00.000Z', Close: 2 }] },
+          incumbent: {
+            trades: [{ pnl: 1 }],
+            rows: [{ timestamp: '2026-01-01T00:00:00.000Z', Close: 1, Feature_RawLongPrediction: 123 }],
+          },
+          challenger: {
+            trades: [{ pnl: 2 }],
+            rows: [{ timestamp: '2026-01-01T00:15:00.000Z', Close: 2, Feature_RawLongPrediction: 456 }],
+            diagnostics: { rawMarker: 'Feature_RawLongPrediction' },
+          },
         },
       }],
       matrixDecision: { recommendation: 'promote', gates: { candidateChanged: true } },
@@ -1872,8 +1879,10 @@ test('buildScoutOrchestrationState keeps heavy lab analysis out of the persisted
     }],
   });
 
+  const manifestJson = JSON.stringify(result.manifest);
   assert.ok(result.labResults[0].analysis);
   assert.equal(result.manifest.labResults[0].analysis, undefined);
+  assert.equal(manifestJson.includes('Feature_RawLongPrediction'), false);
   assert.doesNotThrow(() => JSON.stringify(result.manifest));
 });
 

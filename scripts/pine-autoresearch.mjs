@@ -59,6 +59,19 @@ import {
 import { buildCandidateFamilyKey, summarizePromotionLineage } from './lib/pine-autoresearch-lineage.mjs';
 import { normalizeRegimeExitResearchConfig } from './lib/pine-regime-exit-config.mjs';
 
+const DEFAULT_REGIME_EXIT_STATE = {
+  enabled: false,
+  researchBudgetMode: null,
+  resourceBudget: null,
+  resourceUsageSummary: null,
+  checkpointState: null,
+  objectiveBreakdown: null,
+  multipleTestingPenalty: null,
+  holdoutVerdict: null,
+  offlineDataSummary: null,
+  shadowRegimeScoreboard: null,
+};
+
 function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -228,7 +241,7 @@ export function selectChangedMatrixCandidate({ candidates = [], championState = 
   return selectRobustMatrixCandidate({ candidates: changed });
 }
 
-export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {} }) {
+export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {}, regimeExitState = DEFAULT_REGIME_EXIT_STATE }) {
 
   const championSummary = summarizeResult(championState);
   const paretoShortlist = buildParetoShortlist({
@@ -302,6 +315,21 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
     challenger: item.challenger,
     decision: item.decision,
   }));
+
+  const normalizedRegimeExitState = { ...DEFAULT_REGIME_EXIT_STATE, ...(regimeExitState || {}) };
+  const compactRegimeExitManifest = normalizedRegimeExitState.enabled
+    ? {
+        researchBudgetMode: normalizedRegimeExitState.researchBudgetMode ?? 'regime-exit',
+        resourceBudget: normalizedRegimeExitState.resourceBudget ?? null,
+        resourceUsageSummary: normalizedRegimeExitState.resourceUsageSummary ?? null,
+        checkpointState: normalizedRegimeExitState.checkpointState ?? null,
+        objectiveBreakdown: normalizedRegimeExitState.objectiveBreakdown ?? null,
+        multipleTestingPenalty: normalizedRegimeExitState.multipleTestingPenalty ?? null,
+        holdoutVerdict: normalizedRegimeExitState.holdoutVerdict ?? null,
+        offlineDataSummary: normalizedRegimeExitState.offlineDataSummary ?? null,
+        shadowRegimeScoreboard: normalizedRegimeExitState.shadowRegimeScoreboard ?? null,
+      }
+    : {};
 
   return {
     variantFilePath: path.join(config.researchRoot, `${runId}-variants.json`),
@@ -378,6 +406,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       robustness: selectedCandidate?.robustness ?? null,
       labSetId: trackState.labSetId ?? null,
       gridName: trackState.gridName ?? config.grid ?? null,
+      ...compactRegimeExitManifest,
     },
   };
 }

@@ -28,7 +28,7 @@ function normalizeLaneRatios(raw = {}) {
 
 export function normalizeRegimeExitResearchConfig(raw = {}) {
   return {
-    enabled: Boolean(raw.enabled),
+    enabled: raw.enabled === true,
     exitRegimeEnabled: raw.exitRegimeEnabled !== false,
     globalAllParameterEnabled: raw.globalAllParameterEnabled !== false,
     robustnessLadderEnabled: raw.robustnessLadderEnabled !== false,

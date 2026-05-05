@@ -10,11 +10,38 @@ async function readStdin() {
   return Buffer.concat(chunks).toString('utf8').trim();
 }
 
+function emitFailure(reason, message) {
+  console.log(JSON.stringify({ ok: false, reason, message }));
+  process.exitCode = 1;
+}
+
 async function main() {
   const raw = await readStdin();
-  const payload = raw ? JSON.parse(raw) : {};
 
-  if (payload.command === 'analyze-jsonl-streaming') {
+  let payload;
+  try {
+    payload = raw ? JSON.parse(raw) : {};
+  } catch {
+    emitFailure('invalidPayload', 'Payload is not valid JSON');
+    return;
+  }
+
+  if (!payload || typeof payload !== 'object') {
+    emitFailure('invalidPayload', 'Payload must be an object');
+    return;
+  }
+
+  if (payload.command !== 'analyze-jsonl-streaming') {
+    emitFailure('unknownCommand', `Unsupported command: ${payload.command ?? '<missing>'}`);
+    return;
+  }
+
+  if (typeof payload.filePath !== 'string' || payload.filePath.trim() === '') {
+    emitFailure('invalidPayload', 'Missing required filePath');
+    return;
+  }
+
+  try {
     const analysis = await analyzeJsonlFileStreaming(payload.filePath, payload.options ?? {});
     console.log(JSON.stringify({
       ok: true,
@@ -24,11 +51,13 @@ async function main() {
       diagnostics: analysis.diagnostics,
       rowCount: analysis.rowCount
     }));
-    return;
+  } catch (error) {
+    emitFailure('analysisFailed', error?.message ?? 'Analysis failed');
   }
-
-  console.error(`Unsupported command: ${payload.command ?? '<missing>'}`);
-  process.exitCode = 1;
 }
 
-await main();
+try {
+  await main();
+} catch (error) {
+  emitFailure('analysisFailed', error?.message ?? 'Unhandled worker failure');
+}

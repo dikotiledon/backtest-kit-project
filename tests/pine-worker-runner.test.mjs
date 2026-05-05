@@ -6,10 +6,15 @@ import path from 'node:path';
 
 import { runEvaluationWorker } from '../scripts/lib/pine-worker-runner.mjs';
 
-test('runEvaluationWorker returns parsed bounded JSON summary', async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-worker-'));
+async function makeWorker(source, prefix = 'pine-worker-') {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
   const worker = path.join(dir, 'worker.mjs');
-  await fs.writeFile(worker, "console.log(JSON.stringify({ ok: true, metrics: { roiPct: 42 } }))", 'utf8');
+  await fs.writeFile(worker, source, 'utf8');
+  return worker;
+}
+
+test('runEvaluationWorker returns parsed bounded JSON summary', async () => {
+  const worker = await makeWorker("console.log(JSON.stringify({ ok: true, metrics: { roiPct: 42 } }))");
 
   const result = await runEvaluationWorker({ workerPath: worker, payload: { a: 1 }, timeoutMs: 5000, maxOldSpaceMb: 128 });
 
@@ -17,13 +22,91 @@ test('runEvaluationWorker returns parsed bounded JSON summary', async () => {
   assert.equal(result.summary.metrics.roiPct, 42);
 });
 
-test('runEvaluationWorker marks timeout as workerTimeout', async () => {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-worker-timeout-'));
-  const worker = path.join(dir, 'worker.mjs');
-  await fs.writeFile(worker, "setTimeout(() => console.log(JSON.stringify({ ok: true })), 1000)", 'utf8');
+test('runEvaluationWorker parses last JSON line when logs precede summary', async () => {
+  const worker = await makeWorker([
+    "console.log('booting worker')",
+    "console.log('still running')",
+    "console.log(JSON.stringify({ ok: true, score: 99 }))"
+  ].join('\n'));
 
-  const result = await runEvaluationWorker({ workerPath: worker, payload: {}, timeoutMs: 10, maxOldSpaceMb: 128 });
+  const result = await runEvaluationWorker({ workerPath: worker, payload: {}, timeoutMs: 5000, maxOldSpaceMb: 128 });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.summary.score, 99);
+});
+
+test('runEvaluationWorker marks timeout as workerTimeout', async () => {
+  const worker = await makeWorker("setTimeout(() => console.log(JSON.stringify({ ok: true })), 3000)", 'pine-worker-timeout-');
+
+  const result = await runEvaluationWorker({ workerPath: worker, payload: {}, timeoutMs: 1000, maxOldSpaceMb: 128 });
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'workerTimeout');
+});
+
+test('runEvaluationWorker returns workerFailed for missing workerPath', async () => {
+  const result = await runEvaluationWorker({ workerPath: '', payload: {}, timeoutMs: 5000, maxOldSpaceMb: 128 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.match(result.stderr, /workerPath/i);
+});
+
+test('runEvaluationWorker returns workerFailed for invalid output JSON', async () => {
+  const worker = await makeWorker("console.log('not-json')");
+
+  const result = await runEvaluationWorker({ workerPath: worker, payload: {}, timeoutMs: 5000, maxOldSpaceMb: 128 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.match(result.stderr, /Invalid JSON output from worker/i);
+});
+
+test('runEvaluationWorker handles non-zero worker with structured JSON failure', async () => {
+  const worker = await makeWorker([
+    "console.log(JSON.stringify({ ok: false, reason: 'analysisFailed', message: 'bad data' }))",
+    'process.exit(1)'
+  ].join('\n'));
+
+  const result = await runEvaluationWorker({ workerPath: worker, payload: {}, timeoutMs: 5000, maxOldSpaceMb: 128 });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.equal(result.summary?.reason, 'analysisFailed');
+  assert.match(result.stderr, /bad data/i);
+});
+
+test('runEvaluationWorker caps output buffers and marks truncation', async () => {
+  const worker = await makeWorker([
+    "console.log('x'.repeat(6000))",
+    "console.error('y'.repeat(6000))",
+    "console.log(JSON.stringify({ ok: true, done: true }))"
+  ].join('\n'));
+
+  const result = await runEvaluationWorker({
+    workerPath: worker,
+    payload: {},
+    timeoutMs: 5000,
+    maxOldSpaceMb: 128,
+    maxOutputBytes: 1024
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.match(result.stdout ?? '', /truncated/i);
+});
+
+test('worker entrypoint unknown command produces structured failure via runner', async () => {
+  const workerPath = path.resolve('scripts/pine-evaluate-candidate-worker.mjs');
+
+  const result = await runEvaluationWorker({
+    workerPath,
+    payload: { command: 'unsupported-command' },
+    timeoutMs: 5000,
+    maxOldSpaceMb: 128
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'workerFailed');
+  assert.equal(result.summary?.reason, 'unknownCommand');
 });

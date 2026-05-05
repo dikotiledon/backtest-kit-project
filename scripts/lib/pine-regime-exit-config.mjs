@@ -38,7 +38,7 @@ export function normalizeRegimeExitResearchConfig(raw = {}) {
       mode: ['offline-strict', 'local-first', 'refresh'].includes(raw.offline?.mode)
         ? raw.offline.mode
         : 'offline-strict',
-      allowEmergencyReducedMatrix: Boolean(raw.offline?.allowEmergencyReducedMatrix),
+      allowEmergencyReducedMatrix: raw.offline?.allowEmergencyReducedMatrix === true,
     },
     lanes: normalizeLaneRatios(raw.lanes),
     resource: {
@@ -63,5 +63,5 @@ export function normalizeRegimeExitResearchConfig(raw = {}) {
 }
 
 export function isRegimeExitResearchEnabled(config = {}) {
-  return Boolean(config.enabled);
+  return config?.enabled === true;
 }

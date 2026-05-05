@@ -19,9 +19,11 @@ test('normalizeRegimeExitResearchConfig defaults to safe disabled mode', () => {
   assert.equal(config.resource.maxConcurrentLabWorkers >= 1, true);
 });
 
-test('isRegimeExitResearchEnabled requires top-level flag', () => {
+test('isRegimeExitResearchEnabled requires strict boolean true', () => {
   assert.equal(isRegimeExitResearchEnabled(normalizeRegimeExitResearchConfig({ enabled: false })), false);
   assert.equal(isRegimeExitResearchEnabled(normalizeRegimeExitResearchConfig({ enabled: true })), true);
+  assert.equal(isRegimeExitResearchEnabled({ enabled: 'true' }), false);
+  assert.equal(isRegimeExitResearchEnabled({ enabled: 'false' }), false);
 });
 
 test('normalizeRegimeExitResearchConfig clamps invalid ratios and caps', () => {
@@ -93,5 +95,23 @@ test('normalizeRegimeExitResearchConfig enables only for boolean true', () => {
     const config = normalizeRegimeExitResearchConfig({ enabled: value });
     assert.equal(config.enabled, expected);
     assert.equal(isRegimeExitResearchEnabled(config), expected);
+  }
+});
+
+test('normalizeRegimeExitResearchConfig allows emergency reduced matrix only for boolean true', () => {
+  const cases = [
+    { value: true, expected: true },
+    { value: 'true', expected: false },
+    { value: 'false', expected: false },
+    { value: 1, expected: false },
+    { value: 0, expected: false },
+    { value: undefined, expected: false },
+  ];
+
+  for (const { value, expected } of cases) {
+    const config = normalizeRegimeExitResearchConfig({
+      offline: { allowEmergencyReducedMatrix: value },
+    });
+    assert.equal(config.offline.allowEmergencyReducedMatrix, expected);
   }
 });

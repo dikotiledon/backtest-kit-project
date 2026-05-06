@@ -1,6 +1,6 @@
 # Artifacts and state
 
-Operational map for autoresearch outputs. Not a formal schema; the field inventory lives in `docs/reference/schemas.md`.
+Operational map for autoresearch outputs. For field-level details, see [`docs/reference/schemas.md`](./reference/schemas.md) and [`docs/reference/autoresearch-artifacts.md`](./reference/autoresearch-artifacts.md).
 
 ## Roots
 
@@ -33,6 +33,8 @@ Operational map for autoresearch outputs. Not a formal schema; the field invento
 | `digestRoot/analysis/<runId>-asymmetry.md` | scout | run-scoped | regime/asymmetry report |
 | `digestRoot/<mode>-promote-<timestamp>.md` | promote/autopromote | run-scoped | human promotion note |
 | `pine/sweeps/<runId>/` | sweep script | run-scoped then pruned | primary sweep output |
+| `pine/datasets/<matrixId>/<labId>.json` | dataset pin | tracked when intentionally refreshed | pinned offline candle window |
+| `pine/dump/data/candle/<exchange>/<symbol>/<timeframe>/<timestamp>.json` | dataset stage / Backtest Kit cache | generated cache | materialized candles used by strict offline runs |
 
 ## Lifecycle
 
@@ -89,11 +91,14 @@ Operational map for autoresearch outputs. Not a formal schema; the field invento
 - `expectancyPolicy`: `enabled`, `wrJumpDiagnosticThreshold`, `rejectWrGainAvgWinLoss`, `requireExpectancyNonRegression`.
 - `complexityPolicy`: `enabled`, `ignoreKeys`, score/ROI/PF penalty knobs.
 - `pinnedData`: `enabled`, `datasetsRoot`, `cacheRoot`, `exchangeName`, `sourceExchangeId`, `sourceMode`.
+- `regimeExitResearch`: `enabled`, lane budget ratios, resource budget, global champion anchor, automatic regime switching kill switch.
 - `windowPolicy`: `primary`, `shadow`, `rotating`, `minCoverage`, `maxAge`.
 - `retention`: `keepLatestRuns`, `pruneSweepRuns`, `pruneEvaluationRuns`, `prunePartialRuns`.
 - `researchTracks`: `trackId`, `name`, `gridName`, `variantMode`, `sourceFamily`, `windowSet`, `promotionPolicy`, `stopPolicy`.
 
 ## See also
 
-- `docs/reference/schemas.md` for field-level inventory.
-- `docs/pine-autoresearch.md` for the full cycle narrative.
+- [`docs/reference/schemas.md`](./reference/schemas.md) for legacy field-level inventory.
+- [`docs/reference/autoresearch-artifacts.md`](./reference/autoresearch-artifacts.md) for current artifact lifecycle and compactness rules.
+- [`docs/reference/autoresearch-config.md`](./reference/autoresearch-config.md) for config fields.
+- [`docs/pine-autoresearch.md`](./pine-autoresearch.md) for the full cycle narrative.

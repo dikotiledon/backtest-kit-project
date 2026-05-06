@@ -2,6 +2,11 @@
 
 Operational field inventory only. Not a generated JSON Schema.
 
+For current operator guides, also see:
+- [Autoresearch config reference](./autoresearch-config.md)
+- [Autoresearch artifacts reference](./autoresearch-artifacts.md)
+- [Pine autoresearch](../pine-autoresearch.md)
+
 ## Lock owner (`researchRoot/state/autoresearch.lock.json`)
 
 | Field | Meaning |
@@ -163,6 +168,19 @@ Top-level fields written by scout:
 - `labSetId`
 - `gridName`
 
+Regime-exit fields emitted only when `regimeExitResearch.enabled=true`:
+- `researchBudgetMode`
+- `resourceBudget`
+- `resourceUsageSummary`
+- `checkpointState`
+- `objectiveBreakdown`
+- `multipleTestingPenalty`
+- `holdoutVerdict`
+- `offlineDataSummary`
+- `shadowRegimeScoreboard`
+
+Compactness rule: manifest stores summaries, not full raw row/trade diagnostics. Heavy `analysis` payloads and raw diagnostic markers such as `Feature_RawLongPrediction` must not appear in serialized manifest JSON.
+
 ### `matrixDecision`
 
 | Field | Meaning |
@@ -267,11 +285,15 @@ Each side bucket includes:
 - `avgPnl`
 - `totalPnl`
 
-`regimeSlices` buckets:
+`regimeSlices` buckets can include legacy analysis buckets and regime-exit slice labels:
 - `trend`
 - `chop`
 - `compression`
 - `expansion`
+- `high-vol`
+- `low-vol`
+- `long-favored`
+- `short-favored`
 - `totals`
 
 `asymmetry` fields:
@@ -371,7 +393,7 @@ Track candidate metadata also includes:
 - `tests/pine-autoresearch-lock.test.mjs`: lock owner, reclaim, release.
 - `tests/pine-promotion-queue.test.mjs`: pending/status replay, errors, orphans, dedupe.
 - `tests/pine-dataset.test.mjs`: dataset artifact, window, cache validation.
-- `tests/pine-autoresearch.test.mjs`: manifest, matrixDecision, searchPlan, researchState, pruning, autopromote.
+- `tests/pine-autoresearch.test.mjs`: manifest, matrixDecision, searchPlan, researchState, pruning, autopromote, regime-exit compatibility, manifest compactness.
 - `tests/pine-regime-analysis.test.mjs`: regime slices and asymmetry artifact.
 - `tests/pine-expectancy.test.mjs`: expectancy gate and diagnostics.
 - `tests/pine-optimizer.test.mjs`: metrics and score breakdown.

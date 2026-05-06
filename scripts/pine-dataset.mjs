@@ -67,6 +67,7 @@ async function loadDatasetConfig(cwd, configPath) {
   const labs = [
     normalizeLab(primarySource, 0, 'primary'),
     ...(raw.shadowLabs || []).map((lab, index) => normalizeLab(lab, index, 'shadow')),
+    ...(raw.blindHoldoutLabs || []).map((lab, index) => normalizeLab(lab, index, 'blind-holdout')),
   ];
 
   const pinnedData = {

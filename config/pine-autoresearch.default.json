@@ -348,7 +348,8 @@
     }
   ],
   "regimeExitResearch": {
-    "enabled": false,
+    "enabled": true,
+    "offline": { "mode": "local-first" },
     "budget": {
       "exploitRatio": 0.25,
       "exitRegimeRatio": 0.35,

@@ -1,7 +1,7 @@
 {
   "formatVersion": 1,
-  "generatedAt": "2026-05-05T22:21:19.745Z",
-  "source": "ccxt",
+  "generatedAt": "2026-05-06T10:13:39.916Z",
+  "source": "local-cache",
   "exchangeName": "ccxt-exchange",
   "exchangeId": "binance",
   "lab": {

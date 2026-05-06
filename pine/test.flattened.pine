@@ -595,7 +595,7 @@ showTradeStats = input.bool(false, title="Show Performance Panel", group="Perfor
 useWorstCase = input.bool(false, title="Use Worst-Case Fills", group="Performance")
 
 // Settings object for user-defined settings
-FilterSettings filterSettings = FilterSettings.new(input.bool(title="Use Volatility Filter", defval=true, tooltip="Whether to use the volatility filter.", group="Filters"), input.bool(title="Use Regime Filter", defval=true, group="Filters", inline="regime"), input.bool(title="Use ADX Filter", defval=true, group="Filters", inline="adx"), input.float(title="Threshold", defval=-0.1, minval=-10, maxval=10, step=0.1, tooltip="Whether to use the trend detection filter. Threshold for detecting Trending/Ranging markets.", group="Filters", inline="regime"), input.int(title="Threshold", defval=20, minval=0, maxval=100, step=1, tooltip="Whether to use the ADX filter. Threshold for detecting Trending/Ranging markets.", group="Filters", inline="adx"))
+FilterSettings filterSettings = FilterSettings.new(input.bool(title="Use Volatility Filter", defval=false, tooltip="Whether to use the volatility filter.", group="Filters"), input.bool(title="Use Regime Filter", defval=false, group="Filters", inline="regime"), input.bool(title="Use ADX Filter", defval=true, group="Filters", inline="adx"), input.float(title="Threshold", defval=-0.1, minval=-10, maxval=10, step=0.1, tooltip="Whether to use the trend detection filter. Threshold for detecting Trending/Ranging markets.", group="Filters", inline="regime"), input.int(title="Threshold", defval=20, minval=0, maxval=100, step=1, tooltip="Whether to use the ADX filter. Threshold for detecting Trending/Ranging markets.", group="Filters", inline="adx"))
 
 // Filter object for filtering the ML predictions
 Filter filter = Filter.new(
@@ -793,17 +793,254 @@ baseStartLong = isNewBuySignal and isBullish and isEmaUptrend and isSmaUptrend
 baseStartShort = isNewSellSignal and isBearish and isEmaDowntrend and isSmaDowntrend
 
 // Edge controls to improve trade quality
-useLongSide   = input.bool(true,  title="Enable Longs",  group="Edge Controls")
-useShortSide  = input.bool(true,  title="Enable Shorts", group="Edge Controls")
+// Default profile: Fusion V4 hardened preset from locked 10k-bar XRPUSDT 15m benchmark (2026-04-21)
 useTrendXConf = input.bool(true,  title="Require Confirmation Trend (x)", group="Edge Controls")
-minPredSum    = input.float(2.5,  title="Min Prediction Sum (strength)", minval=0.0, step=0.5, group="Edge Controls")
-minBarsBetween = input.int(4, title="Cooldown Bars Between Entries", minval=0, group="Edge Controls")
+minPredSum    = input.float(1.8,  title="Min Prediction Sum (strength)", minval=0.0, step=0.5, group="Edge Controls")
+minBarsBetween = input.int(1, title="Cooldown Bars Between Entries", minval=0, group="Edge Controls")
+useSignalFusion = input.bool(true, title="Use Signal Fusion", group="Edge Controls")
+minFusionScore = input.int(1, title="Min Fusion Score", minval=0, maxval=4, group="Edge Controls")
+useAtrFlipConfirm = input.bool(true, title="Use ATR Flip Confirm", group="Signal Fusion")
+use3LineConfirm = input.bool(false, title="Use 3 Line Strike Confirm", group="Signal Fusion")
+useEngulfingConfirm = input.bool(true, title="Use Engulfing Confirm", group="Signal Fusion")
+useEmaCrossConfirm = input.bool(false, title="Use EMA Cross Confirm", group="Signal Fusion")
+useFusionV2 = input.bool(false, title="Use Fusion V2 Soft Mode", group="Signal Fusion V2")
+fusionBonusPerSignal = input.float(0.25, title="Fusion Bonus Per Signal", minval=0.0, step=0.05, group="Signal Fusion V2")
+fusionMaxBonus = input.float(0.50, title="Fusion Max Bonus", minval=0.0, step=0.05, group="Signal Fusion V2")
+useFusionV3 = input.bool(false, title="Use Fusion V3 Threshold Shaping", group="Signal Fusion V3")
+fusionPenaltyPerMissing = input.float(0.25, title="Fusion Penalty Per Missing Signal", minval=0.0, step=0.05, group="Signal Fusion V3")
+useFusionV4 = input.bool(true, title="Use Fusion V4 Residual Layer", group="Signal Fusion V4")
+fusionV4MinAbsPrediction = input.float(2, title="Fusion V4 Min |Prediction|", minval=0.0, step=0.5, group="Signal Fusion V4")
+fusionV4MaxAbsPrediction = input.float(4, title="Fusion V4 Max |Prediction|", minval=0.0, step=0.5, group="Signal Fusion V4")
+fusionV4LongAtrWeight = input.float(-0.25, title="Fusion V4 Long ATR Weight", step=0.05, group="Signal Fusion V4")
+fusionV4LongEngulfWeight = input.float(-0.25, title="Fusion V4 Long Engulf Weight", step=0.05, group="Signal Fusion V4")
+fusionV4LongEmaWeight = input.float(0, title="Fusion V4 Long EMA Weight", step=0.05, group="Signal Fusion V4")
+fusionV4ShortAtrWeight = input.float(-0.5, title="Fusion V4 Short ATR Weight", step=0.05, group="Signal Fusion V4")
+fusionV4ShortEngulfWeight = input.float(-0.1, title="Fusion V4 Short Engulf Weight", step=0.05, group="Signal Fusion V4")
+fusionV4ShortEmaWeight = input.float(0, title="Fusion V4 Short EMA Weight", step=0.05, group="Signal Fusion V4")
+useSupertrendFilter = input.bool(true, title="Use Supertrend Filter", group="Phase 3: Supertrend")
+useSupertrendEntryConfirm = input.bool(false, title="Require Supertrend Flip Confirm", group="Phase 3: Supertrend")
+supertrendAtrLen = input.int(10, title="Supertrend ATR Length", minval=1, group="Phase 3: Supertrend")
+supertrendFactor = input.float(1.5, title="Supertrend Factor", minval=0.1, step=0.1, group="Phase 3: Supertrend")
+
+useAvwapContext = input.bool(false, title="Use AVWAP Context", group="Phase 3: AVWAP Context")
+avwapSwingPeriod = input.int(50, title="AVWAP Swing Period", minval=2, group="Phase 3: AVWAP Context")
+avwapReclaimFreshBars = input.int(6, title="AVWAP Reclaim Fresh Bars", minval=1, group="Phase 3: AVWAP Context")
+avwapMaxDistanceAtr = input.float(1.0, title="AVWAP Max Distance ATR", minval=0.1, step=0.1, group="Phase 3: AVWAP Context")
+avwapMaxAnchorAge = input.int(100, title="AVWAP Max Anchor Age", minval=1, group="Phase 3: AVWAP Context")
+avwapRequireReclaimForEntry = input.bool(false, title="Require AVWAP Reclaim For Entry", group="Phase 3: AVWAP Context")
+
+useChannelContext = input.bool(false, title="Use Breakout Context", group="Phase 3: Breakout Context")
+channelDetectLength = input.int(18, title="Channel Detect Length", minval=2, group="Phase 3: Breakout Context")
+channelCompressionThreshold = input.float(0.35, title="Channel Compression Threshold", minval=0.0, step=0.05, group="Phase 3: Breakout Context")
+channelBreakoutFreshBars = input.int(4, title="Channel Breakout Fresh Bars", minval=1, group="Phase 3: Breakout Context")
+channelEnableRetest = input.bool(false, title="Enable Channel Retest", group="Phase 3: Breakout Context")
+channelRetestFreshBars = input.int(6, title="Channel Retest Fresh Bars", minval=1, group="Phase 3: Breakout Context")
+channelHostileBlocksEntry = input.bool(true, title="Channel Hostile Blocks Entry", group="Phase 3: Breakout Context")
+
+useContextAggregator = input.bool(false, title="Use Context Aggregator", group="Phase 3: Context Aggregator")
+contextStrictRequireChannel = input.bool(false, title="Strict Require Channel", group="Phase 3: Context Aggregator")
+contextBoostAddsToStrength = input.bool(false, title="Context Boost Adds To Strength", group="Phase 3: Context Aggregator")
+contextBoostValue = input.float(0.25, title="Context Boost Value", step=0.05, group="Phase 3: Context Aggregator")
+contextHostileBlocksEntry = input.bool(true, title="Context Hostile Blocks Entry", group="Phase 3: Context Aggregator")
+
+useContextExitShaping = input.bool(false, title="Use Context Exit Shaping", group="Phase 3: Context Exit Shaping")
+contextTightenTrailOnCaution = input.bool(false, title="Tighten Trail On Caution", group="Phase 3: Context Exit Shaping")
+contextTrailTightenFactor = input.float(0.75, title="Context Trail Tighten Factor", minval=0.1, maxval=1.0, step=0.05, group="Phase 3: Context Exit Shaping")
+contextAllowEarlySignalExit = input.bool(false, title="Allow Early Signal Exit", group="Phase 3: Context Exit Shaping")
+
+useSqueezeContext = input.bool(true, title="Use Squeeze Context", group="Phase 3: Squeeze Context")
+squeezeLength = input.int(20, title="Squeeze Length", minval=2, group="Phase 3: Squeeze Context")
+squeezeBbMult = input.float(2.0, title="BB Multiplier", minval=0.1, step=0.1, group="Phase 3: Squeeze Context")
+squeezeKcMult = input.float(1.5, title="KC Multiplier", minval=0.1, step=0.1, group="Phase 3: Squeeze Context")
+squeezeReleaseFreshBars = input.int(4, title="Squeeze Release Fresh Bars", minval=1, group="Phase 3: Squeeze Context")
+squeezeBoostValue = input.float(0.25, title="Squeeze Boost Value", minval=0.0, step=0.05, group="Phase 3: Squeeze Context")
+
+useDivergenceContext = input.bool(true, title="Use Divergence Context", group="Phase 3: Divergence Context")
+divRsiLen = input.int(21, title="Divergence RSI Length", minval=1, group="Phase 3: Divergence Context")
+divPivotLeft = input.int(3, title="Divergence Pivot Left", minval=1, group="Phase 3: Divergence Context")
+divPivotRight = input.int(3, title="Divergence Pivot Right", minval=1, group="Phase 3: Divergence Context")
+divFreshBars = input.int(8, title="Divergence Fresh Bars", minval=1, group="Phase 3: Divergence Context")
+divLongBoostValue = input.float(0.7, title="Divergence Long Boost", minval=0.0, step=0.05, group="Phase 3: Divergence Context")
+divShortBoostValue = input.float(0.7, title="Divergence Short Boost", minval=0.0, step=0.05, group="Phase 3: Divergence Context")
+divCautionPenaltyValue = input.float(0.0, title="Divergence Caution Penalty", minval=0.0, step=0.05, group="Phase 3: Divergence Context")
+
+useFailedFollowThroughTighten = input.bool(false, title="Use Failed Follow-Through Tighten", group="Phase 4: Exit-State Research")
+followThroughBars = input.int(4, title="Follow-Through Bars", minval=1, group="Phase 4: Exit-State Research")
+followThroughMinProgressAtr = input.float(0.75, title="Follow-Through Min Progress ATR", minval=0.0, step=0.25, group="Phase 4: Exit-State Research")
+followThroughTightenTrailAtrMult = input.float(0.75, title="Follow-Through Tighten Trail ATR x", minval=0.1, step=0.05, group="Phase 4: Exit-State Research")
+useTimeStop = input.bool(false, title="Use Time Stop", group="Phase 4: Exit-State Research")
+timeStopBars = input.int(8, title="Time Stop Bars", minval=1, group="Phase 4: Exit-State Research")
+timeStopMinUnrealizedAtr = input.float(0.5, title="Time Stop Min Unrealized ATR", minval=0.0, step=0.25, group="Phase 4: Exit-State Research")
+useContextCautionTighten = input.bool(false, title="Use Context Caution Tighten", group="Phase 4: Exit-State Research")
+contextCautionDelta = input.float(0.5, title="Context Caution Delta", minval=0.0, step=0.25, group="Phase 4: Exit-State Research")
+contextCautionTrailAtrMult = input.float(0.75, title="Context Caution Trail ATR x", minval=0.1, step=0.05, group="Phase 4: Exit-State Research")
+usePartialDerisk = input.bool(false, title="Use Partial De-Risk", group="Phase 4: Exit-State Research")
+partialDeriskAtR = input.float(1.0, title="Partial De-Risk At R", minval=0.0, step=0.25, group="Phase 4: Exit-State Research")
+partialDeriskClosePct = input.float(50.0, title="Partial De-Risk Close Pct", minval=0.0, maxval=100.0, step=5.0, group="Phase 4: Exit-State Research")
+usePostEntrySqueezeCollapseTighten = input.bool(false, title="Use Post-Entry Squeeze Collapse Tighten", group="Phase 4: Exit-State Research")
+postEntrySqueezeCollapseBars = input.int(4, title="Post-Entry Squeeze Collapse Bars", minval=1, group="Phase 4: Exit-State Research")
+postEntrySqueezeCollapseTrailAtrMult = input.float(0.75, title="Post-Entry Squeeze Collapse Trail ATR x", minval=0.1, step=0.05, group="Phase 4: Exit-State Research")
+useAdverseDivergenceTighten = input.bool(false, title="Use Adverse Divergence Tighten", group="Phase 4: Exit-State Research")
+adverseDivergenceBars = input.int(6, title="Adverse Divergence Bars", minval=1, group="Phase 4: Exit-State Research")
+adverseDivergenceTrailAtrMult = input.float(0.75, title="Adverse Divergence Trail ATR x", minval=0.1, step=0.05, group="Phase 4: Exit-State Research")
+
+fusion3LineBull = close[3] < open[3] and close[2] < open[2] and close[1] < open[1] and close > open[1]
+fusion3LineBear = close[3] > open[3] and close[2] > open[2] and close[1] > open[1] and close < open[1]
+fusionEngulfingBull = open <= close[1] and open < open[1] and close > open[1]
+fusionEngulfingBear = open >= close[1] and open > open[1] and close < open[1]
+fusionEmaSlow = ta.ema(close, 62)
+fusionEmaFast = ta.ema(close, 38)
+fusionEmaCrossBull = fusionEmaFast > fusionEmaSlow and close[1] < fusionEmaFast and close > fusionEmaFast
+fusionEmaCrossBear = fusionEmaFast < fusionEmaSlow and close[1] > fusionEmaFast and close < fusionEmaFast
+fusionAtrFlipBull = buySignal
+fusionAtrFlipBear = sellSignal
+fusionEnabledCount = (useAtrFlipConfirm ? 1 : 0) + (use3LineConfirm ? 1 : 0) + (useEngulfingConfirm ? 1 : 0) + (useEmaCrossConfirm ? 1 : 0)
+longFusionScore = (useAtrFlipConfirm and fusionAtrFlipBull ? 1 : 0) + (use3LineConfirm and fusion3LineBull ? 1 : 0) + (useEngulfingConfirm and fusionEngulfingBull ? 1 : 0) + (useEmaCrossConfirm and fusionEmaCrossBull ? 1 : 0)
+shortFusionScore = (useAtrFlipConfirm and fusionAtrFlipBear ? 1 : 0) + (use3LineConfirm and fusion3LineBear ? 1 : 0) + (useEngulfingConfirm and fusionEngulfingBear ? 1 : 0) + (useEmaCrossConfirm and fusionEmaCrossBear ? 1 : 0)
+longFusionBonus = useSignalFusion and (useFusionV2 or useFusionV3) ? math.min(fusionMaxBonus, longFusionScore * fusionBonusPerSignal) : 0.0
+shortFusionBonus = useSignalFusion and (useFusionV2 or useFusionV3) ? math.min(fusionMaxBonus, shortFusionScore * fusionBonusPerSignal) : 0.0
+longFusionPenalty = useSignalFusion and useFusionV3 ? math.max(0.0, fusionEnabledCount - longFusionScore) * fusionPenaltyPerMissing : 0.0
+shortFusionPenalty = useSignalFusion and useFusionV3 ? math.max(0.0, fusionEnabledCount - shortFusionScore) * fusionPenaltyPerMissing : 0.0
+fusionV4RangeActive = useSignalFusion and useFusionV4 and math.abs(prediction) >= fusionV4MinAbsPrediction and math.abs(prediction) <= fusionV4MaxAbsPrediction
+longFusionV4Residual = fusionV4RangeActive ? (useAtrFlipConfirm and fusionAtrFlipBull ? fusionV4LongAtrWeight : 0.0) + (useEngulfingConfirm and fusionEngulfingBull ? fusionV4LongEngulfWeight : 0.0) + (useEmaCrossConfirm and fusionEmaCrossBull ? fusionV4LongEmaWeight : 0.0) : 0.0
+shortFusionV4Residual = fusionV4RangeActive ? (useAtrFlipConfirm and fusionAtrFlipBear ? fusionV4ShortAtrWeight : 0.0) + (useEngulfingConfirm and fusionEngulfingBear ? fusionV4ShortEngulfWeight : 0.0) + (useEmaCrossConfirm and fusionEmaCrossBear ? fusionV4ShortEmaWeight : 0.0) : 0.0
+effectiveLongStrength = prediction + longFusionBonus - longFusionPenalty + longFusionV4Residual
+effectiveShortStrength = -prediction + shortFusionBonus - shortFusionPenalty + shortFusionV4Residual
+longFusionPass = (useFusionV2 or useFusionV3 or useFusionV4) ? true : (not useSignalFusion or minFusionScore <= 0 or fusionEnabledCount == 0 or longFusionScore >= minFusionScore)
+shortFusionPass = (useFusionV2 or useFusionV3 or useFusionV4) ? true : (not useSignalFusion or minFusionScore <= 0 or fusionEnabledCount == 0 or shortFusionScore >= minFusionScore)
+
+supertrendAtr = ta.atr(supertrendAtrLen)
+supertrendUp = hl2 - supertrendFactor * supertrendAtr
+supertrendUp1 = nz(supertrendUp[1], supertrendUp)
+supertrendUp := close[1] > supertrendUp1 ? math.max(supertrendUp, supertrendUp1) : supertrendUp
+supertrendDn = hl2 + supertrendFactor * supertrendAtr
+supertrendDn1 = nz(supertrendDn[1], supertrendDn)
+supertrendDn := close[1] < supertrendDn1 ? math.min(supertrendDn, supertrendDn1) : supertrendDn
+supertrendTrend = 1
+supertrendTrend := nz(supertrendTrend[1], supertrendTrend)
+supertrendTrend := supertrendTrend == -1 and close > supertrendDn1 ? 1 : supertrendTrend == 1 and close < supertrendUp1 ? -1 : supertrendTrend
+supertrendBull = supertrendTrend == 1
+supertrendBear = supertrendTrend == -1
+supertrendFlipBull = supertrendBull and supertrendTrend[1] == -1
+supertrendFlipBear = supertrendBear and supertrendTrend[1] == 1
+supertrendLine = supertrendBull ? supertrendUp : supertrendDn
+supertrendPassLong = (not useSupertrendFilter or supertrendBull) and (not useSupertrendEntryConfirm or supertrendFlipBull)
+supertrendPassShort = (not useSupertrendFilter or supertrendBear) and (not useSupertrendEntryConfirm or supertrendFlipBear)
+
+contextAtr = ta.atr(14)
+
+avwapPivotHigh = ta.pivothigh(high, avwapSwingPeriod, avwapSwingPeriod)
+avwapPivotLow = ta.pivotlow(low, avwapSwingPeriod, avwapSwingPeriod)
+var int avwapAnchorBar = na
+var float avwapPv = na
+var float avwapVol = na
+newAvwapAnchor = not na(avwapPivotHigh) or not na(avwapPivotLow)
+if newAvwapAnchor
+    avwapAnchorBar := bar_index - avwapSwingPeriod
+    avwapPv := hlc3[avwapSwingPeriod] * volume[avwapSwingPeriod]
+    avwapVol := volume[avwapSwingPeriod]
+else
+    avwapPv := nz(avwapPv[1]) + hlc3 * volume
+    avwapVol := nz(avwapVol[1]) + volume
+
+barsSinceAvwapAnchor = na(avwapAnchorBar) ? 100000 : bar_index - avwapAnchorBar
+avwapValue = avwapVol > 0 ? avwapPv / avwapVol : na
+avwapDistanceNorm = contextAtr > 0 and not na(avwapValue) ? math.abs(close - avwapValue) / contextAtr : 0.0
+avwapBullBias = useAvwapContext and close >= avwapValue
+avwapBearBias = useAvwapContext and close <= avwapValue
+avwapReclaimBull = useAvwapContext and ta.barssince(ta.crossover(close, avwapValue)) <= avwapReclaimFreshBars
+avwapReclaimBear = useAvwapContext and ta.barssince(ta.crossunder(close, avwapValue)) <= avwapReclaimFreshBars
+avwapLongOk = not useAvwapContext or ((avwapBullBias or (avwapRequireReclaimForEntry ? avwapReclaimBull : true)) and avwapDistanceNorm <= avwapMaxDistanceAtr and barsSinceAvwapAnchor <= avwapMaxAnchorAge)
+avwapShortOk = not useAvwapContext or ((avwapBearBias or (avwapRequireReclaimForEntry ? avwapReclaimBear : true)) and avwapDistanceNorm <= avwapMaxDistanceAtr and barsSinceAvwapAnchor <= avwapMaxAnchorAge)
+
+channelUpper = ta.highest(high, channelDetectLength)
+channelLower = ta.lowest(low, channelDetectLength)
+channelWidthNorm = contextAtr > 0 ? (channelUpper - channelLower) / contextAtr : 0.0
+channelCompressionScore = channelWidthNorm > 0 ? 1 / channelWidthNorm : 0.0
+channelCompressed = useChannelContext and channelWidthNorm <= channelCompressionThreshold
+channelBullBreakFresh = useChannelContext and channelCompressed[1] and ta.barssince(close > channelUpper[1]) <= channelBreakoutFreshBars
+channelBearBreakFresh = useChannelContext and channelCompressed[1] and ta.barssince(close < channelLower[1]) <= channelBreakoutFreshBars
+channelRetestBull = useChannelContext and channelEnableRetest and ta.barssince(low <= channelUpper and close >= channelUpper) <= channelRetestFreshBars
+channelRetestBear = useChannelContext and channelEnableRetest and ta.barssince(high >= channelLower and close <= channelLower) <= channelRetestFreshBars
+channelLongBoost = channelBullBreakFresh or channelRetestBull
+channelShortBoost = channelBearBreakFresh or channelRetestBear
+channelLongHostile = useChannelContext and channelBearBreakFresh
+channelShortHostile = useChannelContext and channelBullBreakFresh
+
+contextLongBlocked = useContextAggregator and ((not avwapLongOk) or (contextStrictRequireChannel and not channelLongBoost) or ((channelHostileBlocksEntry or contextHostileBlocksEntry) and channelLongHostile))
+contextShortBlocked = useContextAggregator and ((not avwapShortOk) or (contextStrictRequireChannel and not channelShortBoost) or ((channelHostileBlocksEntry or contextHostileBlocksEntry) and channelShortHostile))
+contextLongQualify = not useContextAggregator ? true : avwapLongOk
+contextShortQualify = not useContextAggregator ? true : avwapShortOk
+contextLongBoost = not useContextAggregator ? 0.0 : (channelLongBoost and contextBoostAddsToStrength ? contextBoostValue : 0.0)
+contextShortBoost = not useContextAggregator ? 0.0 : (channelShortBoost and contextBoostAddsToStrength ? contextBoostValue : 0.0)
+contextLongCaution = useContextAggregator and (not avwapLongOk or channelLongHostile)
+contextShortCaution = useContextAggregator and (not avwapShortOk or channelShortHostile)
+
+// Standalone mirrors:
+// pine/to-be-implement/Squeeze Momentum Indicator.pine
+// pine/to-be-implement/Divergence For Many Indicators.pine
+squeezeBasis = ta.sma(close, squeezeLength)
+squeezeDeviation = ta.stdev(close, squeezeLength)
+squeezeBbUpper = squeezeBasis + squeezeBbMult * squeezeDeviation
+squeezeBbLower = squeezeBasis - squeezeBbMult * squeezeDeviation
+squeezeKcBasis = ta.ema(close, squeezeLength)
+squeezeKcRange = ta.atr(squeezeLength)
+squeezeKcUpper = squeezeKcBasis + squeezeKcMult * squeezeKcRange
+squeezeKcLower = squeezeKcBasis - squeezeKcMult * squeezeKcRange
+squeezeOn = useSqueezeContext and squeezeBbUpper < squeezeKcUpper and squeezeBbLower > squeezeKcLower
+squeezeReleaseBull = useSqueezeContext and not squeezeOn and squeezeOn[1] and close > close[1]
+squeezeReleaseBear = useSqueezeContext and not squeezeOn and squeezeOn[1] and close < close[1]
+squeezeBullFresh = useSqueezeContext and not na(ta.barssince(squeezeReleaseBull)) and ta.barssince(squeezeReleaseBull) <= squeezeReleaseFreshBars
+squeezeBearFresh = useSqueezeContext and not na(ta.barssince(squeezeReleaseBear)) and ta.barssince(squeezeReleaseBear) <= squeezeReleaseFreshBars
+squeezeLongBoost = (squeezeReleaseBull or squeezeBullFresh) ? squeezeBoostValue : 0.0
+squeezeShortBoost = (squeezeReleaseBear or squeezeBearFresh) ? squeezeBoostValue : 0.0
+squeezeLongCaution = useSqueezeContext and squeezeOn and not squeezeReleaseBull
+squeezeShortCaution = useSqueezeContext and squeezeOn and not squeezeReleaseBear
+
+divRsi = ta.rsi(close, divRsiLen)
+divPivotLow = ta.pivotlow(low, divPivotLeft, divPivotRight)
+divPivotHigh = ta.pivothigh(high, divPivotLeft, divPivotRight)
+var float divPrevPriceLow = na
+var float divPrevRsiLow = na
+var float divPrevPriceHigh = na
+var float divPrevRsiHigh = na
+divBullConfirmed = false
+divBearConfirmed = false
+if not na(divPivotLow)
+    divCurrPriceLow = divPivotLow
+    divCurrRsiLow = divRsi[divPivotRight]
+    divBullConfirmed := not na(divPrevPriceLow) and divCurrPriceLow < divPrevPriceLow and divCurrRsiLow > divPrevRsiLow
+    divPrevPriceLow := divCurrPriceLow
+    divPrevRsiLow := divCurrRsiLow
+if not na(divPivotHigh)
+    divCurrPriceHigh = divPivotHigh
+    divCurrRsiHigh = divRsi[divPivotRight]
+    divBearConfirmed := not na(divPrevPriceHigh) and divCurrPriceHigh > divPrevPriceHigh and divCurrRsiHigh < divPrevRsiHigh
+    divPrevPriceHigh := divCurrPriceHigh
+    divPrevRsiHigh := divCurrRsiHigh
+divBullFresh = useDivergenceContext and (divBullConfirmed or (not na(ta.barssince(divBullConfirmed)) and ta.barssince(divBullConfirmed) <= divFreshBars))
+divBearFresh = useDivergenceContext and (divBearConfirmed or (not na(ta.barssince(divBearConfirmed)) and ta.barssince(divBearConfirmed) <= divFreshBars))
+divLongBoost = useDivergenceContext and divBullConfirmed ? divLongBoostValue : 0.0
+divShortBoost = useDivergenceContext and divBearConfirmed ? divShortBoostValue : 0.0
+divLongCaution = useDivergenceContext and (divBearConfirmed or divBearFresh)
+divShortCaution = useDivergenceContext and (divBullConfirmed or divBullFresh)
+divLongPenalty = divLongCaution ? divCautionPenaltyValue : 0.0
+divShortPenalty = divShortCaution ? divCautionPenaltyValue : 0.0
+
+contextLongCaution := contextLongCaution or squeezeLongCaution or divLongCaution
+contextShortCaution := contextShortCaution or squeezeShortCaution or divShortCaution
+effectiveLongStrength := effectiveLongStrength + contextLongBoost + squeezeLongBoost + divLongBoost
+effectiveShortStrength := effectiveShortStrength + contextShortBoost + squeezeShortBoost + divShortBoost
+requiredLongStrength = math.max(0.0, minPredSum + divLongPenalty)
+requiredShortStrength = math.max(0.0, minPredSum + divShortPenalty)
+predLongStrengthPass = effectiveLongStrength >= requiredLongStrength
+predShortStrengthPass = effectiveShortStrength >= requiredShortStrength
 
 var int lastEntryBar = na
 cooldownOk = na(lastEntryBar) or (bar_index - lastEntryBar >= minBarsBetween)
 
-startLongTrade = baseStartLong and useLongSide and (not useTrendXConf or trendx == 1) and (prediction >= minPredSum) and cooldownOk
-startShortTrade = baseStartShort and useShortSide and (not useTrendXConf or trendx == -1) and (-prediction >= minPredSum) and cooldownOk
+startLongTrade = baseStartLong and (not useTrendXConf or trendx == 1) and predLongStrengthPass and cooldownOk and longFusionPass and supertrendPassLong and contextLongQualify and not contextLongBlocked
+startShortTrade = baseStartShort and (not useTrendXConf or trendx == -1) and predShortStrengthPass and cooldownOk and shortFusionPass and supertrendPassShort and contextShortQualify and not contextShortBlocked
 
 // Dynamic Exit Conditions: Booleans for ML Model Position Exits based on Fractal Filters and Kernel Regression Filters
 lastSignalWasBullish = ta.barssince(startLongTrade) < ta.barssince(startShortTrade)
@@ -821,8 +1058,10 @@ endShortTradeDynamic = (isBullishChange and isValidShortExit[1])
 endLongTradeStrict = ((isHeldFourBars and isLastSignalBuy) or (isHeldLessThanFourBars and isNewSellSignal and isLastSignalBuy)) and startLongTrade[4]
 endShortTradeStrict = ((isHeldFourBars and isLastSignalSell) or (isHeldLessThanFourBars and isNewBuySignal and isLastSignalSell)) and startShortTrade[4]
 isDynamicExitValid = not useEmaFilter and not useSmaFilter and not useKernelSmoothing
-endLongTrade = settings.useDynamicExits and isDynamicExitValid ? endLongTradeDynamic : endLongTradeStrict 
-endShortTrade = settings.useDynamicExits and isDynamicExitValid ? endShortTradeDynamic : endShortTradeStrict
+contextAllowLongEarlyExit = useContextExitShaping and contextAllowEarlySignalExit and contextLongCaution
+contextAllowShortEarlyExit = useContextExitShaping and contextAllowEarlySignalExit and contextShortCaution
+endLongTrade = (settings.useDynamicExits and isDynamicExitValid ? endLongTradeDynamic : endLongTradeStrict) or (contextAllowLongEarlyExit and endLongTradeDynamic)
+endShortTrade = (settings.useDynamicExits and isDynamicExitValid ? endShortTradeDynamic : endShortTradeStrict) or (contextAllowShortEarlyExit and endShortTradeDynamic)
 
 // ===========================
 // ==== Signal Engine      ====
@@ -832,46 +1071,142 @@ endShortTrade = settings.useDynamicExits and isDynamicExitValid ? endShortTradeD
 enableStrategy = input.bool(true, title="Enable Signal Engine", group="Strategy")
 useStopsTP     = input.bool(true,  title="Use ATR Stop/Target", group="Strategy")
 riskAtrLen     = input.int(14,     title="ATR Length", minval=1, group="Strategy")
-slAtrMult      = input.float(1.5,  title="SL ATR x", minval=0.1, step=0.1, group="Strategy")
-tpAtrMult      = input.float(1.5,  title="TP ATR x (1:1 R:R by default)", minval=0.1, step=0.1, group="Strategy")
+slAtrMult      = input.float(0.5,  title="SL ATR x", minval=0.1, step=0.1, group="Strategy")
+tpAtrMult      = input.float(7.6,  title="TP ATR x (1:1 R:R by default)", minval=0.1, step=0.1, group="Strategy")
 useSignalExits = input.bool(false, title="Use Signal-Based Exits (in addition to SL/TP)", group="Strategy")
+useTrailingStop = input.bool(true, title="Use ATR Trailing Stop", group="Strategy")
+trailAtrLen = input.int(14, title="Trail ATR Length", minval=1, group="Strategy")
+trailAtrMult = input.float(1, title="Trail ATR x", minval=0.1, step=0.1, group="Strategy")
+trailActivateR = input.float(0.5, title="Trail Activate at R", minval=0.0, step=0.25, group="Strategy")
 
 var int simPos = 0
 var float simEntryPrice = na
-var float atrNow     = na
-var float longStop   = na
-var float longLimit  = na
-var float shortStop  = na
-var float shortLimit = na
+var float atrNow = na
+var float trailAtrNow = na
+var float simRiskDistance = na
+var float simBaseStop = na
+var float simTakeProfit = na
+var float simTrailStop = na
+var float simEntryContextScore = na
+var bool simEntrySqueezeOn = false
+var float activeStop = na
+var float activeTakeProfit = na
 
 atrNow := ta.atr(riskAtrLen)
+trailAtrNow := ta.atr(trailAtrLen)
+
+exitStateLongContextScore = (not avwapLongOk ? 1.0 : 0.0) + (channelLongHostile ? 1.0 : 0.0) + (squeezeLongCaution ? 1.0 : 0.0) + (divLongCaution ? 1.0 : 0.0)
+exitStateShortContextScore = (not avwapShortOk ? 1.0 : 0.0) + (channelShortHostile ? 1.0 : 0.0) + (squeezeShortCaution ? 1.0 : 0.0) + (divShortCaution ? 1.0 : 0.0)
 
 if enableStrategy
     if startLongTrade and simPos <= 0
         simPos := 1
         simEntryPrice := close
+        simRiskDistance := slAtrMult * atrNow
+        simBaseStop := useStopsTP ? close - simRiskDistance : na
+        simTakeProfit := useStopsTP ? close + tpAtrMult * atrNow : na
+        simTrailStop := na
+        simEntryContextScore := exitStateLongContextScore
+        simEntrySqueezeOn := squeezeOn
         lastEntryBar := bar_index
     if startShortTrade and simPos >= 0
         simPos := -1
         simEntryPrice := close
+        simRiskDistance := slAtrMult * atrNow
+        simBaseStop := useStopsTP ? close + simRiskDistance : na
+        simTakeProfit := useStopsTP ? close - tpAtrMult * atrNow : na
+        simTrailStop := na
+        simEntryContextScore := exitStateShortContextScore
+        simEntrySqueezeOn := squeezeOn
         lastEntryBar := bar_index
 
-longStop   := useStopsTP and simPos == 1 ? simEntryPrice - slAtrMult * atrNow : na
-longLimit  := useStopsTP and simPos == 1 ? simEntryPrice + tpAtrMult * atrNow : na
-shortStop  := useStopsTP and simPos == -1 ? simEntryPrice + slAtrMult * atrNow : na
-shortLimit := useStopsTP and simPos == -1 ? simEntryPrice - tpAtrMult * atrNow : na
+barsInTrade = simPos != 0 and not na(lastEntryBar) ? bar_index - lastEntryBar : na
 
-longStopHit  = useStopsTP and simPos == 1 and (ta.crossunder(close, longStop) or close <= longStop)
-longTakeHit  = useStopsTP and simPos == 1 and (ta.crossover(close, longLimit) or close >= longLimit)
-shortStopHit = useStopsTP and simPos == -1 and (ta.crossover(close, shortStop) or close >= shortStop)
-shortTakeHit = useStopsTP and simPos == -1 and (ta.crossunder(close, shortLimit) or close <= shortLimit)
+longFailedFollowThroughTighten = useFailedFollowThroughTighten and simPos == 1 and not na(simEntryPrice) and not na(barsInTrade) and barsInTrade >= followThroughBars and atrNow > 0 and ((high - simEntryPrice) / atrNow) < followThroughMinProgressAtr
+shortFailedFollowThroughTighten = useFailedFollowThroughTighten and simPos == -1 and not na(simEntryPrice) and not na(barsInTrade) and barsInTrade >= followThroughBars and atrNow > 0 and ((simEntryPrice - low) / atrNow) < followThroughMinProgressAtr
 
-if simPos == 1 and ((useSignalExits and endLongTrade) or longStopHit or longTakeHit)
+longTimeStopExit = useTimeStop and simPos == 1 and not na(simEntryPrice) and not na(barsInTrade) and barsInTrade >= timeStopBars and atrNow > 0 and ((close - simEntryPrice) / atrNow) <= timeStopMinUnrealizedAtr
+shortTimeStopExit = useTimeStop and simPos == -1 and not na(simEntryPrice) and not na(barsInTrade) and barsInTrade >= timeStopBars and atrNow > 0 and ((simEntryPrice - close) / atrNow) <= timeStopMinUnrealizedAtr
+
+longContextCautionTighten = useContextCautionTighten and simPos == 1 and not na(simEntryContextScore) and (exitStateLongContextScore - simEntryContextScore) >= contextCautionDelta
+shortContextCautionTighten = useContextCautionTighten and simPos == -1 and not na(simEntryContextScore) and (exitStateShortContextScore - simEntryContextScore) >= contextCautionDelta
+
+longPartialDeriskTriggered = usePartialDerisk and simPos == 1 and not na(simEntryPrice) and not na(simRiskDistance) and simRiskDistance > 0 and ((close - simEntryPrice) / simRiskDistance) >= partialDeriskAtR
+shortPartialDeriskTriggered = usePartialDerisk and simPos == -1 and not na(simEntryPrice) and not na(simRiskDistance) and simRiskDistance > 0 and ((simEntryPrice - close) / simRiskDistance) >= partialDeriskAtR
+
+longPostEntrySqueezeCollapseTighten = usePostEntrySqueezeCollapseTighten and simPos == 1 and not na(barsInTrade) and barsInTrade <= postEntrySqueezeCollapseBars and simEntrySqueezeOn and not squeezeOn
+shortPostEntrySqueezeCollapseTighten = usePostEntrySqueezeCollapseTighten and simPos == -1 and not na(barsInTrade) and barsInTrade <= postEntrySqueezeCollapseBars and simEntrySqueezeOn and not squeezeOn
+
+longAdverseDivergenceTighten = useAdverseDivergenceTighten and simPos == 1 and not na(barsInTrade) and barsInTrade <= adverseDivergenceBars and divLongCaution
+shortAdverseDivergenceTighten = useAdverseDivergenceTighten and simPos == -1 and not na(barsInTrade) and barsInTrade <= adverseDivergenceBars and divShortCaution
+
+longTrailAtrMultInForce = trailAtrMult
+shortTrailAtrMultInForce = trailAtrMult
+
+if contextLongCaution and useContextExitShaping and contextTightenTrailOnCaution
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, trailAtrMult * contextTrailTightenFactor)
+if longFailedFollowThroughTighten
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, followThroughTightenTrailAtrMult)
+if longContextCautionTighten
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, contextCautionTrailAtrMult)
+if longPartialDeriskTriggered
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, math.max(0.1, trailAtrMult * (1.0 - partialDeriskClosePct / 100.0)))
+if longPostEntrySqueezeCollapseTighten
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, postEntrySqueezeCollapseTrailAtrMult)
+if longAdverseDivergenceTighten
+    longTrailAtrMultInForce := math.min(longTrailAtrMultInForce, adverseDivergenceTrailAtrMult)
+
+if contextShortCaution and useContextExitShaping and contextTightenTrailOnCaution
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, trailAtrMult * contextTrailTightenFactor)
+if shortFailedFollowThroughTighten
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, followThroughTightenTrailAtrMult)
+if shortContextCautionTighten
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, contextCautionTrailAtrMult)
+if shortPartialDeriskTriggered
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, math.max(0.1, trailAtrMult * (1.0 - partialDeriskClosePct / 100.0)))
+if shortPostEntrySqueezeCollapseTighten
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, postEntrySqueezeCollapseTrailAtrMult)
+if shortAdverseDivergenceTighten
+    shortTrailAtrMultInForce := math.min(shortTrailAtrMultInForce, adverseDivergenceTrailAtrMult)
+
+longTrailActive = useTrailingStop and simPos == 1 and not na(simRiskDistance) and close >= simEntryPrice + trailActivateR * simRiskDistance
+shortTrailActive = useTrailingStop and simPos == -1 and not na(simRiskDistance) and close <= simEntryPrice - trailActivateR * simRiskDistance
+longTrailCandidate = longTrailActive ? close - longTrailAtrMultInForce * trailAtrNow : na
+shortTrailCandidate = shortTrailActive ? close + shortTrailAtrMultInForce * trailAtrNow : na
+
+if simPos == 1 and longTrailActive
+    simTrailStop := na(simTrailStop) ? longTrailCandidate : math.max(simTrailStop, longTrailCandidate)
+if simPos == -1 and shortTrailActive
+    simTrailStop := na(simTrailStop) ? shortTrailCandidate : math.min(simTrailStop, shortTrailCandidate)
+
+activeStop := simPos == 1 ? (na(simTrailStop) ? simBaseStop : math.max(simBaseStop, simTrailStop)) : simPos == -1 ? (na(simTrailStop) ? simBaseStop : math.min(simBaseStop, simTrailStop)) : na
+activeTakeProfit := simPos != 0 ? simTakeProfit : na
+
+longStopHit = useStopsTP and simPos == 1 and not na(activeStop) and (ta.crossunder(close, activeStop) or close <= activeStop)
+longTakeHit = useStopsTP and simPos == 1 and not na(activeTakeProfit) and (ta.crossover(close, activeTakeProfit) or close >= activeTakeProfit)
+shortStopHit = useStopsTP and simPos == -1 and not na(activeStop) and (ta.crossover(close, activeStop) or close >= activeStop)
+shortTakeHit = useStopsTP and simPos == -1 and not na(activeTakeProfit) and (ta.crossunder(close, activeTakeProfit) or close <= activeTakeProfit)
+longTrailExit = useTrailingStop and simPos == 1 and not na(simTrailStop) and longStopHit
+shortTrailExit = useTrailingStop and simPos == -1 and not na(simTrailStop) and shortStopHit
+
+if simPos == 1 and ((useSignalExits and endLongTrade) or longStopHit or longTakeHit or longTimeStopExit)
     simPos := 0
     simEntryPrice := na
-if simPos == -1 and ((useSignalExits and endShortTrade) or shortStopHit or shortTakeHit)
+    simRiskDistance := na
+    simBaseStop := na
+    simTakeProfit := na
+    simTrailStop := na
+    simEntryContextScore := na
+    simEntrySqueezeOn := false
+if simPos == -1 and ((useSignalExits and endShortTrade) or shortStopHit or shortTakeHit or shortTimeStopExit)
     simPos := 0
     simEntryPrice := na
+    simRiskDistance := na
+    simBaseStop := na
+    simTakeProfit := na
+    simTrailStop := na
+    simEntryContextScore := na
+    simEntrySqueezeOn := false
 
 // =========================
 // ======== Alerts =========
@@ -881,8 +1216,8 @@ shortEntryAlert = enableStrategy and simPos == -1 and simPos[1] != -1
 alertcondition(longEntryAlert,  title="Long Position Opened",  message="Long opened on {{ticker}} {{interval}} @ {{close}}")
 alertcondition(shortEntryAlert, title="Short Position Opened", message="Short opened on {{ticker}} {{interval}} @ {{close}}")
 
-longExitAlert  = enableStrategy and simPos == 0 and simPos[1] == 1 and endLongTrade
-shortExitAlert = enableStrategy and simPos == 0 and simPos[1] == -1 and endShortTrade
+longExitAlert  = enableStrategy and simPos == 0 and simPos[1] == 1 and (endLongTrade or longTimeStopExit)
+shortExitAlert = enableStrategy and simPos == 0 and simPos[1] == -1 and (endShortTrade or shortTimeStopExit)
 alertcondition(longExitAlert,  title="Long Exit",  message="Long exit on {{ticker}} {{interval}} @ {{close}}")
 alertcondition(shortExitAlert, title="Short Exit", message="Short exit on {{ticker}} {{interval}} @ {{close}}")
 
@@ -895,15 +1230,13 @@ alertcondition(shortStopAlert, title="Short Stop Hit", message="Short stop hit o
 // ==== Backtest-kit Outputs
 // =========================
 pineSignal = startLongTrade ? 1 : startShortTrade ? -1 : 0
-pineStopLoss = pineSignal == 1 ? close - slAtrMult * atrNow : pineSignal == -1 ? close + slAtrMult * atrNow : close
-pineTakeProfit = pineSignal == 1 ? close + tpAtrMult * atrNow : pineSignal == -1 ? close - tpAtrMult * atrNow : close
+pineStopLoss = simPos != 0 and not na(activeStop) ? activeStop : pineSignal == 1 ? close - slAtrMult * atrNow : pineSignal == -1 ? close + slAtrMult * atrNow : close
+pineTakeProfit = simPos != 0 and not na(activeTakeProfit) ? activeTakeProfit : pineSignal == 1 ? close + tpAtrMult * atrNow : pineSignal == -1 ? close - tpAtrMult * atrNow : close
 pineEstimatedTime = 240
 
 // Optimizer-ready numeric exports
 trendXLongPass = not useTrendXConf or trendx == 1
 trendXShortPass = not useTrendXConf or trendx == -1
-predLongStrengthPass = prediction >= minPredSum
-predShortStrengthPass = -prediction >= minPredSum
 
 featurePrediction = prediction
 featureTrendX = trendx
@@ -929,16 +1262,90 @@ featureTrendXShortPass = trendXShortPass ? 1 : 0
 featurePredLongStrengthPass = predLongStrengthPass ? 1 : 0
 featurePredShortStrengthPass = predShortStrengthPass ? 1 : 0
 featureCooldownOk = cooldownOk ? 1 : 0
-featureBlockLongTrendX = baseStartLong and useLongSide and not trendXLongPass ? 1 : 0
-featureBlockShortTrendX = baseStartShort and useShortSide and not trendXShortPass ? 1 : 0
-featureBlockLongPred = baseStartLong and useLongSide and trendXLongPass and not predLongStrengthPass ? 1 : 0
-featureBlockShortPred = baseStartShort and useShortSide and trendXShortPass and not predShortStrengthPass ? 1 : 0
-featureBlockLongCooldown = baseStartLong and useLongSide and trendXLongPass and predLongStrengthPass and not cooldownOk ? 1 : 0
-featureBlockShortCooldown = baseStartShort and useShortSide and trendXShortPass and predShortStrengthPass and not cooldownOk ? 1 : 0
+featureAtrFlipBull = fusionAtrFlipBull ? 1 : 0
+featureAtrFlipBear = fusionAtrFlipBear ? 1 : 0
+featureEmaCrossBull = fusionEmaCrossBull ? 1 : 0
+featureEmaCrossBear = fusionEmaCrossBear ? 1 : 0
+featureEngulfingBull = fusionEngulfingBull ? 1 : 0
+featureEngulfingBear = fusionEngulfingBear ? 1 : 0
+featureLongFusionScore = longFusionScore
+featureShortFusionScore = shortFusionScore
+featureLongFusionBonus = longFusionBonus
+featureShortFusionBonus = shortFusionBonus
+featureLongFusionPenalty = longFusionPenalty
+featureShortFusionPenalty = shortFusionPenalty
+featureLongFusionV4Residual = longFusionV4Residual
+featureShortFusionV4Residual = shortFusionV4Residual
+featureFusionV4Active = fusionV4RangeActive ? 1 : 0
+featureEffectiveLongStrength = effectiveLongStrength
+featureEffectiveShortStrength = effectiveShortStrength
+featureRequiredLongStrength = requiredLongStrength
+featureRequiredShortStrength = requiredShortStrength
+featureLongFusionPass = longFusionPass ? 1 : 0
+featureShortFusionPass = shortFusionPass ? 1 : 0
+featureSupertrendBull = supertrendBull ? 1 : 0
+featureSupertrendBear = supertrendBear ? 1 : 0
+featureSupertrendPassLong = supertrendPassLong ? 1 : 0
+featureSupertrendPassShort = supertrendPassShort ? 1 : 0
+featureAvwapBullBias = avwapBullBias ? 1 : 0
+featureAvwapBearBias = avwapBearBias ? 1 : 0
+featureChannelCompressionScore = channelCompressionScore
+featureContextLongQualify = contextLongQualify ? 1 : 0
+featureContextShortQualify = contextShortQualify ? 1 : 0
+featureLongContextCaution = contextLongCaution ? 1 : 0
+featureShortContextCaution = contextShortCaution ? 1 : 0
+featureSqueezeState = squeezeOn ? 1 : 0
+featureSqueezeReleaseBull = squeezeReleaseBull ? 1 : 0
+featureSqueezeReleaseBear = squeezeReleaseBear ? 1 : 0
+featureSqueezeLongBoost = squeezeLongBoost
+featureSqueezeShortBoost = squeezeShortBoost
+featureSqueezeLongCaution = squeezeLongCaution ? 1 : 0
+featureSqueezeShortCaution = squeezeShortCaution ? 1 : 0
+featureCompressionState = (featureSqueezeState > 0 or featureChannelCompressionScore >= 0.6) ? 1 : 0
+featureExpansionState = (featureSqueezeReleaseBull > 0 or featureSqueezeReleaseBear > 0 or featureSqueezeLongBoost > 0 or featureSqueezeShortBoost > 0) ? 1 : 0
+featureTrendStrengthState = ((trendx != 0 ? 1 : 0) + (featureTrendXLongPass ? 1 : 0) + (featureTrendXShortPass ? 1 : 0) + (featureSupertrendBull ? 1 : 0) + (featureSupertrendBear ? 1 : 0)) > 0 ? 1 : 0
+featureDivBullConfirmed = divBullConfirmed ? 1 : 0
+featureDivBearConfirmed = divBearConfirmed ? 1 : 0
+featureDivBullFresh = divBullFresh ? 1 : 0
+featureDivBearFresh = divBearFresh ? 1 : 0
+featureDivLongBoost = divLongBoost
+featureDivShortBoost = divShortBoost
+featureDivLongPenalty = divLongPenalty
+featureDivShortPenalty = divShortPenalty
+featureDivLongCaution = divLongCaution ? 1 : 0
+featureDivShortCaution = divShortCaution ? 1 : 0
+featureCautionDensity = (featureLongContextCaution + featureShortContextCaution + featureSqueezeLongCaution + featureSqueezeShortCaution + featureDivLongCaution + featureDivShortCaution) / 6.0
+featureLongEarlyExitAllowed = contextAllowLongEarlyExit ? 1 : 0
+featureShortEarlyExitAllowed = contextAllowShortEarlyExit ? 1 : 0
+featureFailedFollowThroughTighten = (longFailedFollowThroughTighten or shortFailedFollowThroughTighten) ? 1 : 0
+featureTimeStopTriggered = (longTimeStopExit or shortTimeStopExit) ? 1 : 0
+featureContextCautionTightened = (longContextCautionTighten or shortContextCautionTighten) ? 1 : 0
+featurePartialDeriskTriggered = (longPartialDeriskTriggered or shortPartialDeriskTriggered) ? 1 : 0
+featurePostEntrySqueezeCollapseTighten = (longPostEntrySqueezeCollapseTighten or shortPostEntrySqueezeCollapseTighten) ? 1 : 0
+featureAdverseDivergenceTighten = (longAdverseDivergenceTighten or shortAdverseDivergenceTighten) ? 1 : 0
+featureTrailAtrMultInForce = simPos == 1 ? longTrailAtrMultInForce : simPos == -1 ? shortTrailAtrMultInForce : trailAtrMult
+featureLiveContextScoreDelta = simPos == 1 and not na(simEntryContextScore) ? exitStateLongContextScore - simEntryContextScore : simPos == -1 and not na(simEntryContextScore) ? exitStateShortContextScore - simEntryContextScore : 0.0
+featureLongTrailTightened = simPos == 1 and longTrailAtrMultInForce < trailAtrMult ? 1 : 0
+featureShortTrailTightened = simPos == -1 and shortTrailAtrMultInForce < trailAtrMult ? 1 : 0
+featureBlockLongTrendX = baseStartLong and not trendXLongPass ? 1 : 0
+featureBlockShortTrendX = baseStartShort and not trendXShortPass ? 1 : 0
+featureBlockLongPred = baseStartLong and trendXLongPass and not predLongStrengthPass ? 1 : 0
+featureBlockShortPred = baseStartShort and trendXShortPass and not predShortStrengthPass ? 1 : 0
+featureBlockLongCooldown = baseStartLong and trendXLongPass and predLongStrengthPass and not cooldownOk ? 1 : 0
+featureBlockShortCooldown = baseStartShort and trendXShortPass and predShortStrengthPass and not cooldownOk ? 1 : 0
+featureBlockLongFusion = baseStartLong and trendXLongPass and predLongStrengthPass and cooldownOk and not longFusionPass ? 1 : 0
+featureBlockShortFusion = baseStartShort and trendXShortPass and predShortStrengthPass and cooldownOk and not shortFusionPass ? 1 : 0
+featureBlockLongSupertrend = baseStartLong and trendXLongPass and predLongStrengthPass and cooldownOk and longFusionPass and not supertrendPassLong ? 1 : 0
+featureBlockShortSupertrend = baseStartShort and trendXShortPass and predShortStrengthPass and cooldownOk and shortFusionPass and not supertrendPassShort ? 1 : 0
 featureStartLong = startLongTrade ? 1 : 0
 featureStartShort = startShortTrade ? 1 : 0
 featureEndLong = endLongTrade ? 1 : 0
 featureEndShort = endShortTrade ? 1 : 0
+featureTrailActive = ((longTrailActive and simPos == 1) or (shortTrailActive and simPos == -1)) ? 1 : 0
+featureTrailStopDistance = simPos == 1 and not na(activeStop) ? close - activeStop : simPos == -1 and not na(activeStop) ? activeStop - close : 0
+featureTrailMoved = not na(simTrailStop) ? 1 : 0
+featureTrailExitLong = longTrailExit ? 1 : 0
+featureTrailExitShort = shortTrailExit ? 1 : 0
 featureSimPos = simPos
 
 plot(close, "Close", display=display.data_window)
@@ -970,16 +1377,90 @@ plot(featureTrendXShortPass, "Feature_TrendXShortPass", display=display.data_win
 plot(featurePredLongStrengthPass, "Feature_PredLongStrengthPass", display=display.data_window)
 plot(featurePredShortStrengthPass, "Feature_PredShortStrengthPass", display=display.data_window)
 plot(featureCooldownOk, "Feature_CooldownOk", display=display.data_window)
+plot(featureAtrFlipBull, "Feature_AtrFlipBull", display=display.data_window)
+plot(featureAtrFlipBear, "Feature_AtrFlipBear", display=display.data_window)
+plot(featureEmaCrossBull, "Feature_EmaCrossBull", display=display.data_window)
+plot(featureEmaCrossBear, "Feature_EmaCrossBear", display=display.data_window)
+plot(featureEngulfingBull, "Feature_EngulfingBull", display=display.data_window)
+plot(featureEngulfingBear, "Feature_EngulfingBear", display=display.data_window)
+plot(featureLongFusionScore, "Feature_LongFusionScore", display=display.data_window)
+plot(featureShortFusionScore, "Feature_ShortFusionScore", display=display.data_window)
+plot(featureLongFusionBonus, "Feature_LongFusionBonus", display=display.data_window)
+plot(featureShortFusionBonus, "Feature_ShortFusionBonus", display=display.data_window)
+plot(featureLongFusionPenalty, "Feature_LongFusionPenalty", display=display.data_window)
+plot(featureShortFusionPenalty, "Feature_ShortFusionPenalty", display=display.data_window)
+plot(featureLongFusionV4Residual, "Feature_LongFusionV4Residual", display=display.data_window)
+plot(featureShortFusionV4Residual, "Feature_ShortFusionV4Residual", display=display.data_window)
+plot(featureFusionV4Active, "Feature_FusionV4Active", display=display.data_window)
+plot(featureEffectiveLongStrength, "Feature_EffectiveLongStrength", display=display.data_window)
+plot(featureEffectiveShortStrength, "Feature_EffectiveShortStrength", display=display.data_window)
+plot(featureRequiredLongStrength, "Feature_RequiredLongStrength", display=display.data_window)
+plot(featureRequiredShortStrength, "Feature_RequiredShortStrength", display=display.data_window)
+plot(featureLongFusionPass, "Feature_LongFusionPass", display=display.data_window)
+plot(featureShortFusionPass, "Feature_ShortFusionPass", display=display.data_window)
+plot(featureSupertrendBull, "Feature_SupertrendBull", display=display.data_window)
+plot(featureSupertrendBear, "Feature_SupertrendBear", display=display.data_window)
+plot(featureSupertrendPassLong, "Feature_SupertrendPassLong", display=display.data_window)
+plot(featureSupertrendPassShort, "Feature_SupertrendPassShort", display=display.data_window)
+plot(featureAvwapBullBias, "Feature_AvwapBullBias", display=display.data_window)
+plot(featureAvwapBearBias, "Feature_AvwapBearBias", display=display.data_window)
+plot(featureChannelCompressionScore, "Feature_ChannelCompressionScore", display=display.data_window)
+plot(featureContextLongQualify, "Feature_ContextLongQualify", display=display.data_window)
+plot(featureContextShortQualify, "Feature_ContextShortQualify", display=display.data_window)
+plot(featureLongContextCaution, "Feature_LongContextCaution", display=display.data_window)
+plot(featureShortContextCaution, "Feature_ShortContextCaution", display=display.data_window)
+plot(featureSqueezeState, "Feature_SqueezeState", display=display.data_window)
+plot(featureSqueezeReleaseBull, "Feature_SqueezeReleaseBull", display=display.data_window)
+plot(featureSqueezeReleaseBear, "Feature_SqueezeReleaseBear", display=display.data_window)
+plot(featureSqueezeLongBoost, "Feature_SqueezeLongBoost", display=display.data_window)
+plot(featureSqueezeShortBoost, "Feature_SqueezeShortBoost", display=display.data_window)
+plot(featureSqueezeLongCaution, "Feature_SqueezeLongCaution", display=display.data_window)
+plot(featureSqueezeShortCaution, "Feature_SqueezeShortCaution", display=display.data_window)
+plot(featureCompressionState, "Feature_CompressionState", display=display.data_window)
+plot(featureExpansionState, "Feature_ExpansionState", display=display.data_window)
+plot(featureTrendStrengthState, "Feature_TrendStrengthState", display=display.data_window)
+plot(featureCautionDensity, "Feature_CautionDensity", display=display.data_window)
+plot(featureDivBullConfirmed, "Feature_DivBullConfirmed", display=display.data_window)
+plot(featureDivBearConfirmed, "Feature_DivBearConfirmed", display=display.data_window)
+plot(featureDivBullFresh, "Feature_DivBullFresh", display=display.data_window)
+plot(featureDivBearFresh, "Feature_DivBearFresh", display=display.data_window)
+plot(featureDivLongBoost, "Feature_DivLongBoost", display=display.data_window)
+plot(featureDivShortBoost, "Feature_DivShortBoost", display=display.data_window)
+plot(featureDivLongPenalty, "Feature_DivLongPenalty", display=display.data_window)
+plot(featureDivShortPenalty, "Feature_DivShortPenalty", display=display.data_window)
+plot(featureDivLongCaution, "Feature_DivLongCaution", display=display.data_window)
+plot(featureDivShortCaution, "Feature_DivShortCaution", display=display.data_window)
+plot(featureLongEarlyExitAllowed, "Feature_LongEarlyExitAllowed", display=display.data_window)
+plot(featureShortEarlyExitAllowed, "Feature_ShortEarlyExitAllowed", display=display.data_window)
+plot(featureLongTrailTightened, "Feature_LongTrailTightened", display=display.data_window)
+plot(featureShortTrailTightened, "Feature_ShortTrailTightened", display=display.data_window)
 plot(featureBlockLongTrendX, "Feature_BlockLong_TrendX", display=display.data_window)
 plot(featureBlockShortTrendX, "Feature_BlockShort_TrendX", display=display.data_window)
 plot(featureBlockLongPred, "Feature_BlockLong_Pred", display=display.data_window)
 plot(featureBlockShortPred, "Feature_BlockShort_Pred", display=display.data_window)
 plot(featureBlockLongCooldown, "Feature_BlockLong_Cooldown", display=display.data_window)
 plot(featureBlockShortCooldown, "Feature_BlockShort_Cooldown", display=display.data_window)
+plot(featureBlockLongFusion, "Feature_BlockLong_Fusion", display=display.data_window)
+plot(featureBlockShortFusion, "Feature_BlockShort_Fusion", display=display.data_window)
+plot(featureBlockLongSupertrend, "Feature_BlockLong_Supertrend", display=display.data_window)
+plot(featureBlockShortSupertrend, "Feature_BlockShort_Supertrend", display=display.data_window)
 plot(featureStartLong, "Feature_StartLong", display=display.data_window)
 plot(featureStartShort, "Feature_StartShort", display=display.data_window)
 plot(featureEndLong, "Feature_EndLong", display=display.data_window)
 plot(featureEndShort, "Feature_EndShort", display=display.data_window)
+plot(featureTrailActive, "Feature_TrailActive", display=display.data_window)
+plot(featureTrailStopDistance, "Feature_TrailStopDistance", display=display.data_window)
+plot(featureTrailMoved, "Feature_TrailMoved", display=display.data_window)
+plot(featureTrailExitLong, "Feature_TrailExitLong", display=display.data_window)
+plot(featureTrailExitShort, "Feature_TrailExitShort", display=display.data_window)
+plot(featureFailedFollowThroughTighten, "Feature_FailedFollowThroughTighten", display=display.data_window)
+plot(featureTimeStopTriggered, "Feature_TimeStopTriggered", display=display.data_window)
+plot(featureContextCautionTightened, "Feature_ContextCautionTightened", display=display.data_window)
+plot(featurePartialDeriskTriggered, "Feature_PartialDeriskTriggered", display=display.data_window)
+plot(featurePostEntrySqueezeCollapseTighten, "Feature_PostEntrySqueezeCollapseTighten", display=display.data_window)
+plot(featureAdverseDivergenceTighten, "Feature_AdverseDivergenceTighten", display=display.data_window)
+plot(featureTrailAtrMultInForce, "Feature_TrailAtrMultInForce", display=display.data_window)
+plot(featureLiveContextScoreDelta, "Feature_LiveContextScoreDelta", display=display.data_window)
 plot(featureSimPos, "Feature_SimPos", display=display.data_window)
 
 // =========================

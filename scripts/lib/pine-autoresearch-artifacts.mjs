@@ -24,9 +24,14 @@ export async function beginAutoresearchRunArtifact({ root, runId, profile, now =
   return { startedPath };
 }
 
+export function autoresearchManifestPath({ root, runId }) {
+  if (!runId) throw new Error('runId is required');
+  return path.join(root, 'manifests', `${runId}.json`);
+}
+
 export async function finalizeAutoresearchManifest({ root, manifest }) {
   if (!manifest?.runId) throw new Error('manifest.runId is required');
-  const manifestPath = path.join(root, 'manifests', `${manifest.runId}.json`);
+  const manifestPath = autoresearchManifestPath({ root, runId: manifest.runId });
   const latestPath = path.join(root, 'latest.json');
   await writeJsonAtomic(manifestPath, manifest);
   await writeJsonAtomic(latestPath, { ...manifest, manifestPath });
@@ -43,6 +48,38 @@ export async function markAutoresearchRunIncomplete({ root, runId, reason, error
     endedAt: now.toISOString(),
   });
   return { incompletePath };
+}
+
+export async function markAutoresearchRunIncompleteUnlessManifestExists({ root, runId, reason, error, now = new Date() }) {
+  const manifestPath = autoresearchManifestPath({ root, runId });
+  if (fsSync.existsSync(manifestPath)) {
+    return { skipped: true, skipReason: 'manifest_exists', manifestPath, incompletePath: null };
+  }
+
+  try {
+    const markerErrorText = error?.stack || error?.message || (error ? String(error) : null);
+    const marker = await markAutoresearchRunIncomplete({ root, runId, reason, error: markerErrorText, now });
+    return { skipped: false, manifestPath, ...marker };
+  } catch (markerError) {
+    if (error && (typeof error === 'object' || typeof error === 'function')) {
+      try {
+        Object.defineProperty(error, 'autoresearchIncompleteMarkerError', {
+          value: markerError,
+          enumerable: false,
+          configurable: true,
+        });
+      } catch {
+        // Preserve the original failure even if secondary attachment is blocked.
+      }
+    }
+    return {
+      skipped: true,
+      skipReason: 'marker_failed',
+      manifestPath,
+      incompletePath: null,
+      markerError,
+    };
+  }
 }
 
 export function validateLatestManifestPointer({ root }) {

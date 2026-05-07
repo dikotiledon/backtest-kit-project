@@ -49,7 +49,7 @@ import {
 import {
   beginAutoresearchRunArtifact,
   finalizeAutoresearchManifest,
-  markAutoresearchRunIncomplete,
+  markAutoresearchRunIncompleteUnlessManifestExists,
 } from './lib/pine-autoresearch-artifacts.mjs';
 import {
   buildNoveltySignature,
@@ -1714,11 +1714,11 @@ export async function runScout(config) {
   return { manifest: finalManifest, manifestPath, scoutPath, liveDigestPath, pruneResult };
   } catch (error) {
     if (!manifestFinalized) {
-      await markAutoresearchRunIncomplete({
+      await markAutoresearchRunIncompleteUnlessManifestExists({
         root: trackedConfig.researchRoot,
         runId,
         reason: 'run_failed_before_manifest',
-        error: error?.stack || error?.message || String(error),
+        error,
       });
     }
     throw error;

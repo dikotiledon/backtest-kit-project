@@ -7,6 +7,7 @@ import {
   beginAutoresearchRunArtifact,
   finalizeAutoresearchManifest,
   markAutoresearchRunIncomplete,
+  markAutoresearchRunIncompleteUnlessManifestExists,
   validateLatestManifestPointer,
 } from '../scripts/lib/pine-autoresearch-artifacts.mjs';
 
@@ -50,4 +51,55 @@ test('validateLatestManifestPointer rejects latest pointer without manifest', as
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'latest_manifest_missing');
+});
+
+test('incomplete marker failure is recorded without masking original error', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
+  const runId = 'run-marker-fails';
+  const originalError = new Error('original run failure');
+  fs.writeFileSync(path.join(root, 'incomplete'), 'not a directory', 'utf8');
+
+  const result = await markAutoresearchRunIncompleteUnlessManifestExists({
+    root,
+    runId,
+    reason: 'run_failed_before_manifest',
+    error: originalError,
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.skipReason, 'marker_failed');
+  assert.ok(result.markerError);
+  assert.equal(originalError.autoresearchIncompleteMarkerError, result.markerError);
+  assert.equal(originalError.message, 'original run failure');
+});
+
+test('incomplete marker is skipped when manifest exists after latest pointer failure', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
+  const runId = 'run-latest-fails';
+  const latestPath = path.join(root, 'latest.json');
+  fs.mkdirSync(latestPath, { recursive: true });
+
+  const manifest = { runId, generatedAt: '2026-05-07T00:00:00.000Z', matrixDecision: { recommendation: 'hold' } };
+  let finalizeError = null;
+  try {
+    await finalizeAutoresearchManifest({ root, manifest });
+  } catch (error) {
+    finalizeError = error;
+  }
+
+  assert.ok(finalizeError);
+  const manifestPath = path.join(root, 'manifests', `${runId}.json`);
+  assert.ok(fs.existsSync(manifestPath));
+
+  const result = await markAutoresearchRunIncompleteUnlessManifestExists({
+    root,
+    runId,
+    reason: 'run_failed_before_manifest',
+    error: finalizeError,
+  });
+
+  assert.equal(result.skipped, true);
+  assert.equal(result.skipReason, 'manifest_exists');
+  assert.equal(result.manifestPath, manifestPath);
+  assert.equal(fs.existsSync(path.join(root, 'incomplete', `${runId}.json`)), false);
 });

@@ -47,6 +47,11 @@ import {
   releaseAutoresearchLock,
 } from './lib/pine-autoresearch-lock.mjs';
 import {
+  beginAutoresearchRunArtifact,
+  finalizeAutoresearchManifest,
+  markAutoresearchRunIncomplete,
+} from './lib/pine-autoresearch-artifacts.mjs';
+import {
   buildNoveltySignature,
   nextTrackState,
   normalizeResearchTracks,
@@ -1415,7 +1420,17 @@ export async function runScout(config) {
   }
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
-  let offlineDataSummary = null;
+  let manifestFinalized = false;
+  let trackedConfig = { ...config };
+
+  try {
+    await beginAutoresearchRunArtifact({
+      root: trackedConfig.researchRoot,
+      runId,
+      profile: trackedConfig.selectedProfile,
+    });
+
+    let offlineDataSummary = null;
   if (config.regimeExitResearch?.enabled) {
     offlineDataSummary = await buildOfflineDataPreflight(config);
     if (!offlineDataSummary.ok && offlineDataSummary.mode === 'offline-strict') {
@@ -1459,7 +1474,7 @@ export async function runScout(config) {
   const gridName = activeTrack?.gridName || config.grid;
   const windowSetId = activeTrack?.windowSet || config.windowPolicy?.primary || 'primary';
   const labSetId = [config.primaryLab?.labId, ...(config.shadowLabs || []).map((lab) => lab.labId)].filter(Boolean).join(',');
-  const trackedConfig = { ...config, grid: gridName };
+  trackedConfig = { ...trackedConfig, grid: gridName };
 
   const fallbackSearchBatch = activeTrack
     ? buildTrackCandidateBatch({
@@ -1601,7 +1616,7 @@ export async function runScout(config) {
   const { steadyState, noChangeStreak, manifest } = orchestration;
 
   const manifestName = `${runId}.json`;
-  const manifestPath = path.join(manifestsDir(trackedConfig), manifestName);
+  let manifestPath = path.join(manifestsDir(trackedConfig), manifestName);
   const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
 
   const updatedSchedulerState = nextTrackState({
@@ -1633,8 +1648,12 @@ export async function runScout(config) {
 
   const finalManifest = applySchedulerStateToManifest(manifest, updatedSchedulerState);
 
-  await writeJson(manifestPath, finalManifest);
-  await writeJson(latestManifestPath(trackedConfig), { ...finalManifest, manifestPath });
+  const finalizedArtifact = await finalizeAutoresearchManifest({
+    root: trackedConfig.researchRoot,
+    manifest: finalManifest,
+  });
+  manifestPath = finalizedArtifact.manifestPath;
+  manifestFinalized = true;
 
   if (shouldQueuePromotionManifest(finalManifest)) {
     const queueItem = buildPromotionQueueItem({
@@ -1693,6 +1712,17 @@ export async function runScout(config) {
   const pruneResult = await pruneRunArtifacts(trackedConfig);
 
   return { manifest: finalManifest, manifestPath, scoutPath, liveDigestPath, pruneResult };
+  } catch (error) {
+    if (!manifestFinalized) {
+      await markAutoresearchRunIncomplete({
+        root: trackedConfig.researchRoot,
+        runId,
+        reason: 'run_failed_before_manifest',
+        error: error?.stack || error?.message || String(error),
+      });
+    }
+    throw error;
+  }
 }
 
 async function runDigest(config) {

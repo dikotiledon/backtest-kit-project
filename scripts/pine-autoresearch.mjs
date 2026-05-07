@@ -135,28 +135,20 @@ export function buildRegimeAwareSearchBatch({
   });
 }
 
-function summarizeRegimeLaneGenerator({ selectedLane, championState, config, searchBatch }) {
-  const laneMap = {
-    exploit: ['exploit'],
-    exitRegime: ['exitRegime', 'exit-regime'],
-    globalAllParameter: ['globalAllParameter', 'global-all-parameter'],
-    robustness: ['robustness'],
-  };
-  const laneAliases = laneMap[selectedLane] || [];
-  const searchBatchCount = Array.isArray(searchBatch)
-    ? searchBatch.filter((item) => laneAliases.includes(item?.lane)).length
-    : 0;
+function summarizeRegimeLaneGenerator({ selectedLane, searchBatch = [] } = {}) {
+  const generatedForLane = Array.isArray(searchBatch)
+    ? searchBatch.filter((variant) => variant?.lane === selectedLane)
+    : [];
 
-  const summary = {
+  return {
     lane: selectedLane || null,
     laneKind: selectedLane || null,
-    candidateCount: searchBatchCount,
-    previewOnly: true,
-    countSource: 'searchBatch',
+    candidateCount: generatedForLane.length,
+    previewOnly: generatedForLane.length === 0,
+    countSource: generatedForLane.length > 0 ? 'generatedVariants' : 'none',
     blockedFamilyCount: null,
+    variantIds: generatedForLane.map((variant) => variant.variantId).filter(Boolean).slice(0, 20),
   };
-
-  return summary;
 }
 
 export function buildRegimeExitStateForScout({

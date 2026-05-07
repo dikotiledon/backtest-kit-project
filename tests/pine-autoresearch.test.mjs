@@ -46,6 +46,7 @@ import {
   applySchedulerStateToManifest,
   buildOfflineDataMissingCycleEvent,
   buildOfflineDataMissingSkipResult,
+  buildRegimeExitStateForScout,
   buildRegimeAwareSearchBatch,
 } from '../scripts/pine-autoresearch.mjs';
 
@@ -2797,6 +2798,36 @@ test('offline strict missing path builds skip result + history payload with comp
   assert.equal(event.offlineDataSummary.missingLabs[0].missingTimestamps.length, 5);
 });
 
+
+test('buildRegimeExitStateForScout reports real candidate counts without previewOnly when selected lane generated variants', () => {
+  const state = buildRegimeExitStateForScout({
+    config: {
+      regimeExitResearch: {
+        enabled: true,
+        offline: { mode: 'local-first' },
+        budget: {
+          exploitRatio: 0.25,
+          exitRegimeRatio: 0.35,
+          globalAllParameterRatio: 0.25,
+          robustnessRatio: 0.15,
+        },
+      },
+      maxConfigs: 8,
+    },
+    championState: { config: { useTrailingStop: true, trailAtrMult: 1 } },
+    searchBatch: [
+      { variantId: 'exit-regime-01', lane: 'exitRegime', family: 'exit', patch: { trailAtrMult: 1.25 }, config: { trailAtrMult: 1.25 } },
+      { variantId: 'exit-regime-02', lane: 'exitRegime', family: 'exit', patch: { trailAtrMult: 0.75 }, config: { trailAtrMult: 0.75 } },
+    ],
+    schedulerState: { stagnationLevel: 0 },
+    offlineDataSummary: { ok: true, mode: 'local-first', requiredLabs: [], missingLabs: [] },
+  });
+
+  assert.equal(state.shadowRegimeScoreboard.selectedLane, 'exitRegime');
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.previewOnly, false);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.candidateCount, 2);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.countSource, 'generatedVariants');
+});
 
 
 test('buildRegimeAwareSearchBatch injects selected exitRegime candidates', () => {

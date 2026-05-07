@@ -126,6 +126,26 @@ test('selectNextResearchLane pays highest budget debt before preferred stagnatio
   assert.equal(lane, 'globalAllParameter');
 });
 
+test('selectNextResearchLane ignores non-finite budget debt values', () => {
+  const lane = selectNextResearchLane({
+    stagnationLevel: 0,
+    budgetDebt: {
+      exploit: 0,
+      exitRegime: Number.NaN,
+      globalAllParameter: 9,
+      robustness: Number.POSITIVE_INFINITY,
+    },
+    lanesEnabled: {
+      exploit: true,
+      exitRegime: true,
+      globalAllParameter: true,
+      robustness: true,
+    },
+  });
+
+  assert.equal(lane, 'globalAllParameter');
+});
+
 test('selectNextResearchLane uses preferred lane as tie-breaker after debt', () => {
   const lane = selectNextResearchLane({
     stagnationLevel: 0,

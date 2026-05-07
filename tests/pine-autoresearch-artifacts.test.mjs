@@ -9,6 +9,7 @@ import {
   markAutoresearchRunIncomplete,
   markAutoresearchRunIncompleteUnlessManifestExists,
   validateLatestManifestPointer,
+  findOrphanEvaluationRuns,
 } from '../scripts/lib/pine-autoresearch-artifacts.mjs';
 
 test('artifact lifecycle writes incomplete marker when manifest is not finalized', async () => {
@@ -102,4 +103,16 @@ test('incomplete marker is skipped when manifest exists after latest pointer fai
   assert.equal(result.skipReason, 'manifest_exists');
   assert.equal(result.manifestPath, manifestPath);
   assert.equal(fs.existsSync(path.join(root, 'incomplete', `${runId}.json`)), false);
+});
+
+test('findOrphanEvaluationRuns reports evaluation dirs without manifest or incomplete marker', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
+  fs.mkdirSync(path.join(root, 'evaluations', 'run-orphan'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'evaluations', 'run-complete'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'manifests'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'manifests', 'run-complete.json'), JSON.stringify({ runId: 'run-complete' }), 'utf8');
+
+  const result = findOrphanEvaluationRuns({ root });
+
+  assert.deepEqual(result.orphans.map((item) => item.runId), ['run-orphan']);
 });

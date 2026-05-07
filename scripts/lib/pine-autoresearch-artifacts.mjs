@@ -97,3 +97,20 @@ export function validateLatestManifestPointer({ root }) {
   if (!fsSync.existsSync(manifestPath)) return { ok: false, reason: 'latest_manifest_missing', runId, manifestPath };
   return { ok: true, runId, manifestPath };
 }
+
+export function findOrphanEvaluationRuns({ root }) {
+  const evalRoot = path.join(root, 'evaluations');
+  if (!fsSync.existsSync(evalRoot)) return { ok: true, orphans: [] };
+  const orphans = fsSync.readdirSync(evalRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .filter((runId) => {
+      const manifestPath = path.join(root, 'manifests', `${runId}.json`);
+      const incompletePath = path.join(root, 'incomplete', `${runId}.json`);
+      return !fsSync.existsSync(manifestPath) && !fsSync.existsSync(incompletePath);
+    })
+    .sort()
+    .map((runId) => ({ runId, evaluationDir: path.join(evalRoot, runId) }));
+
+  return { ok: orphans.length === 0, orphans };
+}

@@ -51,6 +51,8 @@ import {
   beginAutoresearchRunArtifact,
   finalizeAutoresearchManifest,
   markAutoresearchRunIncompleteUnlessManifestExists,
+  validateLatestManifestPointer,
+  findOrphanEvaluationRuns,
 } from './lib/pine-autoresearch-artifacts.mjs';
 import {
   buildNoveltySignature,
@@ -1177,14 +1179,42 @@ async function rebuildHistoryArtifacts(config, championState) {
   return events;
 }
 
+function buildAutoresearchArtifactWarnings(config) {
+  const warnings = [];
+  const latestPointer = validateLatestManifestPointer({ root: config.researchRoot });
+  if (!latestPointer.ok && latestPointer.reason !== 'latest_missing') {
+    warnings.push(`Latest manifest pointer validation failed: ${latestPointer.reason}.`);
+  }
+
+  const orphanRuns = findOrphanEvaluationRuns({ root: config.researchRoot });
+  if (!orphanRuns.ok) {
+    warnings.push(`Found ${orphanRuns.orphans.length} evaluation run(s) without manifest or incomplete marker.`);
+  }
+
+  return warnings;
+}
+
+function appendDigestWarnings(digestText, warnings = []) {
+  if (!warnings.length) return digestText;
+  const warningLines = [
+    '',
+    '## Warnings',
+    '',
+    ...warnings.map((warning) => `- ${warning}`),
+    '',
+  ];
+  return `${digestText.trimEnd()}\n${warningLines.join('\n')}`;
+}
+
 async function writeCurrentDigest(config, latestManifest, championState, previousManifest, historyEvents) {
-  const digestText = renderDigestMarkdown({
+  const warnings = buildAutoresearchArtifactWarnings(config);
+  const digestText = appendDigestWarnings(renderDigestMarkdown({
     config,
     latestManifest,
     previousManifest,
     historyEvents,
     championState,
-  });
+  }), warnings);
   await writeText(latestDigestPath(config), digestText);
   return latestDigestPath(config);
 }
@@ -1749,13 +1779,14 @@ async function runDigest(config) {
   const digestId = `digest-${timestampId()}`;
   const digestPath = path.join(config.digestRoot, `${digestId}.md`);
   const historyEvents = await loadHistoryEvents(config);
-  const digestText = renderDigestMarkdown({
+  const warnings = buildAutoresearchArtifactWarnings(config);
+  const digestText = appendDigestWarnings(renderDigestMarkdown({
     config,
     latestManifest: latest,
     previousManifest: previous,
     historyEvents,
     championState,
-  });
+  }), warnings);
   await writeText(digestPath, digestText);
   await writeText(latestDigestPath(config), digestText);
 

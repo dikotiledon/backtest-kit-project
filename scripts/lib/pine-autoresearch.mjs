@@ -9,6 +9,11 @@ function round(value, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function finiteNumberOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function stableValue(value) {
   if (Array.isArray(value)) {
     return value.map((item) => stableValue(item));
@@ -299,15 +304,72 @@ export function selectChampionBootstrapSource({ latestManifest, seedPayload } = 
 }
 
 export function evaluateProfitabilityFloor({ incumbent, challenger, policy = {} } = {}) {
-  const minRoiDeltaPct = Number(policy.minRoiDeltaPct ?? 5);
-  const minProfitFactorDelta = Number(policy.minProfitFactorDelta ?? 0.1);
-  const minTradeCount = Number(policy.minTradeCount ?? 60);
-  const roiDelta = Number(challenger?.metrics?.roiPct ?? challenger?.roiPct ?? 0) - Number(incumbent?.metrics?.roiPct ?? incumbent?.roiPct ?? 0);
-  const pfDelta = Number(challenger?.metrics?.profitFactor ?? challenger?.profitFactor ?? 0) - Number(incumbent?.metrics?.profitFactor ?? incumbent?.profitFactor ?? 0);
-  const tradeCount = Number(challenger?.metrics?.tradeCount ?? challenger?.tradeCount ?? 0);
+  const inputs = {
+    minRoiDeltaPct: finiteNumberOrNull(policy.minRoiDeltaPct ?? 5),
+    minProfitFactorDelta: finiteNumberOrNull(policy.minProfitFactorDelta ?? 0.1),
+    minTradeCount: finiteNumberOrNull(policy.minTradeCount ?? 60),
+    incumbentRoiPct: finiteNumberOrNull(incumbent?.metrics?.roiPct ?? incumbent?.roiPct),
+    challengerRoiPct: finiteNumberOrNull(challenger?.metrics?.roiPct ?? challenger?.roiPct),
+    incumbentProfitFactor: finiteNumberOrNull(incumbent?.metrics?.profitFactor ?? incumbent?.profitFactor),
+    challengerProfitFactor: finiteNumberOrNull(challenger?.metrics?.profitFactor ?? challenger?.profitFactor),
+    challengerTradeCount: finiteNumberOrNull(challenger?.metrics?.tradeCount ?? challenger?.tradeCount),
+  };
+  const invalidFields = Object.entries(inputs)
+    .filter(([, value]) => value === null)
+    .map(([name]) => name);
+  if (invalidFields.length > 0) {
+    return {
+      passed: false,
+      invalid: true,
+      reason: 'non_finite_profitability_input',
+      invalidFields,
+      roiDelta: null,
+      pfDelta: null,
+      tradeCount: inputs.challengerTradeCount,
+      minRoiDeltaPct: inputs.minRoiDeltaPct,
+      minProfitFactorDelta: inputs.minProfitFactorDelta,
+      minTradeCount: inputs.minTradeCount,
+    };
+  }
+
+  const {
+    minRoiDeltaPct,
+    minProfitFactorDelta,
+    minTradeCount,
+    incumbentRoiPct,
+    challengerRoiPct,
+    incumbentProfitFactor,
+    challengerProfitFactor,
+    challengerTradeCount,
+  } = inputs;
+  const roiDelta = challengerRoiPct - incumbentRoiPct;
+  const pfDelta = challengerProfitFactor - incumbentProfitFactor;
+  const tradeCount = challengerTradeCount;
 
   const passed = roiDelta >= minRoiDeltaPct && pfDelta >= minProfitFactorDelta && tradeCount >= minTradeCount;
   return { passed, roiDelta, pfDelta, tradeCount, minRoiDeltaPct, minProfitFactorDelta, minTradeCount };
+}
+
+function summarizeProfitabilityFloorFailure(profitabilityFloor) {
+  if (profitabilityFloor.invalid) {
+    const invalidFields = profitabilityFloor.invalidFields?.length > 0
+      ? ` (${profitabilityFloor.invalidFields.join(', ')})`
+      : '';
+    return `Profitability floor failed: ${profitabilityFloor.reason}${invalidFields}.`;
+  }
+
+  const failures = [];
+  if (profitabilityFloor.roiDelta < profitabilityFloor.minRoiDeltaPct) {
+    failures.push(`ROI delta ${round(profitabilityFloor.roiDelta)} < ${profitabilityFloor.minRoiDeltaPct}`);
+  }
+  if (profitabilityFloor.pfDelta < profitabilityFloor.minProfitFactorDelta) {
+    failures.push(`profit factor delta ${round(profitabilityFloor.pfDelta, 3)} < ${profitabilityFloor.minProfitFactorDelta}`);
+  }
+  if (profitabilityFloor.tradeCount < profitabilityFloor.minTradeCount) {
+    failures.push(`trade count ${profitabilityFloor.tradeCount} < ${profitabilityFloor.minTradeCount}`);
+  }
+
+  return `Profitability floor failed: ${failures.length > 0 ? failures.join('; ') : 'unknown floor component failed'}.`;
 }
 
 export function decideAutoresearchOutcome({
@@ -476,7 +538,7 @@ export function decideAutoresearchOutcome({
     if (!profitabilityFloor.passed) {
       return {
         recommendation: 'hold',
-        summary: `Profitability floor failed: ROI delta ${round(profitabilityFloor.roiDelta)} < ${profitabilityFloor.minRoiDeltaPct} or profit factor delta ${round(profitabilityFloor.pfDelta, 3)} < ${profitabilityFloor.minProfitFactorDelta}.`,
+        summary: summarizeProfitabilityFloorFailure(profitabilityFloor),
         comparisons,
         gates: { ...gates, profitabilityFloor: false },
         failedGates: ['profitabilityFloor'],

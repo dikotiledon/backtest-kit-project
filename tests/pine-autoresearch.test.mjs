@@ -539,6 +539,58 @@ test('decideAutoresearchOutcome rejects near-zero ROI improvement despite other 
   assert.match(outcome.summary, /ROI|profit factor/i);
 });
 
+test('decideAutoresearchOutcome holds when profitability floor sees non-finite challenger metrics', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 101, roiPct: Infinity, profitFactor: Infinity, tradeCount: 110, maxDrawdownPct: 5 }),
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 60,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+    holdoutVerdict: { passed: true },
+    promotionPolicy: {
+      minRoiDeltaPct: 5,
+      minProfitFactorDelta: 0.1,
+      minTradeCount: 60,
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.equal(outcome.profitabilityFloor.invalid, true);
+  assert.equal(outcome.profitabilityFloor.reason, 'non_finite_profitability_input');
+  assert.deepEqual(outcome.profitabilityFloor.invalidFields, ['challengerRoiPct', 'challengerProfitFactor']);
+  assert.match(outcome.summary, /non_finite_profitability_input/);
+});
+
+test('decideAutoresearchOutcome profitability floor trade-count-only failure summary is specific', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 101, roiPct: 50, profitFactor: 1.6, tradeCount: 80, maxDrawdownPct: 5 }),
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 60,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+    holdoutVerdict: { passed: true },
+    promotionPolicy: {
+      minRoiDeltaPct: 5,
+      minProfitFactorDelta: 0.1,
+      minTradeCount: 90,
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.match(outcome.summary, /trade count 80 < 90/);
+  assert.doesNotMatch(outcome.summary, /ROI delta|profit factor delta/i);
+});
+
 test('promotion call sites pass holdout verdict required inputs', async () => {
   const source = await fs.readFile(new URL('../scripts/pine-autoresearch.mjs', import.meta.url), 'utf8');
   const decisionBlocks = [...source.matchAll(/const decision = decideAutoresearchOutcome\(\{\s*([\s\S]*?)\s*\}\);/g)]

@@ -240,19 +240,24 @@ test('pine autoresearch exposes neutral evaluator seams for external lanes', () 
   assert.equal(typeof manifestsDir, 'function');
 });
 
-test('pine-autoresearch --help exits before config load or lock acquisition', async () => {
-  const result = await spawnNode([
-    path.join(repoRoot, 'scripts/pine-autoresearch.mjs'),
-    '--help',
-  ], {
-    cwd: repoRoot,
-    env: { ...process.env, PINE_AUTORESEARCH_TEST_TRACE_CONFIG_LOAD: '1' },
-  });
+for (const helpArgs of [['--help'], ['-h'], ['help']]) {
+  test(`pine-autoresearch ${helpArgs.join(' ')} exits before config load or lock acquisition`, async () => {
+    const result = await spawnNode([
+      path.join(repoRoot, 'scripts/pine-autoresearch.mjs'),
+      ...helpArgs,
+      '--config',
+      path.join(repoRoot, 'tmp', 'definitely-missing-autoresearch-config.json'),
+    ], {
+      cwd: repoRoot,
+      env: process.env,
+    });
 
-  assert.equal(result.status, 0);
-  assert.match(result.stdout, /Usage:.*pine-autoresearch/i);
-  assert.doesNotMatch(result.stdout + result.stderr, /cycle=|lock|manifest=|recommendation=/i);
-});
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Usage:.*pine-autoresearch/i);
+    assert.doesNotMatch(result.stdout + result.stderr, /cycle=|lock|manifest=|recommendation=/i);
+    assert.doesNotMatch(result.stdout + result.stderr, /ENOENT|no such file|cannot find|missing.*config/i);
+  });
+}
 
 test('pine-autoresearch-run.ps1 parses cleanly', async () => {
   const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');

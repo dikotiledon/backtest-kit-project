@@ -8,7 +8,8 @@ param(
   [string]$RepoRoot,
   [string]$LockName = 'Global\BacktestKit-Pine-Autoresearch',
   [switch]$DryRun,
-  [switch]$StreamOutput
+  [switch]$StreamOutput,
+  [int]$TimeoutSeconds = 5400
 )
 
 $ErrorActionPreference = 'Stop'
@@ -174,6 +175,100 @@ function Acquire-SchedulerLock {
   return $null
 }
 
+function Stop-ProcessTree {
+  param(
+    [System.Diagnostics.Process]$Process,
+    [string]$TaskName
+  )
+
+  if (-not $Process -or $Process.HasExited) {
+    return
+  }
+
+  $pidValue = $Process.Id
+  try {
+    if ($IsWindows -or $env:OS -eq 'Windows_NT') {
+      & taskkill /PID $pidValue /T /F | Out-Null
+    } else {
+      $Process.Kill($true)
+    }
+  } catch {
+    try {
+      $Process.Kill()
+    } catch {
+      Write-Warning "[$TaskName] failed to kill process ${pidValue}: $($_.Exception.Message)"
+    }
+  }
+
+  try {
+    $Process.WaitForExit(30000) | Out-Null
+  } catch {
+  }
+}
+
+function Invoke-LoggedCommand {
+  param(
+    [string]$PwshPath,
+    [string]$CommandScriptPath,
+    [string]$WorkingDirectory,
+    [string]$LogPath,
+    [string]$TaskName,
+    [int]$TimeoutSeconds
+  )
+
+  $effectiveTimeoutSeconds = $TimeoutSeconds
+  if ($effectiveTimeoutSeconds -le 0) {
+    $effectiveTimeoutSeconds = 5400
+  }
+  $timeoutMs = [Math]::Min([int64]::MaxValue, [int64]$effectiveTimeoutSeconds * 1000)
+
+  $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
+  $processInfo.FileName = $PwshPath
+  [void]$processInfo.ArgumentList.Add('-NoProfile')
+  [void]$processInfo.ArgumentList.Add('-File')
+  [void]$processInfo.ArgumentList.Add($CommandScriptPath)
+  $processInfo.WorkingDirectory = $WorkingDirectory
+  $processInfo.RedirectStandardOutput = $true
+  $processInfo.RedirectStandardError = $true
+  $processInfo.UseShellExecute = $false
+
+  $childProcess = [System.Diagnostics.Process]::new()
+  $childProcess.StartInfo = $processInfo
+  $stdoutTask = $null
+  $stderrTask = $null
+
+  try {
+    if (-not $childProcess.Start()) {
+      throw "Failed to start task $TaskName child process"
+    }
+
+    $stdoutTask = $childProcess.StandardOutput.ReadToEndAsync()
+    $stderrTask = $childProcess.StandardError.ReadToEndAsync()
+
+    if (-not $childProcess.WaitForExit($timeoutMs)) {
+      $timeoutMessage = "[$TaskName] timeout after ${effectiveTimeoutSeconds}s; killing process tree pid=$($childProcess.Id)"
+      Write-Host $timeoutMessage
+      Add-Content -LiteralPath $LogPath -Value $timeoutMessage
+      Stop-ProcessTree -Process $childProcess -TaskName $TaskName
+      return 124
+    }
+
+    $childProcess.WaitForExit()
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $output = ($stdout, $stderr -join '')
+    if (-not [string]::IsNullOrEmpty($output)) {
+      Set-Content -LiteralPath $LogPath -Value $output -Encoding UTF8
+      Write-Host $output
+    } else {
+      Set-Content -LiteralPath $LogPath -Value '' -Encoding UTF8
+    }
+    return $childProcess.ExitCode
+  } finally {
+    $childProcess.Dispose()
+  }
+}
+
 if ($DryRun) {
   Write-Host "[dry-run] repo=$RepoRoot"
   Write-Host "[dry-run] command=$Command"
@@ -228,31 +323,16 @@ try {
 
     Set-Content -LiteralPath $commandScriptPath -Value $Command -Encoding UTF8
     if ($StreamOutput) {
-      & $commandScriptPath 2>&1 | Tee-Object -FilePath $logPath
-      $childExitCode = $LASTEXITCODE
-    } else {
-      $processInfo = [System.Diagnostics.ProcessStartInfo]::new()
-      $processInfo.FileName = $pwshPath
-      [void]$processInfo.ArgumentList.Add('-NoProfile')
-      [void]$processInfo.ArgumentList.Add('-File')
-      [void]$processInfo.ArgumentList.Add($commandScriptPath)
-      $processInfo.WorkingDirectory = (Get-Location).Path
-      $processInfo.RedirectStandardOutput = $true
-      $processInfo.RedirectStandardError = $true
-      $processInfo.UseShellExecute = $false
-
-      $childProcess = [System.Diagnostics.Process]::Start($processInfo)
-      $stdout = $childProcess.StandardOutput.ReadToEnd()
-      $stderr = $childProcess.StandardError.ReadToEnd()
-      $childProcess.WaitForExit()
-      $childExitCode = $childProcess.ExitCode
-      $output = ($stdout, $stderr -join '')
-      if (-not [string]::IsNullOrEmpty($output)) {
-        $output | Tee-Object -FilePath $logPath
-      } else {
-        Set-Content -LiteralPath $logPath -Value '' -Encoding UTF8
-      }
+      Write-Warning "[$TaskName] -StreamOutput is deprecated for scheduled runs; using concurrent captured logging instead."
     }
+
+    $childExitCode = Invoke-LoggedCommand `
+      -PwshPath $pwshPath `
+      -CommandScriptPath $commandScriptPath `
+      -WorkingDirectory (Get-Location).Path `
+      -LogPath $logPath `
+      -TaskName $TaskName `
+      -TimeoutSeconds $TimeoutSeconds
 
     if ($childExitCode -ne 0) {
       throw "Task $TaskName failed with exit code $childExitCode"

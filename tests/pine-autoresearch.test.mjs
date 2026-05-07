@@ -342,6 +342,49 @@ test('pine-autoresearch-run.ps1 removes its lock after a nonzero command', async
   assert.equal(await readIfExists(lockPath), null);
 });
 
+test('pine-autoresearch-run.ps1 drains stderr without pipe deadlock', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-stderr-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockPath = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks', 'scheduler.lock');
+  const markerPath = path.join(tempRoot, 'stderr-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'stderr-check',
+    '-Command', `1..8000 | ForEach-Object { [Console]::Error.WriteLine(('stderr-line-' + $_).PadRight(200, 'x')) }; Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value 'ran'`,
+    '-RepoRoot', tempRoot,
+    '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Stderr-${process.pid}`,
+  ], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.equal((await readIfExists(markerPath))?.trim(), 'ran');
+  assert.equal(await readIfExists(lockPath), null);
+  const logs = await fs.readdir(path.join(tempRoot, 'tmp', 'pine-autoresearch-logs'));
+  const logPath = path.join(tempRoot, 'tmp', 'pine-autoresearch-logs', logs.find((name) => /^stderr-check-.*\.log$/.test(name)));
+  const log = await fs.readFile(logPath, 'utf8');
+  assert.match(log, /stderr-line-8000/);
+});
+
+test('pine-autoresearch-run.ps1 times out hung command and removes scheduler lock', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-timeout-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const lockPath = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks', 'scheduler.lock');
+  const markerPath = path.join(tempRoot, 'timeout-marker.txt');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'timeout-check',
+    '-Command', `Set-Content -LiteralPath ${psSingleQuote(markerPath)} -Value $PID; Start-Sleep -Seconds 30`,
+    '-RepoRoot', tempRoot,
+    '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Timeout-${process.pid}`,
+    '-TimeoutSeconds', '1',
+  ], { cwd: repoRoot });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stdout + result.stderr, /timeout after 1s; killing process tree/);
+  assert.equal(await readIfExists(lockPath), null);
+  const childPid = Number((await readIfExists(markerPath))?.trim());
+  assert.equal(Number.isFinite(childPid), true);
+  const liveCheck = await runPwsh(`if (Get-Process -Id ${childPid} -ErrorAction SilentlyContinue) { exit 1 }`);
+  assert.equal(liveCheck.code, 0, liveCheck.stderr || liveCheck.stdout);
+});
+
 test('autoresearchLockPath points at state/autoresearch.lock.json', () => {
   const result = autoresearchCli.autoresearchLockPath({ researchRoot: 'pine/autoresearch/matrix-a' });
 

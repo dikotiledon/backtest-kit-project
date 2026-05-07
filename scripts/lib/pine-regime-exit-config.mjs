@@ -30,6 +30,10 @@ function normalizePromotion(raw = {}) {
   return {
     allowAutomaticRegimeSwitching: raw.allowAutomaticRegimeSwitching === true,
     requireGlobalChampionAnchor: raw.requireGlobalChampionAnchor !== false,
+    minRoiDeltaPct: finiteNumber(raw.minRoiDeltaPct, 5),
+    minProfitFactorDelta: finiteNumber(raw.minProfitFactorDelta, 0.1),
+    minTradeCount: Math.max(0, Math.floor(finiteNumber(raw.minTradeCount, 60))),
+    requireBlindHoldoutVerdict: raw.requireBlindHoldoutVerdict !== false,
   };
 }
 

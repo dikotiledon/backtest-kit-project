@@ -2,20 +2,42 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$TaskName,
 
-  [Parameter(Mandatory = $true)]
+  [Parameter(Mandatory = $false)]
   [string]$Command,
+
+  [Parameter(Mandatory = $false)]
+  [string]$CommandPath,
 
   [string]$RepoRoot,
   [string]$LockName = 'Global\BacktestKit-Pine-Autoresearch',
   [switch]$DryRun,
   [switch]$StreamOutput,
-  [int]$TimeoutSeconds = 5400
+  [int]$TimeoutSeconds = 5400,
+
+  [Parameter(Mandatory = $false)]
+  [switch] $RequireManifest,
+
+  [Parameter(Mandatory = $false)]
+  [string] $ManifestRoot,
+
+  [Parameter(Mandatory = $false)]
+  [string] $ExpectedRunId
 )
 
 $ErrorActionPreference = 'Stop'
 
 if (-not $RepoRoot) {
   $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+}
+
+if ([string]::IsNullOrWhiteSpace($Command)) {
+  if ([string]::IsNullOrWhiteSpace($CommandPath)) {
+    Write-Error "Command or CommandPath is required" -ErrorAction Continue
+    exit 64
+  }
+
+  $escapedCommandPath = $CommandPath.Replace("'", "''")
+  $Command = "& '$escapedCommandPath'"
 }
 
 $timestamp = Get-Date -Format 'yyyy-MM-ddTHH-mm-ss'
@@ -336,6 +358,25 @@ try {
 
     if ($childExitCode -ne 0) {
       throw "Task $TaskName failed with exit code $childExitCode"
+    }
+
+    if ($RequireManifest) {
+      if ([string]::IsNullOrWhiteSpace($ManifestRoot) -or [string]::IsNullOrWhiteSpace($ExpectedRunId)) {
+        Write-Error "RequireManifest needs ManifestRoot and ExpectedRunId" -ErrorAction Continue
+        exit 64
+      }
+
+      $manifestPath = Join-Path $ManifestRoot (Join-Path "manifests" ("$ExpectedRunId.json"))
+      $incompletePath = Join-Path $ManifestRoot (Join-Path "incomplete" ("$ExpectedRunId.json"))
+
+      if (-not (Test-Path -LiteralPath $manifestPath)) {
+        if (Test-Path -LiteralPath $incompletePath) {
+          Write-Error "autoresearch manifest missing; incomplete marker exists: $incompletePath" -ErrorAction Continue
+        } else {
+          Write-Error "autoresearch manifest missing and no incomplete marker exists: $manifestPath" -ErrorAction Continue
+        }
+        exit 65
+      }
     }
   } finally {
     if ($mutex) {

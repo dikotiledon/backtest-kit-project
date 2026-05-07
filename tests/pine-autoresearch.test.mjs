@@ -46,6 +46,8 @@ import {
   applySchedulerStateToManifest,
   buildOfflineDataMissingCycleEvent,
   buildOfflineDataMissingSkipResult,
+  buildRegimeExitStateForScout,
+  buildRegimeAwareSearchBatch,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -81,6 +83,20 @@ async function runPwshFile(scriptPath, args = [], { cwd = repoRoot } = {}) {
     child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
     child.on('error', (error) => resolve({ code: -1, stdout, stderr: `${stderr}${error.message ? `\n${error.message}` : ''}`.trim() }));
     child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
+
+function spawnNode(args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, args, {
+      ...options,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.on('close', (status, signal) => resolve({ status, signal, stdout, stderr }));
   });
 }
 
@@ -226,6 +242,25 @@ test('pine autoresearch exposes neutral evaluator seams for external lanes', () 
   assert.equal(typeof manifestsDir, 'function');
 });
 
+for (const helpArgs of [['--help'], ['-h'], ['help']]) {
+  test(`pine-autoresearch ${helpArgs.join(' ')} exits before config load or lock acquisition`, async () => {
+    const result = await spawnNode([
+      path.join(repoRoot, 'scripts/pine-autoresearch.mjs'),
+      ...helpArgs,
+      '--config',
+      path.join(repoRoot, 'tmp', 'definitely-missing-autoresearch-config.json'),
+    ], {
+      cwd: repoRoot,
+      env: process.env,
+    });
+
+    assert.equal(result.status, 0);
+    assert.match(result.stdout, /Usage:.*pine-autoresearch/i);
+    assert.doesNotMatch(result.stdout + result.stderr, /cycle=|lock|manifest=|recommendation=/i);
+    assert.doesNotMatch(result.stdout + result.stderr, /ENOENT|no such file|cannot find|missing.*config/i);
+  });
+}
+
 test('pine-autoresearch-run.ps1 parses cleanly', async () => {
   const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
   const command = `$null = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuote(scriptPath)}, [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Host $_.Message }; exit 1 }`;
@@ -342,6 +377,26 @@ test('pine-autoresearch-run.ps1 removes its lock after a nonzero command', async
   assert.equal(await readIfExists(lockPath), null);
 });
 
+test('scheduler wrapper reports failure when command exits zero without manifest marker', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-wrapper-manifest-'));
+  const commandPath = path.join(tempRoot, 'fake-command.ps1');
+  await fs.writeFile(commandPath, 'Write-Output "fake success without manifest"\nexit 0\n', 'utf8');
+
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'manifest-check',
+    '-CommandPath', commandPath,
+    '-RepoRoot', tempRoot,
+    '-RequireManifest',
+    '-ManifestRoot', tempRoot,
+    '-ExpectedRunId', 'missing-run',
+    '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Manifest-${process.pid}`,
+  ], { cwd: repoRoot });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr + result.stdout, /manifest.*missing|missing.*manifest/i);
+});
+
 test('pine-autoresearch-run.ps1 drains stderr without pipe deadlock', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-stderr-'));
   const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
@@ -442,6 +497,206 @@ test('decideAutoresearchOutcome recommends promote when all gates pass', () => {
 
   assert.equal(result.recommendation, 'promote');
   assert.deepEqual(result.failedGates, []);
+});
+
+test('decideAutoresearchOutcome blocks promotion when blind holdout verdict required', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 50, tradeCount: 100 }),
+    challenger: makeResult({ configId: 'challenger', score: 120, roiPct: 70, tradeCount: 120 }),
+    matrixDecision: {
+      recommendation: 'promote',
+      gates: { candidateChanged: true, primaryPromote: true, shadowPassCount: true, shadowPassRatio: true },
+      failedGates: [],
+    },
+    expectancy: { gate: { passed: true } },
+    holdoutVerdict: null,
+    blindHoldoutLabs: [{ labId: 'xrpusdt-15m-nov2025-blind-holdout' }],
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.match(outcome.summary, /holdout verdict required/i);
+});
+
+test('decideAutoresearchOutcome rejects near-zero ROI improvement despite other passing gates', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 100 }),
+    challenger: makeResult({ configId: 'challenger', score: 101, roiPct: 40.1, profitFactor: 1.41, tradeCount: 110 }),
+    matrixDecision: {
+      recommendation: 'promote',
+      gates: { candidateChanged: true, primaryPromote: true, shadowPassCount: true, shadowPassRatio: true },
+      failedGates: [],
+    },
+    expectancy: { gate: { passed: true } },
+    holdoutVerdict: { passed: true },
+    promotionPolicy: {
+      minRoiDeltaPct: 5,
+      minProfitFactorDelta: 0.1,
+      minTradeCount: 60,
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.match(outcome.summary, /ROI|profit factor/i);
+});
+
+test('decideAutoresearchOutcome holds when profitability floor sees non-finite challenger metrics', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 101, roiPct: Infinity, profitFactor: Infinity, tradeCount: 110, maxDrawdownPct: 5 }),
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 60,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+    holdoutVerdict: { passed: true },
+    promotionPolicy: {
+      minRoiDeltaPct: 5,
+      minProfitFactorDelta: 0.1,
+      minTradeCount: 60,
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.equal(outcome.profitabilityFloor.invalid, true);
+  assert.equal(outcome.profitabilityFloor.reason, 'non_finite_profitability_input');
+  assert.deepEqual(outcome.profitabilityFloor.invalidFields, ['challengerRoiPct', 'challengerProfitFactor']);
+  assert.match(outcome.summary, /non_finite_profitability_input/);
+});
+
+test('decideAutoresearchOutcome profitability floor trade-count-only failure summary is specific', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 101, roiPct: 50, profitFactor: 1.6, tradeCount: 80, maxDrawdownPct: 5 }),
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 60,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+    holdoutVerdict: { passed: true },
+    promotionPolicy: {
+      minRoiDeltaPct: 5,
+      minProfitFactorDelta: 0.1,
+      minTradeCount: 90,
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.match(outcome.summary, /trade count 80 < 90/);
+  assert.doesNotMatch(outcome.summary, /ROI delta|profit factor delta/i);
+});
+
+test('promotion call sites pass holdout verdict required inputs', async () => {
+  const source = await fs.readFile(new URL('../scripts/pine-autoresearch.mjs', import.meta.url), 'utf8');
+  const decisionBlocks = [...source.matchAll(/const decision = decideAutoresearchOutcome\(\{\s*([\s\S]*?)\s*\}\);/g)]
+    .map((match) => match[1]);
+
+  assert.equal(decisionBlocks.length, 2);
+
+  const matrixBlock = decisionBlocks.find((block) => block.includes('config.holdoutVerdict ?? null'));
+  assert.ok(matrixBlock, 'evaluateMatrix must pass configured holdout verdict into outcome decision');
+  assert.match(matrixBlock, /blindHoldoutLabs:\s*config\.blindHoldoutLabs \?\? \[\]/);
+
+  const blindHoldoutBlock = decisionBlocks.find((block) => block.includes('latest.holdoutVerdict ?? config.holdoutVerdict ?? null'));
+  assert.ok(blindHoldoutBlock, 'blind-holdout flow must evaluate without self-requiring a prior holdout verdict');
+  assert.match(blindHoldoutBlock, /blindHoldoutLabs:\s*\[\]/);
+});
+
+test('blind-holdout run passes configured labs without prior verdict', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-blind-holdout-self-block-'));
+  try {
+    const scriptDir = path.join(dir, 'scripts');
+    const configPath = path.join(dir, 'config.json');
+    const strategyPath = path.join(dir, 'strategy.pine');
+    await fs.mkdir(scriptDir, { recursive: true });
+    await fs.writeFile(strategyPath, 'minPredSum = input.float(1.8, title="Min Prediction Sum")\n', 'utf8');
+    await fs.writeFile(path.join(scriptDir, 'pine-import-run-clean.mjs'), `
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const args = process.argv.slice(2);
+const valueAfter = (flag) => args[args.indexOf(flag) + 1];
+const inputPath = valueAfter('--input');
+const outputBase = valueAfter('--output');
+const isChallenger = path.basename(inputPath).startsWith('challenger');
+const winReturnPct = isChallenger ? 2 : 1;
+const rows = [];
+let timestamp = Date.parse('2026-01-01T00:00:00.000Z');
+for (let i = 0; i < 120; i += 1) {
+  const win = i % 5 !== 4;
+  rows.push({ timestamp: new Date(timestamp).toISOString(), Close: 100, Signal: 1, EstimatedTime: 15 });
+  timestamp += 15 * 60 * 1000;
+  rows.push({ timestamp: new Date(timestamp).toISOString(), Close: win ? 100 + winReturnPct : 99, Signal: 0, EstimatedTime: 15 });
+  timestamp += 15 * 60 * 1000;
+}
+const dumpDir = path.join(path.dirname(inputPath), 'dump');
+await fs.mkdir(dumpDir, { recursive: true });
+await fs.writeFile(path.join(dumpDir, outputBase + '.cleaned.jsonl'), rows.map((row) => JSON.stringify(row)).join('\\n') + '\\n', 'utf8');
+`, 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'blind-holdout-self-block-test',
+      scriptPath: strategyPath,
+      grid: 'phase3-core',
+      minTrades: 10,
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 10,
+        minTradeRatioVsIncumbent: 0.75,
+      },
+      expectancyPolicy: { enabled: false },
+      primaryLab: { labId: 'Primary Lab', symbol: 'XRPUSDT', timeframe: '15m', limit: 240 },
+      blindHoldoutLabs: [
+        { labId: 'Blind Holdout Lab A', symbol: 'XRPUSDT', timeframe: '15m', limit: 240 },
+        { labId: 'Blind Holdout Lab B', symbol: 'XRPUSDT', timeframe: '15m', limit: 240 },
+      ],
+      blindHoldoutPolicy: { minShadowPassCount: 1, minShadowPassRatio: 1 },
+      outputs: {
+        researchRoot: path.join(dir, 'research'),
+        digestRoot: path.join(dir, 'digest'),
+      },
+      baseConfig: { minPredSum: 1.8 },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      configId: 'champion-a',
+      config: { minPredSum: 1.8 },
+      configFingerprint: 'champion-fp',
+    }), 'utf8');
+    await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({
+      runId: 'blind-holdout-source',
+      generatedAt: '2026-05-07T00:00:00.000Z',
+      champion: { configId: 'champion-a', config: { minPredSum: 1.8 }, configFingerprint: 'champion-fp' },
+      challenger: { configId: 'challenger-b', label: 'challenger-b', config: { minPredSum: 1.6 }, configFingerprint: 'challenger-fp' },
+    }), 'utf8');
+
+    const result = await spawnNode([
+      path.join(repoRoot, 'scripts/pine-autoresearch.mjs'),
+      'blind-holdout',
+      '--config',
+      configPath,
+    ], { cwd: dir, env: process.env });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /blind-holdout=holdout_pass/);
+    const holdoutPath = result.stdout.match(/\[autoresearch\] holdout=(.+)/)?.[1]?.trim();
+    assert.ok(holdoutPath, result.stdout);
+    const payload = JSON.parse(await fs.readFile(holdoutPath, 'utf8'));
+    assert.equal(payload.status, 'holdout_pass');
+    assert.equal(payload.matrixDecision.recommendation, 'promote');
+    assert.equal(payload.labResults[0].decision.recommendation, 'promote');
+    assert.equal(payload.labResults[0].decision.failedGates.includes('holdoutVerdict'), false);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('decideAutoresearchOutcome recommends hold when trade ratio collapses', () => {
@@ -704,7 +959,7 @@ test('decideQueuedPromotionAction fails when queued family identity differs from
   });
 
   assert.equal(result.recommendation, 'hold');
-  assert.equal(result.status, 'failed');
+  assert.equal(result.status, 'invalid');
   assert.match(result.reason, /family/);
 });
 
@@ -732,7 +987,7 @@ test('decideQueuedPromotionAction fails on champion family mismatch between queu
   });
 
   assert.equal(result.recommendation, 'hold');
-  assert.equal(result.status, 'failed');
+  assert.equal(result.status, 'invalid');
   assert.match(result.reason, /champion family/i);
 });
 
@@ -791,7 +1046,7 @@ test('decideQueuedPromotionAction holds stale when queued champion fingerprint i
   }
 });
 
-test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
+test('decideQueuedPromotionAction marks safety failure when autopromote gates fail', () => {
   const queuedItem = {
     itemId: 'run-a:candidate-fp',
     runId: 'run-a',
@@ -811,21 +1066,28 @@ test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
   const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
 
   assert.equal(result.recommendation, 'hold');
-  assert.equal(result.status, 'blocked');
+  assert.equal(result.status, 'safety_failed');
   assert.equal(result.reason, 'Auto-promote hold: failed cooldown gate(s).');
-  assert.equal(canForceQueuedPromotion(result), true);
+  assert.equal(canForceQueuedPromotion(result), false);
 });
 
 test('resolveAutopromoteQueueStatus maps promoted false results to a queue status', () => {
   assert.equal(resolveAutopromoteQueueStatus({ promoted: true, reason: 'autopromoted' }), 'promoted');
   assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'Champion already matches candidate-a' }), 'stale');
-  assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'promotion_noop' }), 'blocked');
+  assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'promotion_noop' }), 'queue_blocked');
 });
 
-test('canForceQueuedPromotion only allows blocked queue actions', () => {
-  assert.equal(canForceQueuedPromotion({ status: 'blocked' }), true);
-  assert.equal(canForceQueuedPromotion({ status: 'stale' }), false);
-  assert.equal(canForceQueuedPromotion({ status: 'failed' }), false);
+test('canForceQueuedPromotion rejects failed strategy safety gates', () => {
+  assert.equal(canForceQueuedPromotion({ status: 'safety_failed', reason: 'matrix gates failed' }), false);
+  assert.equal(canForceQueuedPromotion({ status: 'expectancy_failed', reason: 'expectancy regression' }), false);
+  assert.equal(canForceQueuedPromotion({ status: 'holdout_failed', reason: 'blind holdout failed' }), false);
+});
+
+test('canForceQueuedPromotion allows only operator recoverable blockers', () => {
+  assert.equal(canForceQueuedPromotion({ status: 'operator_blocked', reason: 'manual queue approval required' }), true);
+  assert.equal(canForceQueuedPromotion({ status: 'queue_blocked', reason: 'queue lock stale' }), true);
+  assert.equal(canForceQueuedPromotion({ status: 'stale', reason: 'already promoted' }), false);
+  assert.equal(canForceQueuedPromotion({ status: 'invalid', reason: 'fingerprint mismatch' }), false);
 });
 
 test('decideQueuedPromotionAction fails when queued manifest is missing or runId mismatches', () => {
@@ -842,9 +1104,9 @@ test('decideQueuedPromotionAction fails when queued manifest is missing or runId
     autoAction: { recommendation: 'promote' },
   });
 
-  assert.equal(missingManifest.status, 'failed');
+  assert.equal(missingManifest.status, 'invalid');
   assert.equal(missingManifest.reason, 'Queued manifest missing for run-a:candidate-fp');
-  assert.equal(mismatchedManifest.status, 'failed');
+  assert.equal(mismatchedManifest.status, 'invalid');
   assert.equal(mismatchedManifest.reason, 'Manifest runId run-b does not match queued runId run-a');
 });
 
@@ -991,15 +1253,15 @@ test('regime-exit manifest shadow signals stay advisory and cannot bypass failin
     },
     autoAction: {
       recommendation: 'hold',
-      summary: 'Auto-promote hold: failed matrix/expectancy/anchor gates despite strong regime switch signal.',
+      summary: 'Auto-promote hold: failed matrix/anchor gates despite strong regime switch signal.',
     },
   });
 
   assert.equal(blocked.recommendation, 'hold');
-  assert.equal(blocked.status, 'blocked');
-  assert.match(blocked.reason, /matrix\/expectancy\/anchor gates/i);
+  assert.equal(blocked.status, 'safety_failed');
+  assert.match(blocked.reason, /matrix\/anchor gates/i);
   assert.match(blocked.reason, /strong regime switch signal/i);
-  assert.equal(canForceQueuedPromotion(blocked), true);
+  assert.equal(canForceQueuedPromotion(blocked), false);
 });
 
 test('decideAutoresearchOutcome holds when expectancy regresses despite a higher win rate', () => {
@@ -1128,6 +1390,25 @@ test('decideMatrixPromotion recommends promote when primary and enough shadows p
   assert.equal(result.recommendation, 'promote');
   assert.equal(result.counts.shadowPassCount, 1);
   assert.equal(result.counts.shadowPassRatio, 0.5);
+});
+
+test('decideMatrixPromotion does not report perfect zero shadow ratio', () => {
+  const decision = decideMatrixPromotion({
+    labResults: [{ decision: { recommendation: 'promote' } }],
+    champion: { configId: 'champion', config: { minPredSum: 2 } },
+    challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+    policy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 3,
+      minShadowPassRatio: 0.6,
+      requireCandidateChange: true,
+    },
+  });
+
+  assert.equal(decision.counts.shadowLabs, 0);
+  assert.equal(decision.counts.shadowPassCount, 0);
+  assert.equal(decision.counts.shadowPassRatio, 0);
+  assert.equal(decision.gates.shadowPassRatio, false);
 });
 
 test('decideMatrixPromotion recommends hold when primary wins but shadows reject', () => {
@@ -2763,6 +3044,75 @@ test('offline strict missing path builds skip result + history payload with comp
   assert.equal(event.offlineDataSummary.missingLabs[0].missingTimestamps.length, 5);
 });
 
+
+test('buildRegimeExitStateForScout reports real candidate counts without previewOnly when selected lane generated variants', () => {
+  const state = buildRegimeExitStateForScout({
+    config: {
+      regimeExitResearch: {
+        enabled: true,
+        offline: { mode: 'local-first' },
+        budget: {
+          exploitRatio: 0.25,
+          exitRegimeRatio: 0.35,
+          globalAllParameterRatio: 0.25,
+          robustnessRatio: 0.15,
+        },
+      },
+      maxConfigs: 8,
+    },
+    championState: { config: { useTrailingStop: true, trailAtrMult: 1 } },
+    searchBatch: [
+      { variantId: 'exit-regime-01', lane: 'exitRegime', family: 'exit', patch: { trailAtrMult: 1.25 }, config: { trailAtrMult: 1.25 } },
+      { variantId: 'exit-regime-02', lane: 'exitRegime', family: 'exit', patch: { trailAtrMult: 0.75 }, config: { trailAtrMult: 0.75 } },
+    ],
+    schedulerState: { stagnationLevel: 0 },
+    offlineDataSummary: { ok: true, mode: 'local-first', requiredLabs: [], missingLabs: [] },
+  });
+
+  assert.equal(state.shadowRegimeScoreboard.selectedLane, 'exitRegime');
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.previewOnly, false);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.candidateCount, 2);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.countSource, 'generatedVariants');
+});
+
+
+test('buildRegimeAwareSearchBatch injects selected exitRegime candidates', () => {
+  const champion = {
+    useRegimeFilter: false,
+    useTrailingStop: true,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+    useStopsTP: true,
+    slAtrMult: 0.5,
+    tpAtrMult: 7.6,
+    useDivergenceContext: true,
+    divFreshBars: 8,
+  };
+
+  const batch = buildRegimeAwareSearchBatch({
+    selectedLane: 'exitRegime',
+    champion,
+    maxConfigs: 8,
+    historyEvents: [],
+    policy: {
+      exploitRatio: 0.25,
+      paretoShortlistSize: 2,
+      matrixCandidateLimit: 2,
+    },
+    schedulerState: {},
+    regimeExitResearch: {
+      enabled: true,
+      exitRegimeEnabled: true,
+      globalAllParameterEnabled: true,
+    },
+  });
+
+  assert.ok(batch.length > 0);
+  assert.ok(batch.some((variant) => variant.lane === 'exitRegime'));
+  assert.ok(batch.every((variant) => variant.variantId));
+  assert.ok(batch.every((variant) => variant.config));
+  assert.ok(batch.every((variant) => variant.patch && Object.keys(variant.patch).length > 0));
+});
 
 
 test('runScout offline-strict missing branch appends cycle history and returns skipped payload', async () => {

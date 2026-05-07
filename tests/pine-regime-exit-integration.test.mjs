@@ -95,9 +95,12 @@ test('buildRegimeExitStateForScout returns compact staged summaries and manifest
     config: seed.config,
     championState: seed.championState,
     historyEventsBefore: seed.historyEventsBefore,
-    searchBatch: seed.searchBatch,
+    searchBatch: [
+      ...seed.searchBatch,
+      { variantId: 'exit-regime-v1', lane: 'exitRegime', family: 'exit-regime', config: { minPredSum: 2 } },
+    ],
     offlineDataSummary: { ok: true, mode: 'offline-strict' },
-    schedulerState: { stagnationLevel: 1, budgetDebt: { globalAllParameter: 2 } },
+    schedulerState: { stagnationLevel: 1, budgetDebt: { exitRegime: 2 } },
   });
 
   assert.equal(regimeExitState.enabled, true);
@@ -117,9 +120,9 @@ test('buildRegimeExitStateForScout returns compact staged summaries and manifest
   assert.equal(regimeExitState.offlineDataSummary.mode, 'offline-strict');
   assert.equal(typeof regimeExitState.shadowRegimeScoreboard.selectedLane, 'string');
   assert.equal(regimeExitState.shadowRegimeScoreboard.laneBudgetAllocation.exitRegime >= 0, true);
-  assert.equal(typeof regimeExitState.shadowRegimeScoreboard.generatorSummary.candidateCount, 'number');
-  assert.equal(regimeExitState.shadowRegimeScoreboard.generatorSummary.previewOnly, true);
-  assert.equal(regimeExitState.shadowRegimeScoreboard.generatorSummary.countSource, 'searchBatch');
+  assert.equal(regimeExitState.shadowRegimeScoreboard.generatorSummary.candidateCount, 1);
+  assert.equal(regimeExitState.shadowRegimeScoreboard.generatorSummary.previewOnly, false);
+  assert.equal(regimeExitState.shadowRegimeScoreboard.generatorSummary.countSource, 'generatedVariants');
 
   const orchestration = buildScoutOrchestrationState({
     ...seed,

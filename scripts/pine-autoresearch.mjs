@@ -10,6 +10,7 @@ import {
   readPromotionQueue,
   selectNextPendingPromotion,
 } from './lib/pine-promotion-queue.mjs';
+import { classifyPromotionHoldReason, isForceablePromotionStatus, PROMOTION_STATUS } from './lib/pine-promotion-status.mjs';
 import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
 import { buildIncumbentSearchBatch } from './lib/pine-search-policy.mjs';
 import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
@@ -47,6 +48,13 @@ import {
   releaseAutoresearchLock,
 } from './lib/pine-autoresearch-lock.mjs';
 import {
+  beginAutoresearchRunArtifact,
+  finalizeAutoresearchManifest,
+  markAutoresearchRunIncompleteUnlessManifestExists,
+  validateLatestManifestPointer,
+  findOrphanEvaluationRuns,
+} from './lib/pine-autoresearch-artifacts.mjs';
+import {
   buildNoveltySignature,
   nextTrackState,
   normalizeResearchTracks,
@@ -76,28 +84,79 @@ const DEFAULT_REGIME_EXIT_STATE = {
 };
 
 
-function summarizeRegimeLaneGenerator({ selectedLane, championState, config, searchBatch }) {
-  const laneMap = {
-    exploit: ['exploit'],
-    exitRegime: ['exitRegime', 'exit-regime'],
-    globalAllParameter: ['globalAllParameter', 'global-all-parameter'],
-    robustness: ['robustness'],
-  };
-  const laneAliases = laneMap[selectedLane] || [];
-  const searchBatchCount = Array.isArray(searchBatch)
-    ? searchBatch.filter((item) => laneAliases.includes(item?.lane)).length
-    : 0;
+export function buildRegimeAwareSearchBatch({
+  selectedLane,
+  champion,
+  maxConfigs,
+  historyEvents = [],
+  policy = {},
+  schedulerState = {},
+  regimeExitResearch = {},
+} = {}) {
+  const safeMaxConfigs = Math.max(0, Math.floor(Number(maxConfigs) || 0));
+  if (!champion || safeMaxConfigs <= 0) return [];
 
-  const summary = {
+  if (regimeExitResearch?.enabled === true && selectedLane === 'exitRegime') {
+    const candidates = buildExitFamilyCandidates({
+      champion,
+      maxConfigs: safeMaxConfigs,
+      historyEvents,
+      schedulerState,
+      policy,
+    });
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      return candidates.slice(0, safeMaxConfigs).map((candidate, index) => ({
+        ...candidate,
+        lane: 'exitRegime',
+        family: candidate.family || 'exit',
+        variantId: candidate.variantId || `exit-regime-${String(index + 1).padStart(2, '0')}`,
+        index,
+      }));
+    }
+  }
+
+  if (regimeExitResearch?.enabled === true && selectedLane === 'globalAllParameter') {
+    const candidates = buildGlobalMutationBatch({
+      champion,
+      maxConfigs: safeMaxConfigs,
+      historyEvents,
+      schedulerState,
+      policy,
+    });
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      return candidates.slice(0, safeMaxConfigs).map((candidate, index) => ({
+        ...candidate,
+        lane: 'globalAllParameter',
+        family: candidate.family || 'global',
+        variantId: candidate.variantId || `global-all-${String(index + 1).padStart(2, '0')}`,
+        index,
+      }));
+    }
+  }
+
+  return buildIncumbentSearchBatch({
+    incumbent: champion,
+    maxConfigs: safeMaxConfigs,
+    historyEvents,
+    policy,
+    schedulerState,
+  });
+}
+
+function summarizeRegimeLaneGenerator({ selectedLane, searchBatch = [] } = {}) {
+  const generatedForLane = Array.isArray(searchBatch)
+    ? searchBatch.filter((variant) => variant?.lane === selectedLane)
+    : [];
+
+  return {
     lane: selectedLane || null,
     laneKind: selectedLane || null,
-    candidateCount: searchBatchCount,
-    previewOnly: true,
-    countSource: 'searchBatch',
+    candidateCount: generatedForLane.length,
+    previewOnly: generatedForLane.length === 0,
+    countSource: generatedForLane.length > 0 ? 'generatedVariants' : 'none',
     blockedFamilyCount: null,
+    variantIds: generatedForLane.map((variant) => variant.variantId).filter(Boolean).slice(0, 20),
   };
-
-  return summary;
 }
 
 export function buildRegimeExitStateForScout({
@@ -207,6 +266,30 @@ function parseArgs(argv) {
   return out;
 }
 
+function isHelpRequest(argv = []) {
+  return argv.includes('--help') || argv.includes('-h') || argv[0] === 'help';
+}
+
+function formatAutoresearchHelp() {
+  return [
+    'Usage: node scripts/pine-autoresearch.mjs <command> [options]',
+    '',
+    'Commands:',
+    '  cycle        Run scout/autoresearch cycle (default)',
+    '  scout        Alias for cycle',
+    '  digest       Write digest from latest manifest',
+    '  promote      Promote queued manifest when gates pass',
+    '  autopromote  Evaluate promotion queue',
+    '',
+    'Options:',
+    '  --config <path>       Config file path',
+    '  --profile <name>      Profile name',
+    '  --force-cycle         Ignore cycle cadence guard',
+    '  --force               Operator force for explicitly forceable queue holds only',
+    '  --help, -h            Print this help before operational setup',
+  ].join('\n');
+}
+
 function resolveMaybeRelative(baseDir, value) {
   if (!value) return null;
   return path.isAbsolute(value) ? value : path.resolve(baseDir, value);
@@ -227,34 +310,41 @@ function round(value, digits = 2) {
 }
 
 export function decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction } = {}) {
-  if (!queuedItem) return { recommendation: 'hold', status: 'blocked', reason: 'No pending promotion item' };
-  if (!manifest) return { recommendation: 'hold', status: 'failed', reason: `Queued manifest missing for ${queuedItem.itemId}` };
-  if (manifest.runId !== queuedItem.runId) return { recommendation: 'hold', status: 'failed', reason: `Manifest runId ${manifest.runId} does not match queued runId ${queuedItem.runId}` };
-  if (manifest.matrixDecision?.recommendation !== 'promote') return { recommendation: 'hold', status: 'stale', reason: `Queued manifest recommendation is ${manifest.matrixDecision?.recommendation || 'unknown'}` };
-  if (!manifest.challenger?.config) return { recommendation: 'hold', status: 'failed', reason: 'Queued manifest has no challenger config' };
-  if (sameConfig(championState?.config, manifest.challenger.config)) return { recommendation: 'hold', status: 'stale', reason: `Champion already matches ${manifest.challenger.configId}` };
+  if (!queuedItem) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'No pending promotion item' };
+  if (!manifest) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: `Queued manifest missing for ${queuedItem.itemId}` };
+  if (manifest.runId !== queuedItem.runId) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: `Manifest runId ${manifest.runId} does not match queued runId ${queuedItem.runId}` };
+  if (manifest.matrixDecision?.recommendation !== 'promote') return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: `Queued manifest recommendation is ${manifest.matrixDecision?.recommendation || 'unknown'}` };
+  if (!manifest.challenger?.config) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'Queued manifest has no challenger config' };
+  if (sameConfig(championState?.config, manifest.challenger.config)) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: `Champion already matches ${manifest.challenger.configId}` };
   const currentChampionFingerprint = championState?.configFingerprint || configFingerprint(championState?.config || {});
-  if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Queued champion fingerprint missing at decision' };
-  if (currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Current champion changed since queued decision' };
+  if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Queued champion fingerprint missing at decision' };
+  if (currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Current champion changed since queued decision' };
   if (queuedItem.candidateFamilyKey && manifest.candidateFamilyKey && queuedItem.candidateFamilyKey !== manifest.candidateFamilyKey) {
-    return { recommendation: 'hold', status: 'failed', reason: 'Queued candidate family does not match manifest family' };
+    return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'Queued candidate family does not match manifest family' };
   }
   if (queuedItem.championFamilyKeyAtDecision && manifest.championFamilyKey && queuedItem.championFamilyKeyAtDecision !== manifest.championFamilyKey) {
-    return { recommendation: 'hold', status: 'failed', reason: 'Queued champion family does not match manifest family' };
+    return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'Queued champion family does not match manifest family' };
   }
-  if (autoAction?.recommendation !== 'promote') return { recommendation: 'hold', status: 'blocked', reason: autoAction?.summary || 'Autopromote gates did not pass' };
-  return { recommendation: 'promote', status: 'promoted', reason: 'Queued promotion guards passed' };
+  if (autoAction?.recommendation !== 'promote') {
+    const reason = autoAction?.summary || 'Autopromote gates did not pass';
+    return {
+      recommendation: 'hold',
+      status: classifyPromotionHoldReason(reason),
+      reason,
+    };
+  }
+  return { recommendation: 'promote', status: PROMOTION_STATUS.PROMOTED, reason: 'Queued promotion guards passed' };
 }
 
 export function canForceQueuedPromotion(queuedAction = null) {
-  return queuedAction?.status === 'blocked';
+  return isForceablePromotionStatus(queuedAction?.status);
 }
 
 export function resolveAutopromoteQueueStatus(result = {}) {
-  if (result?.promoted) return 'promoted';
+  if (result?.promoted) return PROMOTION_STATUS.PROMOTED;
   const reason = String(result?.reason || 'promotion_noop');
-  if (/already matches|already promoted/i.test(reason)) return 'stale';
-  return 'blocked';
+  if (/already matches|already promoted/i.test(reason)) return PROMOTION_STATUS.STALE;
+  return PROMOTION_STATUS.QUEUE_BLOCKED;
 }
 
 async function appendAutopromoteQueueStatus(queuePath, queuedItem, result = {}) {
@@ -1089,14 +1179,42 @@ async function rebuildHistoryArtifacts(config, championState) {
   return events;
 }
 
+function buildAutoresearchArtifactWarnings(config) {
+  const warnings = [];
+  const latestPointer = validateLatestManifestPointer({ root: config.researchRoot });
+  if (!latestPointer.ok && latestPointer.reason !== 'latest_missing') {
+    warnings.push(`Latest manifest pointer validation failed: ${latestPointer.reason}.`);
+  }
+
+  const orphanRuns = findOrphanEvaluationRuns({ root: config.researchRoot });
+  if (!orphanRuns.ok) {
+    warnings.push(`Found ${orphanRuns.orphans.length} evaluation run(s) without manifest or incomplete marker.`);
+  }
+
+  return warnings;
+}
+
+function appendDigestWarnings(digestText, warnings = []) {
+  if (!warnings.length) return digestText;
+  const warningLines = [
+    '',
+    '## Warnings',
+    '',
+    ...warnings.map((warning) => `- ${warning}`),
+    '',
+  ];
+  return `${digestText.trimEnd()}\n${warningLines.join('\n')}`;
+}
+
 async function writeCurrentDigest(config, latestManifest, championState, previousManifest, historyEvents) {
-  const digestText = renderDigestMarkdown({
+  const warnings = buildAutoresearchArtifactWarnings(config);
+  const digestText = appendDigestWarnings(renderDigestMarkdown({
     config,
     latestManifest,
     previousManifest,
     historyEvents,
     championState,
-  });
+  }), warnings);
   await writeText(latestDigestPath(config), digestText);
   return latestDigestPath(config);
 }
@@ -1295,6 +1413,9 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
       thresholds: lab.thresholds,
       expectancyPolicy: config.expectancyPolicy,
       complexityPolicy: config.complexityPolicy,
+      holdoutVerdict: config.holdoutVerdict ?? null,
+      blindHoldoutLabs: config.blindHoldoutLabs ?? [],
+      promotionPolicy: config.regimeExitResearch?.enabled ? config.regimeExitResearch?.promotion : null,
     });
 
     labResults.push({
@@ -1340,7 +1461,17 @@ export async function runScout(config) {
   }
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
-  let offlineDataSummary = null;
+  let manifestFinalized = false;
+  let trackedConfig = { ...config };
+
+  try {
+    await beginAutoresearchRunArtifact({
+      root: trackedConfig.researchRoot,
+      runId,
+      profile: trackedConfig.selectedProfile,
+    });
+
+    let offlineDataSummary = null;
   if (config.regimeExitResearch?.enabled) {
     offlineDataSummary = await buildOfflineDataPreflight(config);
     if (!offlineDataSummary.ok && offlineDataSummary.mode === 'offline-strict') {
@@ -1384,9 +1515,9 @@ export async function runScout(config) {
   const gridName = activeTrack?.gridName || config.grid;
   const windowSetId = activeTrack?.windowSet || config.windowPolicy?.primary || 'primary';
   const labSetId = [config.primaryLab?.labId, ...(config.shadowLabs || []).map((lab) => lab.labId)].filter(Boolean).join(',');
-  const trackedConfig = { ...config, grid: gridName };
+  trackedConfig = { ...trackedConfig, grid: gridName };
 
-  const searchBatch = activeTrack
+  const fallbackSearchBatch = activeTrack
     ? buildTrackCandidateBatch({
         track: activeTrack,
         incumbent: championState.config,
@@ -1403,15 +1534,34 @@ export async function runScout(config) {
         schedulerState,
       });
 
-  const searchVariants = searchBatch.length > 0
-    ? searchBatch
-    : buildIncumbentSearchBatch({
-        incumbent: championState.config,
-        maxConfigs: trackedConfig.maxConfigs,
-        historyEvents: historyEventsBefore,
-        policy: trackedConfig.searchPolicy,
-        schedulerState,
-      });
+  const regimeExitStateSeed = buildRegimeExitStateForScout({
+    config: trackedConfig,
+    championState,
+    historyEventsBefore,
+    searchBatch: [],
+    offlineDataSummary,
+    schedulerState,
+  });
+  const selectedRegimeLane = regimeExitStateSeed?.shadowRegimeScoreboard?.selectedLane || null;
+
+  const regimeAwareSearchBatch = buildRegimeAwareSearchBatch({
+    selectedLane: selectedRegimeLane,
+    champion: championState.config,
+    maxConfigs: trackedConfig.maxConfigs,
+    historyEvents: historyEventsBefore,
+    policy: trackedConfig.searchPolicy,
+    schedulerState,
+    regimeExitResearch: trackedConfig.regimeExitResearch,
+  });
+  const generatedRegimeLane = trackedConfig.regimeExitResearch?.enabled === true
+    && ['exitRegime', 'globalAllParameter'].includes(selectedRegimeLane)
+    && regimeAwareSearchBatch.some((variant) => variant?.lane === selectedRegimeLane);
+
+  const searchVariants = generatedRegimeLane
+    ? regimeAwareSearchBatch
+    : fallbackSearchBatch.length > 0
+      ? fallbackSearchBatch
+      : regimeAwareSearchBatch;
   const totalCombos = searchVariants.length;
   const sweepOffset = computeSweepOffset({
     historyEvents: historyEventsBefore,
@@ -1507,7 +1657,7 @@ export async function runScout(config) {
   const { steadyState, noChangeStreak, manifest } = orchestration;
 
   const manifestName = `${runId}.json`;
-  const manifestPath = path.join(manifestsDir(trackedConfig), manifestName);
+  let manifestPath = path.join(manifestsDir(trackedConfig), manifestName);
   const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
 
   const updatedSchedulerState = nextTrackState({
@@ -1539,8 +1689,12 @@ export async function runScout(config) {
 
   const finalManifest = applySchedulerStateToManifest(manifest, updatedSchedulerState);
 
-  await writeJson(manifestPath, finalManifest);
-  await writeJson(latestManifestPath(trackedConfig), { ...finalManifest, manifestPath });
+  const finalizedArtifact = await finalizeAutoresearchManifest({
+    root: trackedConfig.researchRoot,
+    manifest: finalManifest,
+  });
+  manifestPath = finalizedArtifact.manifestPath;
+  manifestFinalized = true;
 
   if (shouldQueuePromotionManifest(finalManifest)) {
     const queueItem = buildPromotionQueueItem({
@@ -1599,6 +1753,17 @@ export async function runScout(config) {
   const pruneResult = await pruneRunArtifacts(trackedConfig);
 
   return { manifest: finalManifest, manifestPath, scoutPath, liveDigestPath, pruneResult };
+  } catch (error) {
+    if (!manifestFinalized) {
+      await markAutoresearchRunIncompleteUnlessManifestExists({
+        root: trackedConfig.researchRoot,
+        runId,
+        reason: 'run_failed_before_manifest',
+        error,
+      });
+    }
+    throw error;
+  }
 }
 
 async function runDigest(config) {
@@ -1614,13 +1779,14 @@ async function runDigest(config) {
   const digestId = `digest-${timestampId()}`;
   const digestPath = path.join(config.digestRoot, `${digestId}.md`);
   const historyEvents = await loadHistoryEvents(config);
-  const digestText = renderDigestMarkdown({
+  const warnings = buildAutoresearchArtifactWarnings(config);
+  const digestText = appendDigestWarnings(renderDigestMarkdown({
     config,
     latestManifest: latest,
     previousManifest: previous,
     historyEvents,
     championState,
-  });
+  }), warnings);
   await writeText(digestPath, digestText);
   await writeText(latestDigestPath(config), digestText);
 
@@ -1692,6 +1858,9 @@ async function runBlindHoldout(config) {
       thresholds: lab.thresholds,
       expectancyPolicy: config.expectancyPolicy,
       complexityPolicy: config.complexityPolicy,
+      holdoutVerdict: latest.holdoutVerdict ?? config.holdoutVerdict ?? null,
+      blindHoldoutLabs: [],
+      promotionPolicy: config.regimeExitResearch?.enabled ? config.regimeExitResearch?.promotion : null,
     });
     labResults.push({
       lab,
@@ -1888,7 +2057,13 @@ async function runAutopromote(config, args) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const rawArgs = process.argv.slice(2);
+  if (isHelpRequest(rawArgs)) {
+    console.log(formatAutoresearchHelp());
+    return;
+  }
+
+  const args = parseArgs(rawArgs);
   const command = args._[0] || 'cycle';
   const cwd = process.cwd();
   const config = await loadConfig(cwd, args.config, {

@@ -9,6 +9,11 @@ function round(value, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function finiteNumberOrNull(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function stableValue(value) {
   if (Array.isArray(value)) {
     return value.map((item) => stableValue(item));
@@ -298,7 +303,85 @@ export function selectChampionBootstrapSource({ latestManifest, seedPayload } = 
   return candidates[0] || null;
 }
 
-export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = {}, expectancyPolicy = {}, complexityPolicy = {} }) {
+export function evaluateProfitabilityFloor({ incumbent, challenger, policy = {} } = {}) {
+  const inputs = {
+    minRoiDeltaPct: finiteNumberOrNull(policy.minRoiDeltaPct ?? 5),
+    minProfitFactorDelta: finiteNumberOrNull(policy.minProfitFactorDelta ?? 0.1),
+    minTradeCount: finiteNumberOrNull(policy.minTradeCount ?? 60),
+    incumbentRoiPct: finiteNumberOrNull(incumbent?.metrics?.roiPct ?? incumbent?.roiPct),
+    challengerRoiPct: finiteNumberOrNull(challenger?.metrics?.roiPct ?? challenger?.roiPct),
+    incumbentProfitFactor: finiteNumberOrNull(incumbent?.metrics?.profitFactor ?? incumbent?.profitFactor),
+    challengerProfitFactor: finiteNumberOrNull(challenger?.metrics?.profitFactor ?? challenger?.profitFactor),
+    challengerTradeCount: finiteNumberOrNull(challenger?.metrics?.tradeCount ?? challenger?.tradeCount),
+  };
+  const invalidFields = Object.entries(inputs)
+    .filter(([, value]) => value === null)
+    .map(([name]) => name);
+  if (invalidFields.length > 0) {
+    return {
+      passed: false,
+      invalid: true,
+      reason: 'non_finite_profitability_input',
+      invalidFields,
+      roiDelta: null,
+      pfDelta: null,
+      tradeCount: inputs.challengerTradeCount,
+      minRoiDeltaPct: inputs.minRoiDeltaPct,
+      minProfitFactorDelta: inputs.minProfitFactorDelta,
+      minTradeCount: inputs.minTradeCount,
+    };
+  }
+
+  const {
+    minRoiDeltaPct,
+    minProfitFactorDelta,
+    minTradeCount,
+    incumbentRoiPct,
+    challengerRoiPct,
+    incumbentProfitFactor,
+    challengerProfitFactor,
+    challengerTradeCount,
+  } = inputs;
+  const roiDelta = challengerRoiPct - incumbentRoiPct;
+  const pfDelta = challengerProfitFactor - incumbentProfitFactor;
+  const tradeCount = challengerTradeCount;
+
+  const passed = roiDelta >= minRoiDeltaPct && pfDelta >= minProfitFactorDelta && tradeCount >= minTradeCount;
+  return { passed, roiDelta, pfDelta, tradeCount, minRoiDeltaPct, minProfitFactorDelta, minTradeCount };
+}
+
+function summarizeProfitabilityFloorFailure(profitabilityFloor) {
+  if (profitabilityFloor.invalid) {
+    const invalidFields = profitabilityFloor.invalidFields?.length > 0
+      ? ` (${profitabilityFloor.invalidFields.join(', ')})`
+      : '';
+    return `Profitability floor failed: ${profitabilityFloor.reason}${invalidFields}.`;
+  }
+
+  const failures = [];
+  if (profitabilityFloor.roiDelta < profitabilityFloor.minRoiDeltaPct) {
+    failures.push(`ROI delta ${round(profitabilityFloor.roiDelta)} < ${profitabilityFloor.minRoiDeltaPct}`);
+  }
+  if (profitabilityFloor.pfDelta < profitabilityFloor.minProfitFactorDelta) {
+    failures.push(`profit factor delta ${round(profitabilityFloor.pfDelta, 3)} < ${profitabilityFloor.minProfitFactorDelta}`);
+  }
+  if (profitabilityFloor.tradeCount < profitabilityFloor.minTradeCount) {
+    failures.push(`trade count ${profitabilityFloor.tradeCount} < ${profitabilityFloor.minTradeCount}`);
+  }
+
+  return `Profitability floor failed: ${failures.length > 0 ? failures.join('; ') : 'unknown floor component failed'}.`;
+}
+
+export function decideAutoresearchOutcome({
+  incumbent,
+  challenger,
+  thresholds = {},
+  expectancyPolicy = {},
+  complexityPolicy = {},
+  holdoutVerdict = null,
+  blindHoldoutLabs = [],
+  promotionPolicy = null,
+} = {}) {
   if (!incumbent) {
     throw new Error('Incumbent result is required');
   }
@@ -405,6 +488,77 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
     .filter(([, passed]) => !passed)
     .map(([name]) => name);
 
+  const holdoutRequired = Array.isArray(blindHoldoutLabs) && blindHoldoutLabs.length > 0;
+  if (failedGates.length === 0 && holdoutRequired && !holdoutVerdict) {
+    return {
+      recommendation: 'hold',
+      summary: 'Blind holdout verdict required before promotion.',
+      comparisons,
+      gates: { ...gates, holdoutVerdict: false },
+      failedGates: ['holdoutVerdict'],
+      thresholds: {
+        minScoreDelta,
+        minRoiDeltaPct,
+        minProfitFactorDelta,
+        maxDrawdownDeltaPct,
+        minTradeCount,
+        minTradeRatioVsIncumbent,
+        adjusted: adjustedThresholds,
+      },
+      complexity,
+      expectancy: expectancyGate,
+      expectancyGate,
+    };
+  }
+  if (failedGates.length === 0 && holdoutVerdict && holdoutVerdict.passed !== true) {
+    return {
+      recommendation: 'hold',
+      summary: `Blind holdout failed: ${holdoutVerdict.reason || 'unspecified'}`,
+      comparisons,
+      gates: { ...gates, holdoutVerdict: false },
+      failedGates: ['holdoutVerdict'],
+      thresholds: {
+        minScoreDelta,
+        minRoiDeltaPct,
+        minProfitFactorDelta,
+        maxDrawdownDeltaPct,
+        minTradeCount,
+        minTradeRatioVsIncumbent,
+        adjusted: adjustedThresholds,
+      },
+      complexity,
+      expectancy: expectancyGate,
+      expectancyGate,
+    };
+  }
+
+  let profitabilityFloor = null;
+  if (failedGates.length === 0 && promotionPolicy) {
+    profitabilityFloor = evaluateProfitabilityFloor({ incumbent, challenger, policy: promotionPolicy });
+    if (!profitabilityFloor.passed) {
+      return {
+        recommendation: 'hold',
+        summary: summarizeProfitabilityFloorFailure(profitabilityFloor),
+        comparisons,
+        gates: { ...gates, profitabilityFloor: false },
+        failedGates: ['profitabilityFloor'],
+        thresholds: {
+          minScoreDelta,
+          minRoiDeltaPct,
+          minProfitFactorDelta,
+          maxDrawdownDeltaPct,
+          minTradeCount,
+          minTradeRatioVsIncumbent,
+          adjusted: adjustedThresholds,
+        },
+        complexity,
+        expectancy: expectancyGate,
+        expectancyGate,
+        profitabilityFloor,
+      };
+    }
+  }
+
   const recommendation = failedGates.length === 0 ? 'promote' : 'hold';
   const summary = recommendation === 'promote'
     ? `Promote challenger ${challenger.configId}: all promotion gates passed.`
@@ -416,7 +570,7 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
     recommendation,
     summary,
     comparisons,
-    gates,
+    gates: profitabilityFloor ? { ...gates, profitabilityFloor: true } : gates,
     failedGates,
     thresholds: {
       minScoreDelta,
@@ -430,6 +584,7 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
     complexity,
     expectancy: expectancyGate,
     expectancyGate,
+    profitabilityFloor,
   };
 }
 
@@ -438,7 +593,7 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
   const shadowLabs = labResults.slice(1);
   const shadowPassCount = shadowLabs.filter((item) => item.decision?.recommendation === 'promote').length;
   const allPassCount = labResults.filter((item) => item.decision?.recommendation === 'promote').length;
-  const shadowPassRatio = shadowLabs.length ? round(shadowPassCount / shadowLabs.length, 3) : 1;
+  const shadowPassRatio = shadowLabs.length > 0 ? round(shadowPassCount / shadowLabs.length, 3) : 0;
   const candidateChanged = !sameConfig(champion?.config, challenger?.config);
 
   const requirePrimaryPromote = policy.requirePrimaryPromote ?? true;
@@ -450,7 +605,7 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
     candidateChanged: requireCandidateChange ? candidateChanged : true,
     primaryPromote: requirePrimaryPromote ? primary?.decision?.recommendation === 'promote' : true,
     shadowPassCount: shadowPassCount >= minShadowPassCount,
-    shadowPassRatio: shadowPassRatio >= minShadowPassRatio,
+    shadowPassRatio: shadowLabs.length > 0 && shadowPassRatio >= minShadowPassRatio,
   };
 
   const failedGates = Object.entries(gates)

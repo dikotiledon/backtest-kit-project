@@ -77,9 +77,16 @@ export function validateExitPatch(patch = {}) {
   return { ok: true };
 }
 
-function normalizeBase(incumbent) {
-  const config = incumbent?.config && typeof incumbent.config === 'object' ? incumbent.config : {};
+function sourceConfig(source) {
+  if (source?.config && typeof source.config === 'object' && !Array.isArray(source.config)) return source.config;
+  if (source && typeof source === 'object' && !Array.isArray(source)) return source;
+  return {};
+}
+
+function normalizeBase(source) {
+  const config = sourceConfig(source);
   return {
+    config,
     slAtrMult: positive(config.slAtrMult, 1),
     tpAtrMult: positive(config.tpAtrMult, 2.5),
     useTrailingStop: config.useTrailingStop === true,
@@ -87,11 +94,12 @@ function normalizeBase(incumbent) {
   };
 }
 
-export function buildExitFamilyCandidates({ incumbent, regimeSliceId, maxConfigs } = {}) {
+export function buildExitFamilyCandidates({ incumbent, champion, regimeSliceId, maxConfigs } = {}) {
   const limit = normalizeMaxConfigs(maxConfigs);
   if (limit === 0) return [];
 
-  const base = normalizeBase(incumbent);
+  const source = incumbent ?? champion;
+  const base = normalizeBase(source);
   const patchPool = [
     {
       exitFamily: 'atr-stop-take-profit',
@@ -122,11 +130,13 @@ export function buildExitFamilyCandidates({ incumbent, regimeSliceId, maxConfigs
         exitFamily: item.exitFamily,
         regimeSliceId,
         patch,
+        variantId: `exit-regime-${candidateId}`,
+        config: { ...base.config, ...patch },
         metadata: {
           ...item.metadata,
           partialTakeProfit: PARTIAL_TAKE_PROFIT_STATUS,
           blockedFamilies: BLOCKED_EXIT_FAMILIES,
-          ...(incumbent?.id ? { originConfigId: incumbent.id } : {}),
+          ...(source?.id ? { originConfigId: source.id } : {}),
         },
       };
     })

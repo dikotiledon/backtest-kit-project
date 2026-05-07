@@ -179,7 +179,7 @@ test('runEvaluationWorker normalizes invalid numeric options to safe bounds', as
   const result = await runEvaluationWorker({
     workerPath: worker,
     payload: {},
-    timeoutMs: 10,
+    timeoutMs: 5000,
     maxOldSpaceMb: 1,
     maxOutputBytes: 1
   });

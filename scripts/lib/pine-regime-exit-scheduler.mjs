@@ -78,6 +78,11 @@ export function allocateRegimeExitLaneBudget({ maxConfigs, lanes = {} }) {
   return budget;
 }
 
+function normalizeBudgetDebt(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
 export function selectNextResearchLane({ stagnationLevel = 0, budgetDebt = {}, lanesEnabled = {} }) {
   const enabledLanes = LANE_KEYS.filter((lane) => lanesEnabled[lane] !== false);
   if (enabledLanes.length === 0) return null;
@@ -97,13 +102,17 @@ export function selectNextResearchLane({ stagnationLevel = 0, budgetDebt = {}, l
 
   if (candidates.length === 0) return enabledLanes.sort()[0];
 
-  if (candidates.includes(metadata.preferredLane)) return metadata.preferredLane;
+  const preferredLane = candidates.includes(metadata.preferredLane) ? metadata.preferredLane : null;
 
   candidates.sort((a, b) => {
-    const debtA = Number(budgetDebt[a] ?? 0);
-    const debtB = Number(budgetDebt[b] ?? 0);
+    const debtA = normalizeBudgetDebt(budgetDebt[a]);
+    const debtB = normalizeBudgetDebt(budgetDebt[b]);
 
     if (debtB !== debtA) return debtB - debtA;
+    if (preferredLane) {
+      if (a === preferredLane && b !== preferredLane) return -1;
+      if (b === preferredLane && a !== preferredLane) return 1;
+    }
     return priority.indexOf(a) - priority.indexOf(b);
   });
 

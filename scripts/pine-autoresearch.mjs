@@ -10,6 +10,7 @@ import {
   readPromotionQueue,
   selectNextPendingPromotion,
 } from './lib/pine-promotion-queue.mjs';
+import { classifyPromotionHoldReason, isForceablePromotionStatus, PROMOTION_STATUS } from './lib/pine-promotion-status.mjs';
 import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
 import { buildIncumbentSearchBatch } from './lib/pine-search-policy.mjs';
 import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
@@ -307,34 +308,41 @@ function round(value, digits = 2) {
 }
 
 export function decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction } = {}) {
-  if (!queuedItem) return { recommendation: 'hold', status: 'blocked', reason: 'No pending promotion item' };
-  if (!manifest) return { recommendation: 'hold', status: 'failed', reason: `Queued manifest missing for ${queuedItem.itemId}` };
-  if (manifest.runId !== queuedItem.runId) return { recommendation: 'hold', status: 'failed', reason: `Manifest runId ${manifest.runId} does not match queued runId ${queuedItem.runId}` };
-  if (manifest.matrixDecision?.recommendation !== 'promote') return { recommendation: 'hold', status: 'stale', reason: `Queued manifest recommendation is ${manifest.matrixDecision?.recommendation || 'unknown'}` };
-  if (!manifest.challenger?.config) return { recommendation: 'hold', status: 'failed', reason: 'Queued manifest has no challenger config' };
-  if (sameConfig(championState?.config, manifest.challenger.config)) return { recommendation: 'hold', status: 'stale', reason: `Champion already matches ${manifest.challenger.configId}` };
+  if (!queuedItem) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'No pending promotion item' };
+  if (!manifest) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: `Queued manifest missing for ${queuedItem.itemId}` };
+  if (manifest.runId !== queuedItem.runId) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: `Manifest runId ${manifest.runId} does not match queued runId ${queuedItem.runId}` };
+  if (manifest.matrixDecision?.recommendation !== 'promote') return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: `Queued manifest recommendation is ${manifest.matrixDecision?.recommendation || 'unknown'}` };
+  if (!manifest.challenger?.config) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'Queued manifest has no challenger config' };
+  if (sameConfig(championState?.config, manifest.challenger.config)) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: `Champion already matches ${manifest.challenger.configId}` };
   const currentChampionFingerprint = championState?.configFingerprint || configFingerprint(championState?.config || {});
-  if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Queued champion fingerprint missing at decision' };
-  if (currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: 'stale', reason: 'Current champion changed since queued decision' };
+  if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Queued champion fingerprint missing at decision' };
+  if (currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Current champion changed since queued decision' };
   if (queuedItem.candidateFamilyKey && manifest.candidateFamilyKey && queuedItem.candidateFamilyKey !== manifest.candidateFamilyKey) {
-    return { recommendation: 'hold', status: 'failed', reason: 'Queued candidate family does not match manifest family' };
+    return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'Queued candidate family does not match manifest family' };
   }
   if (queuedItem.championFamilyKeyAtDecision && manifest.championFamilyKey && queuedItem.championFamilyKeyAtDecision !== manifest.championFamilyKey) {
-    return { recommendation: 'hold', status: 'failed', reason: 'Queued champion family does not match manifest family' };
+    return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'Queued champion family does not match manifest family' };
   }
-  if (autoAction?.recommendation !== 'promote') return { recommendation: 'hold', status: 'blocked', reason: autoAction?.summary || 'Autopromote gates did not pass' };
-  return { recommendation: 'promote', status: 'promoted', reason: 'Queued promotion guards passed' };
+  if (autoAction?.recommendation !== 'promote') {
+    const reason = autoAction?.summary || 'Autopromote gates did not pass';
+    return {
+      recommendation: 'hold',
+      status: classifyPromotionHoldReason(reason),
+      reason,
+    };
+  }
+  return { recommendation: 'promote', status: PROMOTION_STATUS.PROMOTED, reason: 'Queued promotion guards passed' };
 }
 
 export function canForceQueuedPromotion(queuedAction = null) {
-  return queuedAction?.status === 'blocked';
+  return isForceablePromotionStatus(queuedAction?.status);
 }
 
 export function resolveAutopromoteQueueStatus(result = {}) {
-  if (result?.promoted) return 'promoted';
+  if (result?.promoted) return PROMOTION_STATUS.PROMOTED;
   const reason = String(result?.reason || 'promotion_noop');
-  if (/already matches|already promoted/i.test(reason)) return 'stale';
-  return 'blocked';
+  if (/already matches|already promoted/i.test(reason)) return PROMOTION_STATUS.STALE;
+  return PROMOTION_STATUS.QUEUE_BLOCKED;
 }
 
 async function appendAutopromoteQueueStatus(queuePath, queuedItem, result = {}) {

@@ -759,7 +759,7 @@ test('decideQueuedPromotionAction fails when queued family identity differs from
   });
 
   assert.equal(result.recommendation, 'hold');
-  assert.equal(result.status, 'failed');
+  assert.equal(result.status, 'invalid');
   assert.match(result.reason, /family/);
 });
 
@@ -787,7 +787,7 @@ test('decideQueuedPromotionAction fails on champion family mismatch between queu
   });
 
   assert.equal(result.recommendation, 'hold');
-  assert.equal(result.status, 'failed');
+  assert.equal(result.status, 'invalid');
   assert.match(result.reason, /champion family/i);
 });
 
@@ -846,7 +846,7 @@ test('decideQueuedPromotionAction holds stale when queued champion fingerprint i
   }
 });
 
-test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
+test('decideQueuedPromotionAction marks safety failure when autopromote gates fail', () => {
   const queuedItem = {
     itemId: 'run-a:candidate-fp',
     runId: 'run-a',
@@ -866,21 +866,28 @@ test('decideQueuedPromotionAction blocks when autopromote gates fail', () => {
   const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
 
   assert.equal(result.recommendation, 'hold');
-  assert.equal(result.status, 'blocked');
+  assert.equal(result.status, 'safety_failed');
   assert.equal(result.reason, 'Auto-promote hold: failed cooldown gate(s).');
-  assert.equal(canForceQueuedPromotion(result), true);
+  assert.equal(canForceQueuedPromotion(result), false);
 });
 
 test('resolveAutopromoteQueueStatus maps promoted false results to a queue status', () => {
   assert.equal(resolveAutopromoteQueueStatus({ promoted: true, reason: 'autopromoted' }), 'promoted');
   assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'Champion already matches candidate-a' }), 'stale');
-  assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'promotion_noop' }), 'blocked');
+  assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'promotion_noop' }), 'queue_blocked');
 });
 
-test('canForceQueuedPromotion only allows blocked queue actions', () => {
-  assert.equal(canForceQueuedPromotion({ status: 'blocked' }), true);
-  assert.equal(canForceQueuedPromotion({ status: 'stale' }), false);
-  assert.equal(canForceQueuedPromotion({ status: 'failed' }), false);
+test('canForceQueuedPromotion rejects failed strategy safety gates', () => {
+  assert.equal(canForceQueuedPromotion({ status: 'safety_failed', reason: 'matrix gates failed' }), false);
+  assert.equal(canForceQueuedPromotion({ status: 'expectancy_failed', reason: 'expectancy regression' }), false);
+  assert.equal(canForceQueuedPromotion({ status: 'holdout_failed', reason: 'blind holdout failed' }), false);
+});
+
+test('canForceQueuedPromotion allows only operator recoverable blockers', () => {
+  assert.equal(canForceQueuedPromotion({ status: 'operator_blocked', reason: 'manual queue approval required' }), true);
+  assert.equal(canForceQueuedPromotion({ status: 'queue_blocked', reason: 'queue lock stale' }), true);
+  assert.equal(canForceQueuedPromotion({ status: 'stale', reason: 'already promoted' }), false);
+  assert.equal(canForceQueuedPromotion({ status: 'invalid', reason: 'fingerprint mismatch' }), false);
 });
 
 test('decideQueuedPromotionAction fails when queued manifest is missing or runId mismatches', () => {
@@ -897,9 +904,9 @@ test('decideQueuedPromotionAction fails when queued manifest is missing or runId
     autoAction: { recommendation: 'promote' },
   });
 
-  assert.equal(missingManifest.status, 'failed');
+  assert.equal(missingManifest.status, 'invalid');
   assert.equal(missingManifest.reason, 'Queued manifest missing for run-a:candidate-fp');
-  assert.equal(mismatchedManifest.status, 'failed');
+  assert.equal(mismatchedManifest.status, 'invalid');
   assert.equal(mismatchedManifest.reason, 'Manifest runId run-b does not match queued runId run-a');
 });
 
@@ -1046,15 +1053,15 @@ test('regime-exit manifest shadow signals stay advisory and cannot bypass failin
     },
     autoAction: {
       recommendation: 'hold',
-      summary: 'Auto-promote hold: failed matrix/expectancy/anchor gates despite strong regime switch signal.',
+      summary: 'Auto-promote hold: failed matrix/anchor gates despite strong regime switch signal.',
     },
   });
 
   assert.equal(blocked.recommendation, 'hold');
-  assert.equal(blocked.status, 'blocked');
-  assert.match(blocked.reason, /matrix\/expectancy\/anchor gates/i);
+  assert.equal(blocked.status, 'safety_failed');
+  assert.match(blocked.reason, /matrix\/anchor gates/i);
   assert.match(blocked.reason, /strong regime switch signal/i);
-  assert.equal(canForceQueuedPromotion(blocked), true);
+  assert.equal(canForceQueuedPromotion(blocked), false);
 });
 
 test('decideAutoresearchOutcome holds when expectancy regresses despite a higher win rate', () => {

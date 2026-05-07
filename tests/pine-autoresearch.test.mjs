@@ -377,6 +377,26 @@ test('pine-autoresearch-run.ps1 removes its lock after a nonzero command', async
   assert.equal(await readIfExists(lockPath), null);
 });
 
+test('scheduler wrapper reports failure when command exits zero without manifest marker', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-wrapper-manifest-'));
+  const commandPath = path.join(tempRoot, 'fake-command.ps1');
+  await fs.writeFile(commandPath, 'Write-Output "fake success without manifest"\nexit 0\n', 'utf8');
+
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+  const result = await runPwshFile(scriptPath, [
+    '-TaskName', 'manifest-check',
+    '-CommandPath', commandPath,
+    '-RepoRoot', tempRoot,
+    '-RequireManifest',
+    '-ManifestRoot', tempRoot,
+    '-ExpectedRunId', 'missing-run',
+    '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Manifest-${process.pid}`,
+  ], { cwd: repoRoot });
+
+  assert.notEqual(result.code, 0);
+  assert.match(result.stderr + result.stdout, /manifest.*missing|missing.*manifest/i);
+});
+
 test('pine-autoresearch-run.ps1 drains stderr without pipe deadlock', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-stderr-'));
   const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');

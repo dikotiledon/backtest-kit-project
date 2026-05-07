@@ -499,6 +499,24 @@ test('decideAutoresearchOutcome recommends promote when all gates pass', () => {
   assert.deepEqual(result.failedGates, []);
 });
 
+test('decideAutoresearchOutcome blocks promotion when blind holdout verdict required', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 50, tradeCount: 100 }),
+    challenger: makeResult({ configId: 'challenger', score: 120, roiPct: 70, tradeCount: 120 }),
+    matrixDecision: {
+      recommendation: 'promote',
+      gates: { candidateChanged: true, primaryPromote: true, shadowPassCount: true, shadowPassRatio: true },
+      failedGates: [],
+    },
+    expectancy: { gate: { passed: true } },
+    holdoutVerdict: null,
+    blindHoldoutLabs: [{ labId: 'xrpusdt-15m-nov2025-blind-holdout' }],
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.match(outcome.summary, /holdout verdict required/i);
+});
+
 test('decideAutoresearchOutcome recommends hold when trade ratio collapses', () => {
   const incumbent = makeResult({
     configId: 'incumbent',
@@ -1190,6 +1208,25 @@ test('decideMatrixPromotion recommends promote when primary and enough shadows p
   assert.equal(result.recommendation, 'promote');
   assert.equal(result.counts.shadowPassCount, 1);
   assert.equal(result.counts.shadowPassRatio, 0.5);
+});
+
+test('decideMatrixPromotion does not report perfect zero shadow ratio', () => {
+  const decision = decideMatrixPromotion({
+    labResults: [{ decision: { recommendation: 'promote' } }],
+    champion: { configId: 'champion', config: { minPredSum: 2 } },
+    challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+    policy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 3,
+      minShadowPassRatio: 0.6,
+      requireCandidateChange: true,
+    },
+  });
+
+  assert.equal(decision.counts.shadowLabs, 0);
+  assert.equal(decision.counts.shadowPassCount, 0);
+  assert.equal(decision.counts.shadowPassRatio, 0);
+  assert.equal(decision.gates.shadowPassRatio, false);
 });
 
 test('decideMatrixPromotion recommends hold when primary wins but shadows reject', () => {

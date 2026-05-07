@@ -298,7 +298,15 @@ export function selectChampionBootstrapSource({ latestManifest, seedPayload } = 
   return candidates[0] || null;
 }
 
-export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = {}, expectancyPolicy = {}, complexityPolicy = {} }) {
+export function decideAutoresearchOutcome({
+  incumbent,
+  challenger,
+  thresholds = {},
+  expectancyPolicy = {},
+  complexityPolicy = {},
+  holdoutVerdict = null,
+  blindHoldoutLabs = [],
+} = {}) {
   if (!incumbent) {
     throw new Error('Incumbent result is required');
   }
@@ -405,6 +413,50 @@ export function decideAutoresearchOutcome({ incumbent, challenger, thresholds = 
     .filter(([, passed]) => !passed)
     .map(([name]) => name);
 
+  const holdoutRequired = Array.isArray(blindHoldoutLabs) && blindHoldoutLabs.length > 0;
+  if (failedGates.length === 0 && holdoutRequired && !holdoutVerdict) {
+    return {
+      recommendation: 'hold',
+      summary: 'Blind holdout verdict required before promotion.',
+      comparisons,
+      gates: { ...gates, holdoutVerdict: false },
+      failedGates: ['holdoutVerdict'],
+      thresholds: {
+        minScoreDelta,
+        minRoiDeltaPct,
+        minProfitFactorDelta,
+        maxDrawdownDeltaPct,
+        minTradeCount,
+        minTradeRatioVsIncumbent,
+        adjusted: adjustedThresholds,
+      },
+      complexity,
+      expectancy: expectancyGate,
+      expectancyGate,
+    };
+  }
+  if (failedGates.length === 0 && holdoutVerdict && holdoutVerdict.passed !== true) {
+    return {
+      recommendation: 'hold',
+      summary: `Blind holdout failed: ${holdoutVerdict.reason || 'unspecified'}`,
+      comparisons,
+      gates: { ...gates, holdoutVerdict: false },
+      failedGates: ['holdoutVerdict'],
+      thresholds: {
+        minScoreDelta,
+        minRoiDeltaPct,
+        minProfitFactorDelta,
+        maxDrawdownDeltaPct,
+        minTradeCount,
+        minTradeRatioVsIncumbent,
+        adjusted: adjustedThresholds,
+      },
+      complexity,
+      expectancy: expectancyGate,
+      expectancyGate,
+    };
+  }
+
   const recommendation = failedGates.length === 0 ? 'promote' : 'hold';
   const summary = recommendation === 'promote'
     ? `Promote challenger ${challenger.configId}: all promotion gates passed.`
@@ -438,7 +490,7 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
   const shadowLabs = labResults.slice(1);
   const shadowPassCount = shadowLabs.filter((item) => item.decision?.recommendation === 'promote').length;
   const allPassCount = labResults.filter((item) => item.decision?.recommendation === 'promote').length;
-  const shadowPassRatio = shadowLabs.length ? round(shadowPassCount / shadowLabs.length, 3) : 1;
+  const shadowPassRatio = shadowLabs.length > 0 ? round(shadowPassCount / shadowLabs.length, 3) : 0;
   const candidateChanged = !sameConfig(champion?.config, challenger?.config);
 
   const requirePrimaryPromote = policy.requirePrimaryPromote ?? true;
@@ -450,7 +502,7 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
     candidateChanged: requireCandidateChange ? candidateChanged : true,
     primaryPromote: requirePrimaryPromote ? primary?.decision?.recommendation === 'promote' : true,
     shadowPassCount: shadowPassCount >= minShadowPassCount,
-    shadowPassRatio: shadowPassRatio >= minShadowPassRatio,
+    shadowPassRatio: shadowLabs.length > 0 && shadowPassRatio >= minShadowPassRatio,
   };
 
   const failedGates = Object.entries(gates)

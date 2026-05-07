@@ -76,6 +76,65 @@ const DEFAULT_REGIME_EXIT_STATE = {
 };
 
 
+export function buildRegimeAwareSearchBatch({
+  selectedLane,
+  champion,
+  maxConfigs,
+  historyEvents = [],
+  policy = {},
+  schedulerState = {},
+  regimeExitResearch = {},
+} = {}) {
+  const safeMaxConfigs = Math.max(0, Math.floor(Number(maxConfigs) || 0));
+  if (!champion || safeMaxConfigs <= 0) return [];
+
+  if (regimeExitResearch?.enabled === true && selectedLane === 'exitRegime') {
+    const candidates = buildExitFamilyCandidates({
+      champion,
+      maxConfigs: safeMaxConfigs,
+      historyEvents,
+      schedulerState,
+      policy,
+    });
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      return candidates.slice(0, safeMaxConfigs).map((candidate, index) => ({
+        ...candidate,
+        lane: 'exitRegime',
+        family: candidate.family || 'exit',
+        variantId: candidate.variantId || `exit-regime-${String(index + 1).padStart(2, '0')}`,
+        index,
+      }));
+    }
+  }
+
+  if (regimeExitResearch?.enabled === true && selectedLane === 'globalAllParameter') {
+    const candidates = buildGlobalMutationBatch({
+      champion,
+      maxConfigs: safeMaxConfigs,
+      historyEvents,
+      schedulerState,
+      policy,
+    });
+    if (Array.isArray(candidates) && candidates.length > 0) {
+      return candidates.slice(0, safeMaxConfigs).map((candidate, index) => ({
+        ...candidate,
+        lane: 'globalAllParameter',
+        family: candidate.family || 'global',
+        variantId: candidate.variantId || `global-all-${String(index + 1).padStart(2, '0')}`,
+        index,
+      }));
+    }
+  }
+
+  return buildIncumbentSearchBatch({
+    incumbent: champion,
+    maxConfigs: safeMaxConfigs,
+    historyEvents,
+    policy,
+    schedulerState,
+  });
+}
+
 function summarizeRegimeLaneGenerator({ selectedLane, championState, config, searchBatch }) {
   const laneMap = {
     exploit: ['exploit'],
@@ -1410,7 +1469,7 @@ export async function runScout(config) {
   const labSetId = [config.primaryLab?.labId, ...(config.shadowLabs || []).map((lab) => lab.labId)].filter(Boolean).join(',');
   const trackedConfig = { ...config, grid: gridName };
 
-  const searchBatch = activeTrack
+  const fallbackSearchBatch = activeTrack
     ? buildTrackCandidateBatch({
         track: activeTrack,
         incumbent: championState.config,
@@ -1427,15 +1486,34 @@ export async function runScout(config) {
         schedulerState,
       });
 
-  const searchVariants = searchBatch.length > 0
-    ? searchBatch
-    : buildIncumbentSearchBatch({
-        incumbent: championState.config,
-        maxConfigs: trackedConfig.maxConfigs,
-        historyEvents: historyEventsBefore,
-        policy: trackedConfig.searchPolicy,
-        schedulerState,
-      });
+  const regimeExitStateSeed = buildRegimeExitStateForScout({
+    config: trackedConfig,
+    championState,
+    historyEventsBefore,
+    searchBatch: [],
+    offlineDataSummary,
+    schedulerState,
+  });
+  const selectedRegimeLane = regimeExitStateSeed?.shadowRegimeScoreboard?.selectedLane || null;
+
+  const regimeAwareSearchBatch = buildRegimeAwareSearchBatch({
+    selectedLane: selectedRegimeLane,
+    champion: championState.config,
+    maxConfigs: trackedConfig.maxConfigs,
+    historyEvents: historyEventsBefore,
+    policy: trackedConfig.searchPolicy,
+    schedulerState,
+    regimeExitResearch: trackedConfig.regimeExitResearch,
+  });
+  const generatedRegimeLane = trackedConfig.regimeExitResearch?.enabled === true
+    && ['exitRegime', 'globalAllParameter'].includes(selectedRegimeLane)
+    && regimeAwareSearchBatch.some((variant) => variant?.lane === selectedRegimeLane);
+
+  const searchVariants = generatedRegimeLane
+    ? regimeAwareSearchBatch
+    : fallbackSearchBatch.length > 0
+      ? fallbackSearchBatch
+      : regimeAwareSearchBatch;
   const totalCombos = searchVariants.length;
   const sweepOffset = computeSweepOffset({
     historyEvents: historyEventsBefore,

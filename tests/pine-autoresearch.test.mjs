@@ -46,6 +46,7 @@ import {
   applySchedulerStateToManifest,
   buildOfflineDataMissingCycleEvent,
   buildOfflineDataMissingSkipResult,
+  buildRegimeAwareSearchBatch,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -2796,6 +2797,45 @@ test('offline strict missing path builds skip result + history payload with comp
   assert.equal(event.offlineDataSummary.missingLabs[0].missingTimestamps.length, 5);
 });
 
+
+
+test('buildRegimeAwareSearchBatch injects selected exitRegime candidates', () => {
+  const champion = {
+    useRegimeFilter: false,
+    useTrailingStop: true,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+    useStopsTP: true,
+    slAtrMult: 0.5,
+    tpAtrMult: 7.6,
+    useDivergenceContext: true,
+    divFreshBars: 8,
+  };
+
+  const batch = buildRegimeAwareSearchBatch({
+    selectedLane: 'exitRegime',
+    champion,
+    maxConfigs: 8,
+    historyEvents: [],
+    policy: {
+      exploitRatio: 0.25,
+      paretoShortlistSize: 2,
+      matrixCandidateLimit: 2,
+    },
+    schedulerState: {},
+    regimeExitResearch: {
+      enabled: true,
+      exitRegimeEnabled: true,
+      globalAllParameterEnabled: true,
+    },
+  });
+
+  assert.ok(batch.length > 0);
+  assert.ok(batch.some((variant) => variant.lane === 'exitRegime'));
+  assert.ok(batch.every((variant) => variant.variantId));
+  assert.ok(batch.every((variant) => variant.config));
+  assert.ok(batch.every((variant) => variant.patch && Object.keys(variant.patch).length > 0));
+});
 
 
 test('runScout offline-strict missing branch appends cycle history and returns skipped payload', async () => {

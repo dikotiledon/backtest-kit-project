@@ -131,13 +131,20 @@ function buildFamilyPatch({ family, config }) {
   return null;
 }
 
-export function buildGlobalMutationBatch({ incumbent, maxConfigs, frozenKeys, families } = {}) {
-  const config = incumbent?.config && typeof incumbent.config === 'object' ? incumbent.config : {};
+function sourceConfig(source) {
+  if (source?.config && typeof source.config === 'object' && !Array.isArray(source.config)) return source.config;
+  if (source && typeof source === 'object' && !Array.isArray(source)) return source;
+  return {};
+}
+
+export function buildGlobalMutationBatch({ incumbent, champion, maxConfigs, frozenKeys, families } = {}) {
+  const source = incumbent ?? champion;
+  const config = sourceConfig(source);
   const selectedFamilies = Array.isArray(families) && families.length > 0 ? families : DEFAULT_FAMILIES;
   const limit = normalizeMaxConfigs(maxConfigs);
   if (limit === 0) return [];
 
-  const originConfigId = incumbent?.configId ?? incumbent?.config?.configId ?? null;
+  const originConfigId = source?.configId ?? source?.config?.configId ?? config?.configId ?? null;
   const out = [];
   for (const family of selectedFamilies) {
     const patch = buildFamilyPatch({ family, config });
@@ -151,10 +158,13 @@ export function buildGlobalMutationBatch({ incumbent, maxConfigs, frozenKeys, fa
     const lane = 'global-all-parameter';
     out.push({
       candidateId: buildCandidateId({ lane, mutationFamily: family, patch: normalizedPatch }),
+      variantId: `${lane}-${family}`,
       lane,
+      family,
       mutationFamily: family,
       axis: family,
       patch: normalizedPatch,
+      config: { ...config, ...normalizedPatch },
       touchedKeys: Object.keys(normalizedPatch),
       metadata: {
         originConfigId,

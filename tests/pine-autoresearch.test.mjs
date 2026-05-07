@@ -517,6 +517,28 @@ test('decideAutoresearchOutcome blocks promotion when blind holdout verdict requ
   assert.match(outcome.summary, /holdout verdict required/i);
 });
 
+test('decideAutoresearchOutcome rejects near-zero ROI improvement despite other passing gates', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 100 }),
+    challenger: makeResult({ configId: 'challenger', score: 101, roiPct: 40.1, profitFactor: 1.41, tradeCount: 110 }),
+    matrixDecision: {
+      recommendation: 'promote',
+      gates: { candidateChanged: true, primaryPromote: true, shadowPassCount: true, shadowPassRatio: true },
+      failedGates: [],
+    },
+    expectancy: { gate: { passed: true } },
+    holdoutVerdict: { passed: true },
+    promotionPolicy: {
+      minRoiDeltaPct: 5,
+      minProfitFactorDelta: 0.1,
+      minTradeCount: 60,
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.match(outcome.summary, /ROI|profit factor/i);
+});
+
 test('promotion call sites pass holdout verdict required inputs', async () => {
   const source = await fs.readFile(new URL('../scripts/pine-autoresearch.mjs', import.meta.url), 'utf8');
   const decisionBlocks = [...source.matchAll(/const decision = decideAutoresearchOutcome\(\{\s*([\s\S]*?)\s*\}\);/g)]

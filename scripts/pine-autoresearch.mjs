@@ -1385,6 +1385,7 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
       complexityPolicy: config.complexityPolicy,
       holdoutVerdict: config.holdoutVerdict ?? null,
       blindHoldoutLabs: config.blindHoldoutLabs ?? [],
+      promotionPolicy: config.regimeExitResearch?.enabled ? config.regimeExitResearch?.promotion : null,
     });
 
     labResults.push({
@@ -1828,6 +1829,7 @@ async function runBlindHoldout(config) {
       complexityPolicy: config.complexityPolicy,
       holdoutVerdict: latest.holdoutVerdict ?? config.holdoutVerdict ?? null,
       blindHoldoutLabs: [],
+      promotionPolicy: config.regimeExitResearch?.enabled ? config.regimeExitResearch?.promotion : null,
     });
     labResults.push({
       lab,

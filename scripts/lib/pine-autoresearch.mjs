@@ -298,6 +298,18 @@ export function selectChampionBootstrapSource({ latestManifest, seedPayload } = 
   return candidates[0] || null;
 }
 
+export function evaluateProfitabilityFloor({ incumbent, challenger, policy = {} } = {}) {
+  const minRoiDeltaPct = Number(policy.minRoiDeltaPct ?? 5);
+  const minProfitFactorDelta = Number(policy.minProfitFactorDelta ?? 0.1);
+  const minTradeCount = Number(policy.minTradeCount ?? 60);
+  const roiDelta = Number(challenger?.metrics?.roiPct ?? challenger?.roiPct ?? 0) - Number(incumbent?.metrics?.roiPct ?? incumbent?.roiPct ?? 0);
+  const pfDelta = Number(challenger?.metrics?.profitFactor ?? challenger?.profitFactor ?? 0) - Number(incumbent?.metrics?.profitFactor ?? incumbent?.profitFactor ?? 0);
+  const tradeCount = Number(challenger?.metrics?.tradeCount ?? challenger?.tradeCount ?? 0);
+
+  const passed = roiDelta >= minRoiDeltaPct && pfDelta >= minProfitFactorDelta && tradeCount >= minTradeCount;
+  return { passed, roiDelta, pfDelta, tradeCount, minRoiDeltaPct, minProfitFactorDelta, minTradeCount };
+}
+
 export function decideAutoresearchOutcome({
   incumbent,
   challenger,
@@ -306,6 +318,7 @@ export function decideAutoresearchOutcome({
   complexityPolicy = {},
   holdoutVerdict = null,
   blindHoldoutLabs = [],
+  promotionPolicy = null,
 } = {}) {
   if (!incumbent) {
     throw new Error('Incumbent result is required');
@@ -457,6 +470,33 @@ export function decideAutoresearchOutcome({
     };
   }
 
+  let profitabilityFloor = null;
+  if (failedGates.length === 0 && promotionPolicy) {
+    profitabilityFloor = evaluateProfitabilityFloor({ incumbent, challenger, policy: promotionPolicy });
+    if (!profitabilityFloor.passed) {
+      return {
+        recommendation: 'hold',
+        summary: `Profitability floor failed: ROI delta ${round(profitabilityFloor.roiDelta)} < ${profitabilityFloor.minRoiDeltaPct} or profit factor delta ${round(profitabilityFloor.pfDelta, 3)} < ${profitabilityFloor.minProfitFactorDelta}.`,
+        comparisons,
+        gates: { ...gates, profitabilityFloor: false },
+        failedGates: ['profitabilityFloor'],
+        thresholds: {
+          minScoreDelta,
+          minRoiDeltaPct,
+          minProfitFactorDelta,
+          maxDrawdownDeltaPct,
+          minTradeCount,
+          minTradeRatioVsIncumbent,
+          adjusted: adjustedThresholds,
+        },
+        complexity,
+        expectancy: expectancyGate,
+        expectancyGate,
+        profitabilityFloor,
+      };
+    }
+  }
+
   const recommendation = failedGates.length === 0 ? 'promote' : 'hold';
   const summary = recommendation === 'promote'
     ? `Promote challenger ${challenger.configId}: all promotion gates passed.`
@@ -468,7 +508,7 @@ export function decideAutoresearchOutcome({
     recommendation,
     summary,
     comparisons,
-    gates,
+    gates: profitabilityFloor ? { ...gates, profitabilityFloor: true } : gates,
     failedGates,
     thresholds: {
       minScoreDelta,
@@ -482,6 +522,7 @@ export function decideAutoresearchOutcome({
     complexity,
     expectancy: expectancyGate,
     expectancyGate,
+    profitabilityFloor,
   };
 }
 

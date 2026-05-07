@@ -323,8 +323,8 @@
       "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
-        "minRoiDeltaPct": 0,
-        "minProfitFactorDelta": 0,
+        "minRoiDeltaPct": 5,
+        "minProfitFactorDelta": 0.1,
         "maxDrawdownDeltaPct": 0.75,
         "minTradeCount": 60,
         "minTradeRatioVsIncumbent": 0.75
@@ -339,8 +339,8 @@
       "exchange": "default_exchange",
       "thresholds": {
         "minScoreDelta": 0,
-        "minRoiDeltaPct": 0,
-        "minProfitFactorDelta": 0,
+        "minRoiDeltaPct": 5,
+        "minProfitFactorDelta": 0.1,
         "maxDrawdownDeltaPct": 0.75,
         "minTradeCount": 60,
         "minTradeRatioVsIncumbent": 0.75
@@ -364,7 +364,11 @@
     },
     "promotion": {
       "allowAutomaticRegimeSwitching": false,
-      "requireGlobalChampionAnchor": true
+      "requireGlobalChampionAnchor": true,
+      "minRoiDeltaPct": 5,
+      "minProfitFactorDelta": 0.1,
+      "minTradeCount": 60,
+      "requireBlindHoldoutVerdict": true
     }
   }
 }

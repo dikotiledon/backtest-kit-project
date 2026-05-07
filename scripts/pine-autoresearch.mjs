@@ -207,6 +207,30 @@ function parseArgs(argv) {
   return out;
 }
 
+function isHelpRequest(argv = []) {
+  return argv.includes('--help') || argv.includes('-h') || argv[0] === 'help';
+}
+
+function formatAutoresearchHelp() {
+  return [
+    'Usage: node scripts/pine-autoresearch.mjs <command> [options]',
+    '',
+    'Commands:',
+    '  cycle        Run scout/autoresearch cycle (default)',
+    '  scout        Alias for cycle',
+    '  digest       Write digest from latest manifest',
+    '  promote      Promote queued manifest when gates pass',
+    '  autopromote  Evaluate promotion queue',
+    '',
+    'Options:',
+    '  --config <path>       Config file path',
+    '  --profile <name>      Profile name',
+    '  --force-cycle         Ignore cycle cadence guard',
+    '  --force               Operator force for explicitly forceable queue holds only',
+    '  --help, -h            Print this help before operational setup',
+  ].join('\n');
+}
+
 function resolveMaybeRelative(baseDir, value) {
   if (!value) return null;
   return path.isAbsolute(value) ? value : path.resolve(baseDir, value);
@@ -1888,7 +1912,13 @@ async function runAutopromote(config, args) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv.slice(2));
+  const rawArgs = process.argv.slice(2);
+  if (isHelpRequest(rawArgs)) {
+    console.log(formatAutoresearchHelp());
+    return;
+  }
+
+  const args = parseArgs(rawArgs);
   const command = args._[0] || 'cycle';
   const cwd = process.cwd();
   const config = await loadConfig(cwd, args.config, {

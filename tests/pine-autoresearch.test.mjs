@@ -84,6 +84,20 @@ async function runPwshFile(scriptPath, args = [], { cwd = repoRoot } = {}) {
   });
 }
 
+function spawnNode(args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, args, {
+      ...options,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += String(chunk); });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk); });
+    child.on('close', (status, signal) => resolve({ status, signal, stdout, stderr }));
+  });
+}
+
 async function readIfExists(filePath) {
   try {
     return await fs.readFile(filePath, 'utf8');
@@ -224,6 +238,20 @@ test('pine autoresearch exposes neutral evaluator seams for external lanes', () 
   assert.equal(typeof ensureChampionState, 'function');
   assert.equal(typeof latestManifestPath, 'function');
   assert.equal(typeof manifestsDir, 'function');
+});
+
+test('pine-autoresearch --help exits before config load or lock acquisition', async () => {
+  const result = await spawnNode([
+    path.join(repoRoot, 'scripts/pine-autoresearch.mjs'),
+    '--help',
+  ], {
+    cwd: repoRoot,
+    env: { ...process.env, PINE_AUTORESEARCH_TEST_TRACE_CONFIG_LOAD: '1' },
+  });
+
+  assert.equal(result.status, 0);
+  assert.match(result.stdout, /Usage:.*pine-autoresearch/i);
+  assert.doesNotMatch(result.stdout + result.stderr, /cycle=|lock|manifest=|recommendation=/i);
 });
 
 test('pine-autoresearch-run.ps1 parses cleanly', async () => {

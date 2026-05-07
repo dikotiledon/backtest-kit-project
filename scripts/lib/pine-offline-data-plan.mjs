@@ -13,7 +13,9 @@ export function buildOfflineDataPlan({ matrixId, pinnedData = {}, labs = [], off
       timeframe: lab.timeframe,
       limit: lab.limit,
       when: lab.when,
-      exchangeName: lab.exchange || pinnedData.exchangeName || 'ccxt-exchange',
+      exchangeName: pinnedData.enabled && pinnedData.exchangeName
+        ? pinnedData.exchangeName
+        : (lab.exchange || pinnedData.exchangeName || 'ccxt-exchange'),
       requiresCacheComplete: mode === 'offline-strict',
       complete: lab.complete ?? null,
       missingCount: lab.missingCount ?? 0,

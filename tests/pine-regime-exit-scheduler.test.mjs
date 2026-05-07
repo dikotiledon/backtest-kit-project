@@ -96,14 +96,54 @@ test('stagnation metadata strictPromotionGates only enabled at level 3', () => {
   assert.equal(STAGNATION_LANE_METADATA[3].strictPromotionGates, true);
 });
 
-test('selectNextResearchLane stagnation preferences 0/1/2/3', () => {
+test('selectNextResearchLane uses stagnation preferences as zero-debt tie breakers 0/1/2/3', () => {
   const lanesEnabled = { exploit: true, exitRegime: true, globalAllParameter: true, robustness: true };
-  const budgetDebt = { exploit: 999, exitRegime: 1, globalAllParameter: 1, robustness: 1 };
+  const budgetDebt = { exploit: 0, exitRegime: 0, globalAllParameter: 0, robustness: 0 };
 
   assert.equal(selectNextResearchLane({ stagnationLevel: 0, budgetDebt, lanesEnabled }), 'exitRegime');
   assert.equal(selectNextResearchLane({ stagnationLevel: 1, budgetDebt, lanesEnabled }), 'globalAllParameter');
   assert.equal(selectNextResearchLane({ stagnationLevel: 2, budgetDebt, lanesEnabled }), 'globalAllParameter');
   assert.equal(selectNextResearchLane({ stagnationLevel: 3, budgetDebt, lanesEnabled }), 'globalAllParameter');
+});
+
+test('selectNextResearchLane pays highest budget debt before preferred stagnation lane', () => {
+  const lane = selectNextResearchLane({
+    stagnationLevel: 0,
+    budgetDebt: {
+      exploit: 0,
+      exitRegime: 0,
+      globalAllParameter: 9,
+      robustness: 2,
+    },
+    lanesEnabled: {
+      exploit: true,
+      exitRegime: true,
+      globalAllParameter: true,
+      robustness: true,
+    },
+  });
+
+  assert.equal(lane, 'globalAllParameter');
+});
+
+test('selectNextResearchLane uses preferred lane as tie-breaker after debt', () => {
+  const lane = selectNextResearchLane({
+    stagnationLevel: 0,
+    budgetDebt: {
+      exploit: 0,
+      exitRegime: 0,
+      globalAllParameter: 0,
+      robustness: 0,
+    },
+    lanesEnabled: {
+      exploit: true,
+      exitRegime: true,
+      globalAllParameter: true,
+      robustness: true,
+    },
+  });
+
+  assert.equal(lane, 'exitRegime');
 });
 
 test('selectNextResearchLane preferred disabled fallback deterministic', () => {

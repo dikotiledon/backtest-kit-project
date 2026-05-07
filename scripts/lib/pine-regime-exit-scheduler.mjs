@@ -97,13 +97,17 @@ export function selectNextResearchLane({ stagnationLevel = 0, budgetDebt = {}, l
 
   if (candidates.length === 0) return enabledLanes.sort()[0];
 
-  if (candidates.includes(metadata.preferredLane)) return metadata.preferredLane;
+  const preferredLane = candidates.includes(metadata.preferredLane) ? metadata.preferredLane : null;
 
   candidates.sort((a, b) => {
     const debtA = Number(budgetDebt[a] ?? 0);
     const debtB = Number(budgetDebt[b] ?? 0);
 
     if (debtB !== debtA) return debtB - debtA;
+    if (preferredLane) {
+      if (a === preferredLane && b !== preferredLane) return -1;
+      if (b === preferredLane && a !== preferredLane) return 1;
+    }
     return priority.indexOf(a) - priority.indexOf(b);
   });
 

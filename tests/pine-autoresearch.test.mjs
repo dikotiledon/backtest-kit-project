@@ -529,8 +529,100 @@ test('promotion call sites pass holdout verdict required inputs', async () => {
   assert.match(matrixBlock, /blindHoldoutLabs:\s*config\.blindHoldoutLabs \?\? \[\]/);
 
   const blindHoldoutBlock = decisionBlocks.find((block) => block.includes('latest.holdoutVerdict ?? config.holdoutVerdict ?? null'));
-  assert.ok(blindHoldoutBlock, 'blind-holdout flow must pass available holdout verdict into outcome decision');
-  assert.match(blindHoldoutBlock, /blindHoldoutLabs:\s*labs/);
+  assert.ok(blindHoldoutBlock, 'blind-holdout flow must evaluate without self-requiring a prior holdout verdict');
+  assert.match(blindHoldoutBlock, /blindHoldoutLabs:\s*\[\]/);
+});
+
+test('blind-holdout run passes configured labs without prior verdict', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-blind-holdout-self-block-'));
+  try {
+    const scriptDir = path.join(dir, 'scripts');
+    const configPath = path.join(dir, 'config.json');
+    const strategyPath = path.join(dir, 'strategy.pine');
+    await fs.mkdir(scriptDir, { recursive: true });
+    await fs.writeFile(strategyPath, 'minPredSum = input.float(1.8, title="Min Prediction Sum")\n', 'utf8');
+    await fs.writeFile(path.join(scriptDir, 'pine-import-run-clean.mjs'), `
+import fs from 'node:fs/promises';
+import path from 'node:path';
+const args = process.argv.slice(2);
+const valueAfter = (flag) => args[args.indexOf(flag) + 1];
+const inputPath = valueAfter('--input');
+const outputBase = valueAfter('--output');
+const isChallenger = path.basename(inputPath).startsWith('challenger');
+const winReturnPct = isChallenger ? 2 : 1;
+const rows = [];
+let timestamp = Date.parse('2026-01-01T00:00:00.000Z');
+for (let i = 0; i < 120; i += 1) {
+  const win = i % 5 !== 4;
+  rows.push({ timestamp: new Date(timestamp).toISOString(), Close: 100, Signal: 1, EstimatedTime: 15 });
+  timestamp += 15 * 60 * 1000;
+  rows.push({ timestamp: new Date(timestamp).toISOString(), Close: win ? 100 + winReturnPct : 99, Signal: 0, EstimatedTime: 15 });
+  timestamp += 15 * 60 * 1000;
+}
+const dumpDir = path.join(path.dirname(inputPath), 'dump');
+await fs.mkdir(dumpDir, { recursive: true });
+await fs.writeFile(path.join(dumpDir, outputBase + '.cleaned.jsonl'), rows.map((row) => JSON.stringify(row)).join('\\n') + '\\n', 'utf8');
+`, 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'blind-holdout-self-block-test',
+      scriptPath: strategyPath,
+      grid: 'phase3-core',
+      minTrades: 10,
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 10,
+        minTradeRatioVsIncumbent: 0.75,
+      },
+      expectancyPolicy: { enabled: false },
+      primaryLab: { labId: 'Primary Lab', symbol: 'XRPUSDT', timeframe: '15m', limit: 240 },
+      blindHoldoutLabs: [
+        { labId: 'Blind Holdout Lab A', symbol: 'XRPUSDT', timeframe: '15m', limit: 240 },
+        { labId: 'Blind Holdout Lab B', symbol: 'XRPUSDT', timeframe: '15m', limit: 240 },
+      ],
+      blindHoldoutPolicy: { minShadowPassCount: 1, minShadowPassRatio: 1 },
+      outputs: {
+        researchRoot: path.join(dir, 'research'),
+        digestRoot: path.join(dir, 'digest'),
+      },
+      baseConfig: { minPredSum: 1.8 },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      configId: 'champion-a',
+      config: { minPredSum: 1.8 },
+      configFingerprint: 'champion-fp',
+    }), 'utf8');
+    await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({
+      runId: 'blind-holdout-source',
+      generatedAt: '2026-05-07T00:00:00.000Z',
+      champion: { configId: 'champion-a', config: { minPredSum: 1.8 }, configFingerprint: 'champion-fp' },
+      challenger: { configId: 'challenger-b', label: 'challenger-b', config: { minPredSum: 1.6 }, configFingerprint: 'challenger-fp' },
+    }), 'utf8');
+
+    const result = await spawnNode([
+      path.join(repoRoot, 'scripts/pine-autoresearch.mjs'),
+      'blind-holdout',
+      '--config',
+      configPath,
+    ], { cwd: dir, env: process.env });
+
+    assert.equal(result.status, 0, result.stderr || result.stdout);
+    assert.match(result.stdout, /blind-holdout=holdout_pass/);
+    const holdoutPath = result.stdout.match(/\[autoresearch\] holdout=(.+)/)?.[1]?.trim();
+    assert.ok(holdoutPath, result.stdout);
+    const payload = JSON.parse(await fs.readFile(holdoutPath, 'utf8'));
+    assert.equal(payload.status, 'holdout_pass');
+    assert.equal(payload.matrixDecision.recommendation, 'promote');
+    assert.equal(payload.labResults[0].decision.recommendation, 'promote');
+    assert.equal(payload.labResults[0].decision.failedGates.includes('holdoutVerdict'), false);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('decideAutoresearchOutcome recommends hold when trade ratio collapses', () => {

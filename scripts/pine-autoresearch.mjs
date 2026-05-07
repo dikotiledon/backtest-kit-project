@@ -1827,7 +1827,7 @@ async function runBlindHoldout(config) {
       expectancyPolicy: config.expectancyPolicy,
       complexityPolicy: config.complexityPolicy,
       holdoutVerdict: latest.holdoutVerdict ?? config.holdoutVerdict ?? null,
-      blindHoldoutLabs: labs,
+      blindHoldoutLabs: [],
     });
     labResults.push({
       lab,

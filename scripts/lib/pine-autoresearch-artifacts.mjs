@@ -114,3 +114,15 @@ export function findOrphanEvaluationRuns({ root }) {
 
   return { ok: orphans.length === 0, orphans };
 }
+
+export async function repairOrphanEvaluationRuns({ root, dryRun = true, reason = 'historical_orphan' }) {
+  const scan = findOrphanEvaluationRuns({ root });
+  const repaired = [];
+  if (!dryRun) {
+    for (const orphan of scan.orphans) {
+      await markAutoresearchRunIncomplete({ root, runId: orphan.runId, reason });
+      repaired.push(orphan.runId);
+    }
+  }
+  return { orphans: scan.orphans, repaired };
+}

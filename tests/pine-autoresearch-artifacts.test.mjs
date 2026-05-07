@@ -109,8 +109,15 @@ test('findOrphanEvaluationRuns reports evaluation dirs without manifest or incom
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
   fs.mkdirSync(path.join(root, 'evaluations', 'run-orphan'), { recursive: true });
   fs.mkdirSync(path.join(root, 'evaluations', 'run-complete'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'evaluations', 'run-incomplete'), { recursive: true });
   fs.mkdirSync(path.join(root, 'manifests'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'incomplete'), { recursive: true });
   fs.writeFileSync(path.join(root, 'manifests', 'run-complete.json'), JSON.stringify({ runId: 'run-complete' }), 'utf8');
+  fs.writeFileSync(
+    path.join(root, 'incomplete', 'run-incomplete.json'),
+    JSON.stringify({ runId: 'run-incomplete' }),
+    'utf8',
+  );
 
   const result = findOrphanEvaluationRuns({ root });
 

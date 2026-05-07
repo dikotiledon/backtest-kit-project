@@ -517,6 +517,22 @@ test('decideAutoresearchOutcome blocks promotion when blind holdout verdict requ
   assert.match(outcome.summary, /holdout verdict required/i);
 });
 
+test('promotion call sites pass holdout verdict required inputs', async () => {
+  const source = await fs.readFile(new URL('../scripts/pine-autoresearch.mjs', import.meta.url), 'utf8');
+  const decisionBlocks = [...source.matchAll(/const decision = decideAutoresearchOutcome\(\{\s*([\s\S]*?)\s*\}\);/g)]
+    .map((match) => match[1]);
+
+  assert.equal(decisionBlocks.length, 2);
+
+  const matrixBlock = decisionBlocks.find((block) => block.includes('config.holdoutVerdict ?? null'));
+  assert.ok(matrixBlock, 'evaluateMatrix must pass configured holdout verdict into outcome decision');
+  assert.match(matrixBlock, /blindHoldoutLabs:\s*config\.blindHoldoutLabs \?\? \[\]/);
+
+  const blindHoldoutBlock = decisionBlocks.find((block) => block.includes('latest.holdoutVerdict ?? config.holdoutVerdict ?? null'));
+  assert.ok(blindHoldoutBlock, 'blind-holdout flow must pass available holdout verdict into outcome decision');
+  assert.match(blindHoldoutBlock, /blindHoldoutLabs:\s*labs/);
+});
+
 test('decideAutoresearchOutcome recommends hold when trade ratio collapses', () => {
   const incumbent = makeResult({
     configId: 'incumbent',

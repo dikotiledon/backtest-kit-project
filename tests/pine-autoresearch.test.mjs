@@ -269,6 +269,80 @@ test('pine-autoresearch-run.ps1 parses cleanly', async () => {
   assert.equal(result.code, 0, result.stderr || result.stdout);
 });
 
+test('pine-autoresearch-scheduler-health.ps1 parses cleanly', async () => {
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-scheduler-health.ps1');
+  const command = `$null = $null; $errors = $null; [System.Management.Automation.Language.Parser]::ParseFile(${psSingleQuote(scriptPath)}, [ref]$null, [ref]$errors) | Out-Null; if ($errors.Count -gt 0) { $errors | ForEach-Object { Write-Host $_.Message }; exit 1 }`;
+  const result = await runPwsh(command);
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+});
+
+test('pine scheduler-health npm script points at health command', async () => {
+  const packageJson = JSON.parse(await fs.readFile(path.join(repoRoot, 'package.json'), 'utf8'));
+
+  assert.equal(
+    packageJson.scripts['pine:ops:scheduler-health'],
+    'pwsh -NoProfile -File ./scripts/ops/pine-autoresearch-scheduler-health.ps1',
+  );
+});
+
+test('pine-autoresearch-scheduler-health.ps1 reports healthy when lock is missing', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-scheduler-health-missing-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-scheduler-health.ps1');
+  const lockPath = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks', 'scheduler.lock');
+  const result = await runPwshFile(scriptPath, ['-RepoRoot', tempRoot], { cwd: repoRoot });
+
+  assert.equal(result.code, 0, result.stderr || result.stdout);
+  assert.match(result.stdout, new RegExp(`status=healthy reason=lock-missing lock=${lockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+});
+
+test('pine-autoresearch-scheduler-health.ps1 reports busy for a fresh live lock', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-scheduler-health-live-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-scheduler-health.ps1');
+  const lockDir = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks');
+  const lockPath = path.join(lockDir, 'scheduler.lock');
+  await fs.mkdir(lockDir, { recursive: true });
+  await fs.writeFile(lockPath, [
+    'task=live-check',
+    `pid=${process.pid}`,
+    `startedAt=${new Date().toISOString()}`,
+    '',
+  ].join('\n'), 'utf8');
+  const result = await runPwshFile(scriptPath, ['-RepoRoot', tempRoot], { cwd: repoRoot });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stdout, /status=busy reason=owner-active ownerAlive=True task=live-check/);
+  assert.match(result.stdout, new RegExp(`pid=${process.pid} lock=${lockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.notEqual(await readIfExists(lockPath), null);
+});
+
+test('pine-autoresearch-scheduler-health.ps1 inspects and reclaims a dead-owner lock', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-scheduler-health-stale-'));
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-scheduler-health.ps1');
+  const lockDir = path.join(tempRoot, 'tmp', 'pine-autoresearch-locks');
+  const lockPath = path.join(lockDir, 'scheduler.lock');
+  await fs.mkdir(lockDir, { recursive: true });
+  const lockPayload = [
+    'task=dead-check',
+    'pid=99999999',
+    `startedAt=${new Date(Date.now() - 13 * 60 * 60 * 1000).toISOString()}`,
+    '',
+  ].join('\n');
+  await fs.writeFile(lockPath, lockPayload, 'utf8');
+
+  const inspect = await runPwshFile(scriptPath, ['-RepoRoot', tempRoot], { cwd: repoRoot });
+  assert.equal(inspect.code, 2);
+  assert.match(inspect.stdout, /status=stale action=inspect-only reason=owner-dead ownerAlive=False task=dead-check pid=99999999/);
+  assert.match(inspect.stdout, new RegExp(`lock=${lockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.equal(await readIfExists(lockPath), lockPayload);
+
+  const reclaim = await runPwshFile(scriptPath, ['-RepoRoot', tempRoot, '-Reclaim'], { cwd: repoRoot });
+  assert.equal(reclaim.code, 0, reclaim.stderr || reclaim.stdout);
+  assert.match(reclaim.stdout, /status=reclaimed reason=owner-dead ownerAlive=False task=dead-check pid=99999999/);
+  assert.match(reclaim.stdout, new RegExp(`lock=${lockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+  assert.equal(await readIfExists(lockPath), null);
+});
+
 test('pine-autoresearch-run.ps1 dry-run skips lock acquisition', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-dry-'));
   const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');

@@ -29,6 +29,7 @@
     "pine:ops:remove-llm-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-llm-tasks.ps1",
     "pine:ops:install-tasks": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-tasks.ps1",
     "pine:ops:remove-tasks": "pwsh -NoProfile -File ./scripts/ops/remove-pine-autoresearch-tasks.ps1",
+    "pine:ops:scheduler-health": "pwsh -NoProfile -File ./scripts/ops/pine-autoresearch-scheduler-health.ps1",
     "pine:ops:install-force-cycle-task": "pwsh -NoProfile -File ./scripts/ops/install-pine-autoresearch-tasks.ps1 -EnableForceCycle -DisableMicro -DisableDigest",
     "test:pine:autoresearch:hardening": "node --test tests/pine-regime-exit-scheduler.test.mjs tests/pine-autoresearch-artifacts.test.mjs tests/pine-autoresearch-production-invariants.test.mjs tests/pine-autoresearch.test.mjs"
   },

@@ -105,6 +105,18 @@ test('validateLatestManifestPointer fails closed on stale pointer and runId mism
   assert.equal(stale.reason, 'latest_manifest_path_stale');
 });
 
+test('validateLatestManifestPointer rejects unsafe latest runId paths', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
+  fs.mkdirSync(path.join(root, 'manifests', 'nested'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'latest.json'), JSON.stringify({ runId: 'nested/run-escape' }), 'utf8');
+  fs.writeFileSync(path.join(root, 'manifests', 'nested', 'run-escape.json'), JSON.stringify({ runId: 'nested/run-escape' }), 'utf8');
+
+  const result = validateLatestManifestPointer({ root });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'latest_run_id_unsafe');
+});
+
 test('incomplete marker failure is recorded without masking original error', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
   const runId = 'run-marker-fails';

@@ -24,8 +24,17 @@ export async function beginAutoresearchRunArtifact({ root, runId, profile, now =
   return { startedPath };
 }
 
+export function isSafeAutoresearchRunId(runId) {
+  return typeof runId === 'string'
+    && runId.length > 0
+    && path.basename(runId) === runId
+    && !runId.includes('/')
+    && !runId.includes('\\')
+    && !runId.includes('..');
+}
+
 export function autoresearchManifestPath({ root, runId }) {
-  if (!runId) throw new Error('runId is required');
+  if (!isSafeAutoresearchRunId(runId)) throw new Error('runId is invalid');
   return path.join(root, 'manifests', `${runId}.json`);
 }
 
@@ -96,7 +105,8 @@ export function validateLatestManifestPointer({ root }) {
   }
   const runId = latest?.runId;
   if (!runId || typeof runId !== 'string') return { ok: false, reason: 'latest_run_id_missing', latestPath };
-  const manifestPath = path.join(root, 'manifests', `${runId}.json`);
+  if (!isSafeAutoresearchRunId(runId)) return { ok: false, reason: 'latest_run_id_unsafe', latestPath, runId };
+  const manifestPath = autoresearchManifestPath({ root, runId });
   if (!fsSync.existsSync(manifestPath)) return { ok: false, reason: 'latest_manifest_missing', latestPath, runId, manifestPath };
   let manifest;
   try {

@@ -10,6 +10,8 @@ The only scripts that touch real scheduled tasks are the install/remove wrappers
 
 Use `-WhatIf` first when you want a preview.
 
+Do not enable, disable, or trigger real Windows scheduled tasks from automation without explicit operator approval.
+
 ## Scheduled task wrappers
 
 Task prefix default: `BacktestKit-Pine`
@@ -29,16 +31,22 @@ pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -WhatIf
 pwsh -NoProfile -File .\scripts\ops\remove-pine-autoresearch-tasks.ps1 -WhatIf
 ```
 
-Install default shape:
+Recommended production shape after scheduler hardening is **Full + Digest**. Keep **Micro** manual-only unless you are intentionally smoke testing the scheduler path.
+
+Before enabling or triggering scheduled Full, verify pinned dataset/cache coverage and scheduler lock health:
 ```powershell
-pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1
+npm run pine:dataset:verify
+npm run pine:ops:scheduler-health
 ```
 
-Default install creates **micro + digest** only.
-
-Opt into full:
+If health reports `status=stale`, reclaim only after confirming the owner process is dead:
 ```powershell
-pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull
+npm run pine:ops:scheduler-health -- -Reclaim
+```
+
+Install production Full + Digest cadence:
+```powershell
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -DisableMicro
 ```
 
 Full-only shape:
@@ -57,6 +65,12 @@ pwsh -NoProfile -File .\scripts\ops\remove-pine-autoresearch-tasks.ps1
 ```
 
 ## Manual runs
+
+Validate the Full wrapper manually before enabling scheduler cadence:
+```powershell
+.\scripts\ops\pine-autoresearch-full.ps1 -RepoRoot D:\Code\Experiment\backtest-kit-project
+npm run pine:ops:scheduler-health
+```
 
 Direct wrapper runs:
 ```powershell
@@ -112,6 +126,14 @@ Overlap behavior:
 - busy JS lock -> command skips with `reason=locked`
 - stale wrapper lock -> wrapper logs `scheduler lock stale; reclaiming ...`
 - stale JS lock -> next eligible command reclaims it
+
+Use scheduler health before production changes so operators can distinguish `busy`, `stale`, and `reclaimed` lock states:
+```powershell
+npm run pine:ops:scheduler-health
+npm run pine:ops:scheduler-health -- -Reclaim
+```
+
+Micro runs every 15m by default, so it can collide with or add noisy skips while Full is still running. Production scheduler cadence should favor Full + Digest and leave Micro for intentional smoke tests.
 
 ## Logs and dry-run
 

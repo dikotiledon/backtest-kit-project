@@ -224,10 +224,11 @@ Backtest-kit candle cache used for strict replay:
 ## OpenClaw cron shape
 
 ### Recommended cadence
-- **Full scout**: hourly
-- **Micro scout**: disable when the objective is broad exploration instead of short-loop regression checking
-- **Digest**: optional, because `latest-digest.md` refreshes after each scout already
-- **Autopromote**: daily at 08:20 local machine time, opt-in only
+- **Full + Digest**: recommended production scheduler cadence after scheduler hardening.
+- **Micro scout**: keep manual-only unless intentionally smoke testing the scheduler path.
+- **Autopromote**: daily at 08:20 local machine time, opt-in only.
+
+Micro every 15m can collide with or add noisy skip logs while Full runs long. Scheduler lock health now distinguishes active `busy`, dead-owner `stale`, and post-reclaim `reclaimed` states, so operators should check health before changing production cadence.
 
 ### Windows task wrappers
 Concrete wrappers now live in:
@@ -249,19 +250,28 @@ Preview install without changing scheduler:
 pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -WhatIf
 ```
 
-Install micro + digest only:
+Do not enable, disable, or trigger real Windows scheduled tasks from automation without explicit operator approval.
+
+Before enabling or triggering scheduled Full, verify pinned dataset/cache coverage and scheduler lock health:
 ```bash
-pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1
+npm run pine:dataset:verify
+npm run pine:ops:scheduler-health
 ```
 
-Install hourly full only:
+If health reports `status=stale`, reclaim only after confirming the owner process is dead:
 ```bash
-pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -FullEveryHours 1 -DisableMicro -DisableDigest
+npm run pine:ops:scheduler-health -- -Reclaim
 ```
 
-Install full cadence with a custom hourly interval while keeping other jobs enabled:
+Validate the Full wrapper manually before enabling scheduler cadence:
 ```bash
-pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -FullEveryHours 1
+.\scripts\ops\pine-autoresearch-full.ps1 -RepoRoot D:\Code\Experiment\backtest-kit-project
+npm run pine:ops:scheduler-health
+```
+
+Install production Full + Digest cadence while keeping Micro manual-only:
+```bash
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -DisableMicro
 ```
 
 Install autopromote too:

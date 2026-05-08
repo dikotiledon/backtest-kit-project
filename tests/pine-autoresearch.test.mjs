@@ -48,6 +48,8 @@ import {
   buildOfflineDataMissingSkipResult,
   buildRegimeExitStateForScout,
   buildRegimeAwareSearchBatch,
+  collectTestedGlobalPatchFingerprints,
+  loadRecentCompletedManifestsForNovelty,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -240,6 +242,87 @@ test('pine autoresearch exposes neutral evaluator seams for external lanes', () 
   assert.equal(typeof ensureChampionState, 'function');
   assert.equal(typeof latestManifestPath, 'function');
   assert.equal(typeof manifestsDir, 'function');
+});
+
+test('collectTestedGlobalPatchFingerprints reads manifest searchPlan variants for same champion only', () => {
+  const currentChampion = { configId: 'champ-current' };
+  const manifests = [
+    {
+      champion: { configId: 'champ-current' },
+      searchPlan: {
+        variants: [
+          {
+            lane: 'globalAllParameter',
+            patchFingerprint: 'fp-current-a',
+            metadata: { patchFingerprint: 'fp-current-meta' },
+          },
+          {
+            lane: 'global-all-parameter',
+            patchFingerprint: 'fp-current-kebab',
+          },
+          {
+            lane: 'exitRegime',
+            patchFingerprint: 'fp-exit-regime',
+          },
+        ],
+      },
+    },
+    {
+      champion: { configId: 'other-champ' },
+      searchPlan: {
+        variants: [
+          { lane: 'globalAllParameter', patchFingerprint: 'fp-other' },
+        ],
+      },
+    },
+  ];
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: currentChampion,
+    manifests,
+  });
+
+  assert.deepEqual([...fingerprints].sort(), ['fp-current-a', 'fp-current-kebab', 'fp-current-meta']);
+});
+
+test('collectTestedGlobalPatchFingerprints accepts future history event manifests', () => {
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current' },
+    historyEvents: [
+      {
+        type: 'cycle-complete',
+        manifest: {
+          champion: { configId: 'champ-current' },
+          searchPlan: {
+            variants: [
+              { lane: 'globalAllParameter', patchFingerprint: 'fp-history' },
+            ],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], ['fp-history']);
+});
+
+test('loadRecentCompletedManifestsForNovelty reads recent manifests and ignores missing or malformed files', async () => {
+  const missingRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-novelty-missing-'));
+  assert.deepEqual(await loadRecentCompletedManifestsForNovelty({ config: { researchRoot: missingRoot } }), []);
+
+  const researchRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-novelty-manifests-'));
+  const config = { researchRoot };
+  const dir = manifestsDir(config);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, '001-old.json'), JSON.stringify({ runId: 'old' }), 'utf8');
+  await fs.writeFile(path.join(dir, '002-valid.json'), JSON.stringify({ runId: 'valid' }), 'utf8');
+  await fs.writeFile(path.join(dir, '003-malformed.json'), '{', 'utf8');
+  await fs.writeFile(path.join(dir, '004-new.json'), JSON.stringify({ runId: 'new' }), 'utf8');
+  await fs.writeFile(path.join(dir, 'ignored.txt'), JSON.stringify({ runId: 'ignored' }), 'utf8');
+
+  const manifests = await loadRecentCompletedManifestsForNovelty({ config, limit: 3 });
+
+  assert.deepEqual(manifests.map((manifest) => manifest.runId), ['valid', 'new']);
 });
 
 for (const helpArgs of [['--help'], ['-h'], ['help']]) {

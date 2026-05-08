@@ -674,6 +674,54 @@ export function manifestsDir(config) {
   return path.join(config.researchRoot, 'manifests');
 }
 
+function configIdentity(value) {
+  return value?.configId ?? value?.id ?? value?.name ?? value?.config?.configId ?? null;
+}
+
+function sameChampionIdentity(a, b) {
+  const left = configIdentity(a);
+  const right = configIdentity(b);
+  return left !== null && right !== null && left === right;
+}
+
+export async function loadRecentCompletedManifestsForNovelty({ config, limit = 24 } = {}) {
+  const safeLimit = Math.max(0, Math.floor(Number(limit) || 0));
+  if (safeLimit === 0) return [];
+  const files = (await listManifestFiles(config)).slice(-safeLimit);
+  const manifests = [];
+  for (const fileName of files) {
+    try {
+      manifests.push(await readJson(path.join(manifestsDir(config), fileName)));
+    } catch {
+      // Ignore corrupt or concurrently-pruned manifests; current cycle can still proceed.
+    }
+  }
+  return manifests;
+}
+
+export function collectTestedGlobalPatchFingerprints({ champion, historyEvents = [], manifests = [] } = {}) {
+  const fingerprints = new Set();
+  const sources = [
+    ...(Array.isArray(manifests) ? manifests : []),
+    ...(Array.isArray(historyEvents) ? historyEvents.map((event) => event?.manifest).filter(Boolean) : []),
+  ];
+
+  for (const manifest of sources) {
+    if (!sameChampionIdentity(champion, manifest?.champion ?? manifest?.incumbent)) continue;
+    const variants = Array.isArray(manifest?.searchPlan?.variants) ? manifest.searchPlan.variants : [];
+    for (const variant of variants) {
+      const lane = variant?.lane;
+      if (lane !== 'globalAllParameter' && lane !== 'global-all-parameter') continue;
+      const direct = variant?.patchFingerprint;
+      const metadata = variant?.metadata?.patchFingerprint;
+      if (typeof direct === 'string' && direct.length > 0) fingerprints.add(direct);
+      if (typeof metadata === 'string' && metadata.length > 0) fingerprints.add(metadata);
+    }
+  }
+
+  return fingerprints;
+}
+
 function hasUnsafeManifestRunId(runId) {
   const value = String(runId);
   return value.includes('/') || value.includes('\\') || value.includes('..');

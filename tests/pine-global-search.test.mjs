@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildGlobalMutationBatch, validateGlobalMutationPatch } from '../scripts/lib/pine-global-search.mjs';
+import {
+  buildGlobalMutationBatch,
+  buildGlobalPatchFingerprint,
+  validateGlobalMutationPatch,
+} from '../scripts/lib/pine-global-search.mjs';
 
 test('buildGlobalMutationBatch covers all declared supported families when requested', () => {
   const families = ['entry', 'filters', 'risk', 'fusion-weight', 'asymmetry', 'exit-state'];
@@ -107,4 +111,215 @@ test('frozen architecture key rejected when explicitly allowed', () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.reason, 'patch touches frozen key');
+});
+
+test('buildGlobalPatchFingerprint is stable and binds champion lane family and patch', () => {
+  const first = buildGlobalPatchFingerprint({
+    championId: 'champ-1',
+    lane: 'global-all-parameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2, adxThreshold: 22 },
+  });
+  const reordered = buildGlobalPatchFingerprint({
+    championId: 'champ-1',
+    lane: 'global-all-parameter',
+    mutationFamily: 'entry',
+    patch: { adxThreshold: 22, minPredSum: 2 },
+  });
+
+  assert.match(first, /^[a-f0-9]{64}$/);
+  assert.equal(first, reordered);
+  assert.notEqual(
+    first,
+    buildGlobalPatchFingerprint({
+      championId: 'champ-2',
+      lane: 'global-all-parameter',
+      mutationFamily: 'entry',
+      patch: { minPredSum: 2, adxThreshold: 22 },
+    }),
+  );
+  assert.notEqual(
+    first,
+    buildGlobalPatchFingerprint({
+      championId: 'champ-1',
+      lane: 'local',
+      mutationFamily: 'entry',
+      patch: { minPredSum: 2, adxThreshold: 22 },
+    }),
+  );
+  assert.notEqual(
+    first,
+    buildGlobalPatchFingerprint({
+      championId: 'champ-1',
+      lane: 'global-all-parameter',
+      mutationFamily: 'filters',
+      patch: { minPredSum: 2, adxThreshold: 22 },
+    }),
+  );
+  assert.notEqual(
+    first,
+    buildGlobalPatchFingerprint({
+      championId: 'champ-1',
+      lane: 'global-all-parameter',
+      mutationFamily: 'entry',
+      patch: { minPredSum: 2.2, adxThreshold: 22 },
+    }),
+  );
+});
+
+test('buildGlobalMutationBatch exposes stable patchFingerprint independent of object key order', () => {
+  const [first] = buildGlobalMutationBatch({
+    champion: {
+      configId: 'champ-1',
+      config: {
+        minPredSum: 1.8,
+        adxThreshold: 20,
+        slAtrMult: 0.5,
+        trailAtrMult: 1,
+        fusionV4LongAtrWeight: -0.25,
+        fusionV4LongEmaWeight: 0,
+        fusionV4ShortEmaWeight: 0,
+      },
+    },
+    maxConfigs: 1,
+    families: ['entry'],
+  });
+
+  const [second] = buildGlobalMutationBatch({
+    champion: {
+      configId: 'champ-1',
+      config: {
+        trailAtrMult: 1,
+        slAtrMult: 0.5,
+        adxThreshold: 20,
+        minPredSum: 1.8,
+        fusionV4ShortEmaWeight: 0,
+        fusionV4LongEmaWeight: 0,
+        fusionV4LongAtrWeight: -0.25,
+      },
+    },
+    maxConfigs: 1,
+    families: ['entry'],
+  });
+
+  assert.equal(typeof first.patchFingerprint, 'string');
+  assert.equal(first.patchFingerprint.length, 64);
+  assert.equal(first.patchFingerprint, second.patchFingerprint);
+  assert.equal(first.metadata.patchFingerprint, first.patchFingerprint);
+  assert.equal(first.metadata.mutationFamily, 'entry');
+});
+
+test('buildGlobalMutationBatch can emit deterministic ladder variants for one family', () => {
+  const batch = buildGlobalMutationBatch({
+    champion: {
+      configId: 'champ-ladder',
+      config: {
+        minPredSum: 1.8,
+        adxThreshold: 20,
+        slAtrMult: 0.5,
+        trailAtrMult: 1,
+        fusionV4LongAtrWeight: -0.25,
+        fusionV4LongEmaWeight: 0,
+        fusionV4ShortEmaWeight: 0,
+      },
+    },
+    maxConfigs: 3,
+    families: ['entry'],
+    variantsPerFamily: 3,
+  });
+
+  assert.equal(batch.length, 3);
+  assert.deepEqual(batch.map((item) => item.patch), [
+    { minPredSum: 2 },
+    { minPredSum: 1.6 },
+    { minPredSum: 2.2 },
+  ]);
+  assert.deepEqual(batch.map((item) => item.variantId), [
+    'global-all-parameter-entry-p01',
+    'global-all-parameter-entry-p02',
+    'global-all-parameter-entry-p03',
+  ]);
+  assert.equal(new Set(batch.map((item) => item.patchFingerprint)).size, 3);
+});
+
+test('buildGlobalMutationBatch skips previously tested patch fingerprints', () => {
+  const champion = {
+    configId: 'champ-novelty',
+    config: {
+      minPredSum: 1.8,
+      adxThreshold: 20,
+      slAtrMult: 0.5,
+      trailAtrMult: 1,
+      fusionV4LongAtrWeight: -0.25,
+      fusionV4LongEmaWeight: 0,
+      fusionV4ShortEmaWeight: 0,
+    },
+  };
+
+  const first = buildGlobalMutationBatch({
+    champion,
+    maxConfigs: 1,
+    families: ['entry'],
+    variantsPerFamily: 3,
+  });
+
+  const second = buildGlobalMutationBatch({
+    champion,
+    maxConfigs: 2,
+    families: ['entry'],
+    variantsPerFamily: 3,
+    testedPatchFingerprints: new Set([first[0].patchFingerprint]),
+  });
+
+  assert.equal(second.length, 2);
+  assert.deepEqual(second.map((item) => item.variantId), [
+    'global-all-parameter-entry-p02',
+    'global-all-parameter-entry-p03',
+  ]);
+  assert.equal(second.some((item) => item.patchFingerprint === first[0].patchFingerprint), false);
+});
+
+test('buildGlobalMutationBatch de-dupes same-batch patches and skips no-op patches', () => {
+  const duplicateBatch = buildGlobalMutationBatch({
+    champion: {
+      configId: 'champ-duplicate-boundary',
+      config: { minPredSum: 9.9 },
+    },
+    maxConfigs: 3,
+    families: ['entry'],
+    variantsPerFamily: 3,
+  });
+
+  assert.deepEqual(duplicateBatch.map((item) => item.variantId), [
+    'global-all-parameter-entry-p01',
+    'global-all-parameter-entry-p02',
+  ]);
+  assert.equal(new Set(duplicateBatch.map((item) => item.patchFingerprint)).size, duplicateBatch.length);
+
+  const champion = {
+    configId: 'champ-no-op-boundary',
+    config: {
+      minPredSum: 10,
+      adxThreshold: 100,
+      slAtrMult: 20,
+      trailAtrMult: 20,
+      fusionV4LongAtrWeight: 5,
+      fusionV4LongEmaWeight: 5,
+      fusionV4ShortEmaWeight: -5,
+    },
+  };
+  const noOpSkippedBatch = buildGlobalMutationBatch({
+    champion,
+    maxConfigs: 20,
+    families: ['entry', 'filters', 'risk', 'exit-state', 'asymmetry'],
+    variantsPerFamily: 3,
+  });
+
+  assert.equal(
+    noOpSkippedBatch.every((item) =>
+      Object.entries(item.patch).some(([key, value]) => !Object.is(champion.config[key], value)),
+    ),
+    true,
+  );
+  assert.equal(new Set(noOpSkippedBatch.map((item) => item.patchFingerprint)).size, noOpSkippedBatch.length);
 });

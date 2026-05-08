@@ -54,10 +54,12 @@ Full-only shape:
 pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -DisableMicro -DisableDigest -FullEveryHours 1
 ```
 
-Opt into autopromote:
+Opt into autopromote for production Full + Digest cadence while keeping Micro manual-only:
 ```powershell
-pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableAutopromote
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -DisableMicro -EnableAutopromote
 ```
+
+`-EnableAutopromote` alone uses the installer default shape (Micro + Digest + Autopromote), not the production Full + Digest cadence.
 
 Remove all default tasks:
 ```powershell

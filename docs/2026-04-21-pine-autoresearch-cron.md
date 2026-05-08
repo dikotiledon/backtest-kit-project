@@ -274,9 +274,9 @@ Install production Full + Digest cadence while keeping Micro manual-only:
 pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -DisableMicro
 ```
 
-Install autopromote too:
+Install production Full + Digest cadence with autopromote too:
 ```bash
-pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableAutopromote
+pwsh -NoProfile -File .\scripts\ops\install-pine-autoresearch-tasks.ps1 -EnableFull -DisableMicro -EnableAutopromote
 ```
 
 ### Scout job

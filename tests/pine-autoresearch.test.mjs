@@ -397,6 +397,38 @@ test('scheduler wrapper reports failure when command exits zero without manifest
   assert.match(result.stderr + result.stdout, /manifest.*missing|missing.*manifest/i);
 });
 
+test('scheduler wrapper validates required manifest JSON and runId', async () => {
+  const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
+
+  for (const [caseName, body, expected] of [
+    ['empty', '', /manifest is empty/i],
+    ['malformed', '{', /manifest is malformed/i],
+    ['array', '[]', /manifest must be a JSON object/i],
+    ['missing-run-id', '{}', /manifest missing runId/i],
+    ['mismatch', '{"runId":"other-run"}', /runId mismatch/i],
+  ]) {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), `pine-wrapper-manifest-${caseName}-`));
+    const manifestDir = path.join(tempRoot, 'manifests');
+    await fs.mkdir(manifestDir, { recursive: true });
+    await fs.writeFile(path.join(manifestDir, 'expected-run.json'), body, 'utf8');
+    const commandPath = path.join(tempRoot, 'fake-command.ps1');
+    await fs.writeFile(commandPath, 'exit 0\n', 'utf8');
+
+    const result = await runPwshFile(scriptPath, [
+      '-TaskName', `manifest-${caseName}`,
+      '-CommandPath', commandPath,
+      '-RepoRoot', tempRoot,
+      '-RequireManifest',
+      '-ManifestRoot', tempRoot,
+      '-ExpectedRunId', 'expected-run',
+      '-LockName', `Global\\BacktestKit-Pine-Autoresearch-Test-Manifest-${caseName}-${process.pid}`,
+    ], { cwd: repoRoot });
+
+    assert.notEqual(result.code, 0, `${caseName} should fail`);
+    assert.match(result.stderr + result.stdout, expected, caseName);
+  }
+});
+
 test('pine-autoresearch-run.ps1 drains stderr without pipe deadlock', async () => {
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-run-stderr-'));
   const scriptPath = path.join(repoRoot, 'scripts', 'ops', 'pine-autoresearch-run.ps1');
@@ -671,12 +703,13 @@ await fs.writeFile(path.join(dumpDir, outputBase + '.cleaned.jsonl'), rows.map((
       config: { minPredSum: 1.8 },
       configFingerprint: 'champion-fp',
     }), 'utf8');
-    await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({
+    await fs.writeFile(path.join(autoresearchCli.manifestsDir(config), 'blind-holdout-source.json'), JSON.stringify({
       runId: 'blind-holdout-source',
       generatedAt: '2026-05-07T00:00:00.000Z',
       champion: { configId: 'champion-a', config: { minPredSum: 1.8 }, configFingerprint: 'champion-fp' },
       challenger: { configId: 'challenger-b', label: 'challenger-b', config: { minPredSum: 1.6 }, configFingerprint: 'challenger-fp' },
     }), 'utf8');
+    await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({ runId: 'blind-holdout-source' }), 'utf8');
 
     const result = await spawnNode([
       path.join(repoRoot, 'scripts/pine-autoresearch.mjs'),
@@ -2639,6 +2672,75 @@ test('buildScoutOrchestrationState exposes stagnation metadata in manifest', () 
 });
 
 
+test('runPromote fails closed when latest pointer canonical manifest is invalid', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-latest-fail-'));
+  try {
+    const configPath = path.join(dir, 'config.json');
+    const scriptPath = path.join(dir, 'strategy.pine');
+    await fs.writeFile(scriptPath, 'minPredSum = input.float(1.8, title="Min Prediction Sum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'latest-fail-test',
+      scriptPath,
+      outputs: { researchRoot: path.join(dir, 'research'), digestRoot: path.join(dir, 'digest') },
+      baseConfig: { minPredSum: 1.8 },
+    }), 'utf8');
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      configId: 'champion-a',
+      config: { minPredSum: 1.8 },
+      configFingerprint: 'fp-a',
+    }), 'utf8');
+    await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({ runId: 'missing-canonical' }), 'utf8');
+
+    await assert.rejects(
+      () => autoresearchCli.runPromote(config, { force: false }, 'manual'),
+      /Invalid latest manifest pointer.*latest_manifest_missing/,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('runPromote preserves explicit manifest override when latest pointer is invalid', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-explicit-manifest-'));
+  try {
+    const configPath = path.join(dir, 'config.json');
+    const scriptPath = path.join(dir, 'strategy.pine');
+    await fs.writeFile(scriptPath, 'minPredSum = input.float(1.8, title="Min Prediction Sum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'explicit-manifest-test',
+      scriptPath,
+      outputs: { researchRoot: path.join(dir, 'research'), digestRoot: path.join(dir, 'digest') },
+      baseConfig: { minPredSum: 1.8 },
+    }), 'utf8');
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      configId: 'champion-a',
+      config: { minPredSum: 1.8 },
+      configFingerprint: 'fp-a',
+    }), 'utf8');
+    await fs.writeFile(autoresearchCli.latestManifestPath(config), '{', 'utf8');
+    const explicitPath = path.join(autoresearchCli.manifestsDir(config), 'explicit-run.json');
+    await fs.writeFile(explicitPath, JSON.stringify({
+      runId: 'explicit-run',
+      challenger: { configId: 'challenger-b', config: { minPredSum: 1.6 } },
+      championFingerprint: 'fp-a',
+      candidateFingerprint: 'fp-b',
+      matrixDecision: { recommendation: 'promote', summary: 'Promote challenger' },
+    }), 'utf8');
+
+    const result = await autoresearchCli.runPromote(config, { manifest: explicitPath, force: false }, 'manual');
+
+    assert.equal(result.promoted, true);
+    const champion = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'champion.json'), 'utf8'));
+    assert.equal(champion.sourceManifestPath, explicitPath);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('promotion history event records from/to fingerprints and family keys', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-lineage-promote-'));
   try {
@@ -2658,7 +2760,7 @@ test('promotion history event records from/to fingerprints and family keys', asy
 
     const config = await autoresearchCli.loadConfig(dir, configPath, {});
     await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
-    await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({
+    await fs.writeFile(path.join(autoresearchCli.manifestsDir(config), 'run-promote-lineage.json'), JSON.stringify({
       runId: 'run-promote-lineage',
       generatedAt: '2026-05-03T00:00:00.000Z',
       champion: { configId: 'champion-a', config: { minPredSum: 1.8 }, configFingerprint: 'fp-a' },
@@ -2669,6 +2771,7 @@ test('promotion history event records from/to fingerprints and family keys', asy
       championFamilyKey: 'family-a',
       matrixDecision: { recommendation: 'promote', summary: 'Promote challenger' },
     }), 'utf8');
+    await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({ runId: 'run-promote-lineage' }), 'utf8');
 
     await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
       configId: 'champion-a',

@@ -84,18 +84,36 @@ export async function markAutoresearchRunIncompleteUnlessManifestExists({ root, 
 
 export function validateLatestManifestPointer({ root }) {
   const latestPath = path.join(root, 'latest.json');
-  if (!fsSync.existsSync(latestPath)) return { ok: false, reason: 'latest_missing' };
+  if (!fsSync.existsSync(latestPath)) return { ok: false, reason: 'latest_missing', latestPath };
   let latest;
   try {
     latest = JSON.parse(fsSync.readFileSync(latestPath, 'utf8'));
   } catch (error) {
-    return { ok: false, reason: 'latest_invalid_json', error: String(error?.message || error) };
+    return { ok: false, reason: 'latest_invalid_json', latestPath, error: String(error?.message || error) };
+  }
+  if (!latest || typeof latest !== 'object' || Array.isArray(latest)) {
+    return { ok: false, reason: 'latest_invalid_shape', latestPath };
   }
   const runId = latest?.runId;
-  if (!runId) return { ok: false, reason: 'latest_run_id_missing' };
+  if (!runId || typeof runId !== 'string') return { ok: false, reason: 'latest_run_id_missing', latestPath };
   const manifestPath = path.join(root, 'manifests', `${runId}.json`);
-  if (!fsSync.existsSync(manifestPath)) return { ok: false, reason: 'latest_manifest_missing', runId, manifestPath };
-  return { ok: true, runId, manifestPath };
+  if (!fsSync.existsSync(manifestPath)) return { ok: false, reason: 'latest_manifest_missing', latestPath, runId, manifestPath };
+  let manifest;
+  try {
+    manifest = JSON.parse(fsSync.readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    return { ok: false, reason: 'latest_manifest_invalid_json', latestPath, runId, manifestPath, error: String(error?.message || error) };
+  }
+  if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) {
+    return { ok: false, reason: 'latest_manifest_invalid_shape', latestPath, runId, manifestPath };
+  }
+  if (manifest.runId !== runId) {
+    return { ok: false, reason: 'latest_manifest_run_id_mismatch', latestPath, runId, manifestRunId: manifest.runId, manifestPath };
+  }
+  if (latest.manifestPath && path.resolve(String(latest.manifestPath)) !== path.resolve(manifestPath)) {
+    return { ok: false, reason: 'latest_manifest_path_stale', latestPath, runId, manifestPath, pointerManifestPath: latest.manifestPath };
+  }
+  return { ok: true, runId, latestPath, manifestPath, latest, manifest: { ...manifest, manifestPath } };
 }
 
 export function findOrphanEvaluationRuns({ root }) {

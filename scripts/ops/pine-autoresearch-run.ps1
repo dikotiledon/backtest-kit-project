@@ -369,13 +369,41 @@ try {
       $manifestPath = Join-Path $ManifestRoot (Join-Path "manifests" ("$ExpectedRunId.json"))
       $incompletePath = Join-Path $ManifestRoot (Join-Path "incomplete" ("$ExpectedRunId.json"))
 
-      if (-not (Test-Path -LiteralPath $manifestPath)) {
+      if (-not (Test-Path -LiteralPath $manifestPath -PathType Leaf)) {
         if (Test-Path -LiteralPath $incompletePath) {
           Write-Error "autoresearch manifest missing; incomplete marker exists: $incompletePath" -ErrorAction Continue
         } else {
           Write-Error "autoresearch manifest missing and no incomplete marker exists: $manifestPath" -ErrorAction Continue
         }
         exit 65
+      }
+
+      $manifest = $null
+      try {
+        $manifestText = Get-Content -LiteralPath $manifestPath -Raw -ErrorAction Stop
+        if ([string]::IsNullOrWhiteSpace($manifestText)) {
+          Write-Error "autoresearch manifest is empty: $manifestPath" -ErrorAction Continue
+          exit 66
+        }
+        $manifest = $manifestText | ConvertFrom-Json -ErrorAction Stop
+      } catch {
+        Write-Error "autoresearch manifest is malformed: $manifestPath ($($_.Exception.Message))" -ErrorAction Continue
+        exit 66
+      }
+
+      if ($null -eq $manifest -or $manifest -is [array]) {
+        Write-Error "autoresearch manifest must be a JSON object: $manifestPath" -ErrorAction Continue
+        exit 66
+      }
+
+      if (-not ($manifest.PSObject.Properties.Name -contains 'runId') -or [string]::IsNullOrWhiteSpace([string]$manifest.runId)) {
+        Write-Error "autoresearch manifest missing runId: $manifestPath" -ErrorAction Continue
+        exit 66
+      }
+
+      if ([string]$manifest.runId -ne $ExpectedRunId) {
+        Write-Error "autoresearch manifest runId mismatch: expected $ExpectedRunId got $($manifest.runId) at $manifestPath" -ErrorAction Continue
+        exit 67
       }
     }
   } finally {

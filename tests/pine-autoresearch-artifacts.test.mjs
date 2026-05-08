@@ -75,6 +75,36 @@ test('validateLatestManifestPointer rejects latest pointer without manifest', as
   assert.equal(result.reason, 'latest_manifest_missing');
 });
 
+test('validateLatestManifestPointer resolves legacy latest pointer to canonical manifest', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
+  const runId = 'run-legacy';
+  fs.mkdirSync(path.join(root, 'manifests'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'latest.json'), JSON.stringify({ runId, staleSummary: 'ignored' }), 'utf8');
+  fs.writeFileSync(path.join(root, 'manifests', `${runId}.json`), JSON.stringify({ runId, canonical: true }), 'utf8');
+
+  const result = validateLatestManifestPointer({ root });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.manifest.canonical, true);
+  assert.equal(result.manifest.manifestPath, path.join(root, 'manifests', `${runId}.json`));
+});
+
+test('validateLatestManifestPointer fails closed on stale pointer and runId mismatch', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
+  fs.mkdirSync(path.join(root, 'manifests'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'latest.json'), JSON.stringify({ runId: 'run-a', manifestPath: path.join(root, 'manifests', 'run-old.json') }), 'utf8');
+  fs.writeFileSync(path.join(root, 'manifests', 'run-a.json'), JSON.stringify({ runId: 'run-b' }), 'utf8');
+
+  const mismatch = validateLatestManifestPointer({ root });
+  assert.equal(mismatch.ok, false);
+  assert.equal(mismatch.reason, 'latest_manifest_run_id_mismatch');
+
+  fs.writeFileSync(path.join(root, 'manifests', 'run-a.json'), JSON.stringify({ runId: 'run-a' }), 'utf8');
+  const stale = validateLatestManifestPointer({ root });
+  assert.equal(stale.ok, false);
+  assert.equal(stale.reason, 'latest_manifest_path_stale');
+});
+
 test('incomplete marker failure is recorded without masking original error', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifacts-'));
   const runId = 'run-marker-fails';

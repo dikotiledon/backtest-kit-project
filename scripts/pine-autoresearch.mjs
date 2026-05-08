@@ -1053,8 +1053,18 @@ async function listManifestFiles(config) {
 }
 
 async function readLatestManifest(config) {
+  const pointer = validateLatestManifestPointer({ root: config.researchRoot });
+  if (!pointer.ok) {
+    const error = new Error(`Invalid latest manifest pointer at ${latestManifestPath(config)}: ${pointer.reason}`);
+    error.latestManifestPointer = pointer;
+    throw error;
+  }
+  return pointer.manifest;
+}
+
+async function tryReadLatestManifest(config) {
   try {
-    return await readJson(latestManifestPath(config));
+    return await readLatestManifest(config);
   } catch {
     return null;
   }
@@ -1224,7 +1234,11 @@ async function seedChampionState(config) {
   let seedPayload = null;
   let seedReadError = null;
 
-  latest = await readLatestManifest(config);
+  try {
+    latest = await tryReadLatestManifest(config);
+  } catch {
+    latest = null;
+  }
 
   if (config.seedChampionPath) {
     try {

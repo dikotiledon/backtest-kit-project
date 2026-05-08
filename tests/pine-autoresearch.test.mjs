@@ -50,6 +50,8 @@ import {
   buildRegimeAwareSearchBatch,
   collectTestedGlobalPatchFingerprints,
   loadRecentCompletedManifestsForNovelty,
+  shouldSkipGlobalAllParameterSweep,
+  buildGlobalAllParameterExhaustedManifest,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -3562,6 +3564,177 @@ test('buildRegimeExitStateForScout reports exhausted globalAllParameter lane wit
   assert.equal(state.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
   assert.equal(state.shadowRegimeScoreboard.generatorSummary.exhausted, true);
   assert.equal(state.shadowRegimeScoreboard.generatorSummary.testedPatchFingerprintCount, 6);
+});
+
+function exhaustedGlobalAllParameterRegimeState(champion = globalAllParameterChampion('champ-exhausted-helper')) {
+  const allVariants = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 6,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+  return buildRegimeExitStateForScout({
+    config: {
+      matrixId: 'pine-autoresearch',
+      maxConfigs: 6,
+      regimeExitResearch: {
+        enabled: true,
+        globalAllParameterEnabled: true,
+        exitRegimeEnabled: false,
+        robustnessEnabled: false,
+      },
+    },
+    championState: champion,
+    searchBatch: [],
+    schedulerState: { stagnationLevel: 1, budgetDebt: { globalAllParameter: 0 } },
+    regimeExitContext: { recentManifestsForNovelty: [globalAllParameterManifest({ champion, variants: allVariants })] },
+  });
+}
+
+test('shouldSkipGlobalAllParameterSweep returns true only for exhausted empty globalAllParameter sweep', () => {
+  const champion = globalAllParameterChampion('champ-skip-helper');
+  const regimeExitState = exhaustedGlobalAllParameterRegimeState(champion);
+
+  assert.equal(shouldSkipGlobalAllParameterSweep({ regimeExitState, searchBatch: [] }), true);
+  assert.equal(shouldSkipGlobalAllParameterSweep({ regimeExitState, searchBatch: [{ variantId: 'novel' }] }), false);
+  assert.equal(shouldSkipGlobalAllParameterSweep({ regimeExitState: { ...regimeExitState, enabled: false }, searchBatch: [] }), false);
+  assert.equal(shouldSkipGlobalAllParameterSweep({
+    regimeExitState: {
+      ...regimeExitState,
+      shadowRegimeScoreboard: {
+        ...regimeExitState.shadowRegimeScoreboard,
+        selectedLane: 'exitRegime',
+      },
+    },
+    searchBatch: [],
+  }), false);
+});
+
+test('buildGlobalAllParameterExhaustedManifest records exhausted globalAllParameter evidence', () => {
+  const champion = globalAllParameterChampion('champ-exhausted-manifest');
+  const regimeExitState = exhaustedGlobalAllParameterRegimeState(champion);
+  const manifest = buildGlobalAllParameterExhaustedManifest({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8 },
+    },
+    runId: 'run-exhausted-manifest',
+    championState: champion,
+    regimeExitState,
+    schedulerState: { noNewCandidateStreak: 2, stagnationLevel: 1 },
+  });
+
+  assert.equal(manifest.globalNoveltyGuardVersion, 1);
+  assert.equal(manifest.searchPlan.variantCount, 0);
+  assert.deepEqual(manifest.searchPlan.variants, []);
+  assert.equal(manifest.matrixDecision.recommendation, 'hold');
+  assert.equal(manifest.matrixDecision.reason, 'global-all-parameter-exhausted');
+  assert.equal(manifest.primarySweep, null);
+  assert.equal(manifest.noNewCandidate, true);
+  assert.equal(manifest.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
+  assert.equal(manifest.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
+  assert.equal(manifest.shadowRegimeScoreboard.generatorSummary.testedPatchFingerprintCount, 6);
+});
+
+test('runScout skips primary sweep and updates scheduler state when globalAllParameter is exhausted', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-global-exhausted-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-exhausted-runscout-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        exitRegimeEnabled: false,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: false,
+        offline: { mode: 'local-first' },
+      },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-exhausted');
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-exhausted-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 0 },
+      noNewCandidateStreak: 0,
+      globalAllParameterVariantsPerFamily: 1,
+    }), 'utf8');
+
+    const allVariants = buildRegimeAwareSearchBatch({
+      selectedLane: 'globalAllParameter',
+      champion,
+      maxConfigs: 6,
+      regimeExitResearch: { enabled: true },
+      policy: { globalAllParameterVariantsPerFamily: 1 },
+    });
+    await fs.writeFile(
+      path.join(autoresearchCli.manifestsDir(config), '000-prior-global.json'),
+      JSON.stringify(globalAllParameterManifest({ champion, variants: allVariants })),
+      'utf8',
+    );
+
+    const sweepCalls = [];
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async (...args) => {
+        sweepCalls.push(args);
+        throw new Error('primary sweep must not run when globalAllParameter is exhausted');
+      },
+    });
+
+    assert.deepEqual(sweepCalls, []);
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'global-all-parameter-exhausted');
+    assert.equal(result.manifest.globalNoveltyGuardVersion, 1);
+    assert.equal(result.manifest.searchPlan.variantCount, 0);
+    assert.deepEqual(result.manifest.searchPlan.variants, []);
+    assert.equal(result.manifest.matrixDecision.reason, 'global-all-parameter-exhausted');
+    assert.equal(result.manifest.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
+    assert.equal(result.manifestPath, path.join(autoresearchCli.manifestsDir(config), `${result.manifest.runId}.json`));
+
+    const variantFilePath = path.join(config.researchRoot, `${result.manifest.runId}-variants.json`);
+    assert.equal(await readIfExists(variantFilePath), null);
+
+    const schedulerState = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), 'utf8'));
+    assert.equal(schedulerState.noNewCandidateStreak, 1);
+    assert.equal(schedulerState.lastChampionFingerprint, schedulerState.lastCandidateFingerprint);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 

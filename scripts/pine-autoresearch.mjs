@@ -283,6 +283,121 @@ export function buildRegimeExitStateForScout({
   };
 }
 
+export function shouldSkipGlobalAllParameterSweep({ regimeExitState, searchBatch = [] } = {}) {
+  const scoreboard = regimeExitState?.shadowRegimeScoreboard;
+  const generatorSummary = scoreboard?.generatorSummary;
+  return regimeExitState?.enabled === true
+    && scoreboard?.selectedLane === 'globalAllParameter'
+    && Array.isArray(searchBatch)
+    && searchBatch.length === 0
+    && generatorSummary?.exhausted === true
+    && generatorSummary?.countSource === 'exhausted';
+}
+
+export function buildGlobalAllParameterExhaustedManifest({
+  config = {},
+  runId,
+  championState,
+  regimeExitState = {},
+  schedulerState = {},
+  trackState = {},
+} = {}) {
+  const championSummary = summarizeResult(championState);
+  const normalizedRegimeExitState = { ...DEFAULT_REGIME_EXIT_STATE, ...(regimeExitState || {}) };
+  const generatedAt = isoNow();
+
+  return {
+    generatedAt,
+    matrixId: config.matrixId,
+    runId,
+    profile: config.selectedProfile,
+    primaryLab: config.primaryLab ?? null,
+    shadowLabs: config.shadowLabs ?? [],
+    blindHoldoutLabs: config.blindHoldoutLabs ?? [],
+    incumbent: championSummary,
+    champion: championSummary,
+    challenger: championSummary,
+    primarySweep: null,
+    searchPlan: {
+      mode: config.searchPolicy?.mode ?? null,
+      exploitRatio: config.searchPolicy?.exploitRatio ?? null,
+      variantCount: 0,
+      variants: [],
+    },
+    paretoShortlist: [],
+    matrixCandidates: [],
+    labResults: [],
+    matrixDecision: {
+      recommendation: 'hold',
+      reason: 'global-all-parameter-exhausted',
+      summary: 'Hold: globalAllParameter novel patch space exhausted for current champion.',
+    },
+    researchState: {
+      steadyState: true,
+      noChangeStreak: Number(schedulerState?.noChangeStreak ?? 0) + 1,
+    },
+    noNewCandidate: true,
+    noNewCandidateStreak: Number(schedulerState?.noNewCandidateStreak ?? 0) + 1,
+    stagnationLevel: schedulerState?.stagnationLevel ?? 0,
+    stagnationReason: 'globalAllParameterExhausted',
+    globalNoveltyGuardVersion: 1,
+    activeTrackId: trackState.activeTrackId ?? null,
+    windowSetId: trackState.windowSetId ?? null,
+    noveltySignature: trackState.noveltySignature ?? null,
+    rotationTrigger: trackState.rotationTrigger ?? null,
+    rotationReason: trackState.rotationReason ?? 'global-all-parameter-exhausted',
+    sameTrackCycleStreak: trackState.sameTrackCycleStreak ?? 0,
+    topCandidateSimilarity: null,
+    promotionEligible: false,
+    promotionEligibleReason: 'global-all-parameter-exhausted',
+    candidateFingerprint: trackState.candidateFingerprint ?? null,
+    rejectedCandidateFingerprint: null,
+    championFingerprint: trackState.championFingerprint ?? null,
+    labSetId: trackState.labSetId ?? null,
+    gridName: trackState.gridName ?? config.grid ?? null,
+    researchBudgetMode: normalizedRegimeExitState.researchBudgetMode ?? 'regime-exit',
+    resourceBudget: normalizedRegimeExitState.resourceBudget ?? null,
+    resourceUsageSummary: normalizedRegimeExitState.resourceUsageSummary ?? null,
+    checkpointState: normalizedRegimeExitState.checkpointState ?? null,
+    objectiveBreakdown: normalizedRegimeExitState.objectiveBreakdown ?? null,
+    multipleTestingPenalty: normalizedRegimeExitState.multipleTestingPenalty ?? null,
+    holdoutVerdict: normalizedRegimeExitState.holdoutVerdict ?? null,
+    offlineDataSummary: normalizedRegimeExitState.offlineDataSummary ?? null,
+    shadowRegimeScoreboard: normalizedRegimeExitState.shadowRegimeScoreboard ?? null,
+  };
+}
+
+export function buildGlobalAllParameterExhaustedSchedulerManifestInput({
+  manifest = {},
+  championState = {},
+  trackState = {},
+} = {}) {
+  const championFingerprint = trackState.championFingerprint
+    ?? (championState?.config ? configFingerprint(championState.config) : manifest.championFingerprint ?? null);
+  const candidateFingerprint = trackState.candidateFingerprint ?? championFingerprint;
+  return {
+    activeTrackId: manifest.activeTrackId ?? trackState.activeTrackId ?? null,
+    candidateFingerprint,
+    rejectedCandidateFingerprint: null,
+    championFingerprint,
+    noveltySignature: manifest.noveltySignature ?? trackState.noveltySignature ?? null,
+    topCandidateSimilarity: null,
+    rotationTrigger: manifest.rotationTrigger ?? trackState.rotationTrigger ?? null,
+    rotationReason: manifest.rotationReason ?? trackState.rotationReason ?? 'global-all-parameter-exhausted',
+    sameTrackCycleStreak: manifest.sameTrackCycleStreak ?? trackState.sameTrackCycleStreak ?? 0,
+    promotionEligible: false,
+    promotionEligibleReason: 'global-all-parameter-exhausted',
+    noNewCandidate: true,
+    stagnationLevel: manifest.stagnationLevel ?? 0,
+    stagnationReason: manifest.stagnationReason ?? 'globalAllParameterExhausted',
+    lastEscalatedAt: manifest.lastEscalatedAt ?? null,
+    generatedAt: manifest.generatedAt,
+    windowSetId: manifest.windowSetId ?? trackState.windowSetId ?? null,
+    labSetId: manifest.labSetId ?? trackState.labSetId ?? null,
+    gridName: manifest.gridName ?? trackState.gridName ?? null,
+  };
+}
+
 function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
@@ -1554,7 +1669,8 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
   };
 }
 
-export async function runScout(config) {
+export async function runScout(config, dependencies = {}) {
+  const runPrimarySweepFn = dependencies.runPrimarySweep || runPrimarySweep;
   await ensureDirs(config);
   const queue = await readPromotionQueue(promotionQueueFilePath(config));
   const pendingPromotion = selectNextPendingPromotion(queue);
@@ -1697,8 +1813,76 @@ export async function runScout(config) {
     totalCombos,
   });
   const variantFilePath = path.join(trackedConfig.researchRoot, `${runId}-variants.json`);
+  const regimeExitStateBeforeSweep = buildRegimeExitStateForScout({
+    config: trackedConfig,
+    championState,
+    historyEventsBefore,
+    searchBatch: searchVariants,
+    offlineDataSummary,
+    schedulerState,
+    regimeExitContext: regimeNoveltyContext,
+  });
+
+  if (shouldSkipGlobalAllParameterSweep({ regimeExitState: regimeExitStateBeforeSweep, searchBatch: searchVariants })) {
+    const championFingerprint = configFingerprint(championState.config);
+    const exhaustedManifest = buildGlobalAllParameterExhaustedManifest({
+      config: trackedConfig,
+      runId,
+      championState,
+      regimeExitState: regimeExitStateBeforeSweep,
+      schedulerState,
+      trackState: {
+        activeTrackId,
+        windowSetId,
+        rotationTrigger: hardRotationTrigger,
+        rotationReason: 'global-all-parameter-exhausted',
+        candidateFingerprint: championFingerprint,
+        championFingerprint,
+        labSetId,
+        gridName,
+      },
+    });
+    const updatedSchedulerState = nextTrackState({
+      state: schedulerState,
+      policy: rotationPolicy,
+      manifest: buildGlobalAllParameterExhaustedSchedulerManifestInput({
+        manifest: exhaustedManifest,
+        championState,
+      }),
+    });
+    await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
+    const finalExhaustedManifest = applySchedulerStateToManifest(exhaustedManifest, updatedSchedulerState);
+    const finalizedArtifact = await finalizeAutoresearchManifest({
+      root: trackedConfig.researchRoot,
+      manifest: finalExhaustedManifest,
+    });
+    manifestFinalized = true;
+    await appendJsonl(historyPath(trackedConfig), {
+      timestamp: finalExhaustedManifest.generatedAt,
+      type: 'cycle',
+      runId,
+      championConfigId: finalExhaustedManifest.champion?.configId,
+      challengerConfigId: finalExhaustedManifest.challenger?.configId,
+      recommendation: finalExhaustedManifest.matrixDecision.recommendation,
+      summary: finalExhaustedManifest.matrixDecision.summary,
+      noNewCandidate: true,
+      noNewCandidateStreak: finalExhaustedManifest.noNewCandidateStreak,
+      stagnationLevel: finalExhaustedManifest.stagnationLevel,
+      stagnationReason: finalExhaustedManifest.stagnationReason,
+      globalNoveltyGuardVersion: finalExhaustedManifest.globalNoveltyGuardVersion,
+    });
+    const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
+    await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest: finalExhaustedManifest }));
+    return {
+      skipped: true,
+      reason: 'global-all-parameter-exhausted',
+      manifest: finalExhaustedManifest,
+      manifestPath: finalizedArtifact.manifestPath,
+    };
+  }
+
   await writeJson(variantFilePath, searchVariants);
-  const primarySweep = await runPrimarySweep(trackedConfig, runId, { sweepOffset, totalCombos, variantFilePath });
+  const primarySweep = await runPrimarySweepFn(trackedConfig, runId, { sweepOffset, totalCombos, variantFilePath });
   const paretoShortlist = buildParetoShortlist({
     champion: summarizeResult(championState),
     rankedResults: primarySweep.topConfigs,
@@ -1745,15 +1929,7 @@ export async function runScout(config) {
       ? 1
       : 0;
 
-  const regimeExitState = buildRegimeExitStateForScout({
-    config: trackedConfig,
-    championState,
-    historyEventsBefore,
-    searchBatch: searchVariants,
-    offlineDataSummary,
-    schedulerState,
-    regimeExitContext: regimeNoveltyContext,
-  });
+  const regimeExitState = regimeExitStateBeforeSweep;
 
   const orchestration = buildScoutOrchestrationState({
     config: trackedConfig,

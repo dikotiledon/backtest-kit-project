@@ -116,22 +116,30 @@ export function buildRegimeAwareSearchBatch({
   }
 
   if (regimeExitResearch?.enabled === true && selectedLane === 'globalAllParameter') {
+    const testedPatchFingerprints = collectTestedGlobalPatchFingerprints({
+      champion,
+      historyEvents,
+      manifests: policy?.recentManifestsForNovelty || [],
+    });
     const candidates = buildGlobalMutationBatch({
       champion,
       maxConfigs: safeMaxConfigs,
       historyEvents,
       schedulerState,
       policy,
+      testedPatchFingerprints,
+      variantsPerFamily: policy?.globalAllParameterVariantsPerFamily
+        ?? schedulerState?.globalAllParameterVariantsPerFamily
+        ?? 4,
     });
-    if (Array.isArray(candidates) && candidates.length > 0) {
-      return candidates.slice(0, safeMaxConfigs).map((candidate, index) => ({
-        ...candidate,
-        lane: 'globalAllParameter',
-        family: candidate.family || 'global',
-        variantId: candidate.variantId || `global-all-${String(index + 1).padStart(2, '0')}`,
-        index,
-      }));
-    }
+    return (Array.isArray(candidates) ? candidates : []).slice(0, safeMaxConfigs).map((candidate, index) => ({
+      ...candidate,
+      lane: 'globalAllParameter',
+      family: candidate.family || 'global',
+      variantId: candidate.variantId || `global-all-${String(index + 1).padStart(2, '0')}`,
+      index,
+      patchFingerprint: candidate.patchFingerprint ?? candidate.metadata?.patchFingerprint ?? null,
+    }));
   }
 
   return buildIncumbentSearchBatch({
@@ -143,19 +151,43 @@ export function buildRegimeAwareSearchBatch({
   });
 }
 
-function summarizeRegimeLaneGenerator({ selectedLane, searchBatch = [] } = {}) {
+function summarizeRegimeLaneGenerator({
+  selectedLane,
+  searchBatch = [],
+  championState = null,
+  historyEvents = [],
+  testedPatchFingerprints = null,
+  recentManifestsForNovelty = [],
+  maxNovelCandidates = null,
+} = {}) {
   const generatedForLane = Array.isArray(searchBatch)
     ? searchBatch.filter((variant) => variant?.lane === selectedLane)
     : [];
+  const knownFingerprints = testedPatchFingerprints instanceof Set
+    ? testedPatchFingerprints
+    : Array.isArray(testedPatchFingerprints)
+      ? new Set(testedPatchFingerprints.filter(Boolean))
+      : collectTestedGlobalPatchFingerprints({
+          champion: championState,
+          historyEvents,
+          manifests: recentManifestsForNovelty,
+        });
+  const exhausted = selectedLane === 'globalAllParameter'
+    && generatedForLane.length === 0
+    && knownFingerprints.size > 0;
 
   return {
     lane: selectedLane || null,
     laneKind: selectedLane || null,
     candidateCount: generatedForLane.length,
-    previewOnly: generatedForLane.length === 0,
-    countSource: generatedForLane.length > 0 ? 'generatedVariants' : 'none',
+    previewOnly: exhausted ? false : generatedForLane.length === 0,
+    countSource: exhausted ? 'exhausted' : (generatedForLane.length > 0 ? 'generatedVariants' : 'none'),
     blockedFamilyCount: null,
+    exhausted,
+    testedPatchFingerprintCount: knownFingerprints.size,
+    maxNovelCandidates,
     variantIds: generatedForLane.map((variant) => variant.variantId).filter(Boolean).slice(0, 20),
+    patchFingerprints: generatedForLane.map((variant) => variant.patchFingerprint).filter(Boolean).slice(0, 20),
   };
 }
 
@@ -166,6 +198,7 @@ export function buildRegimeExitStateForScout({
   searchBatch = [],
   offlineDataSummary = null,
   schedulerState = {},
+  regimeExitContext = {},
 } = {}) {
   if (!config?.regimeExitResearch?.enabled) return null;
 
@@ -192,6 +225,10 @@ export function buildRegimeExitStateForScout({
     championState,
     config,
     searchBatch,
+    historyEvents: historyEventsBefore,
+    recentManifestsForNovelty: regimeExitContext?.recentManifestsForNovelty || [],
+    testedPatchFingerprints: regimeExitContext?.testedPatchFingerprints || null,
+    maxNovelCandidates: config?.maxConfigs ?? null,
   });
 
   const mode = regimeConfig.offline?.mode || null;
@@ -572,7 +609,15 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
         mode: config.searchPolicy.mode,
         exploitRatio: config.searchPolicy.exploitRatio,
         variantCount: searchBatch.length,
-        variants: searchBatch.map(({ variantId, lane, family, config: variantConfig }) => ({ variantId, lane, family, config: variantConfig })),
+        variants: searchBatch.map((variant) => ({
+          variantId: variant?.variantId,
+          lane: variant?.lane,
+          family: variant?.family,
+          patch: variant?.patch,
+          patchFingerprint: variant?.patchFingerprint ?? variant?.metadata?.patchFingerprint ?? null,
+          metadata: variant?.metadata,
+          config: variant?.config,
+        })),
       },
       paretoShortlist,
       matrixCandidates: matrixCandidates.map((item) => ({
@@ -1596,6 +1641,25 @@ export async function runScout(config) {
         schedulerState,
       });
 
+  const recentManifestsForNovelty = await loadRecentCompletedManifestsForNovelty({
+    config: trackedConfig,
+    limit: trackedConfig.rotationPolicy?.tabuBootstrapManifestLimit ?? 24,
+  });
+  const championSource = { configId: championState.configId, config: championState.config };
+  const testedGlobalPatchFingerprints = collectTestedGlobalPatchFingerprints({
+    champion: championSource,
+    historyEvents: historyEventsBefore,
+    manifests: recentManifestsForNovelty,
+  });
+  const regimeNoveltyContext = {
+    recentManifestsForNovelty,
+    testedPatchFingerprints: testedGlobalPatchFingerprints,
+  };
+  const searchPolicyWithNovelty = {
+    ...trackedConfig.searchPolicy,
+    recentManifestsForNovelty,
+  };
+
   const regimeExitStateSeed = buildRegimeExitStateForScout({
     config: trackedConfig,
     championState,
@@ -1608,16 +1672,18 @@ export async function runScout(config) {
 
   const regimeAwareSearchBatch = buildRegimeAwareSearchBatch({
     selectedLane: selectedRegimeLane,
-    champion: championState.config,
+    champion: championSource,
     maxConfigs: trackedConfig.maxConfigs,
     historyEvents: historyEventsBefore,
-    policy: trackedConfig.searchPolicy,
+    policy: searchPolicyWithNovelty,
     schedulerState,
     regimeExitResearch: trackedConfig.regimeExitResearch,
   });
-  const generatedRegimeLane = trackedConfig.regimeExitResearch?.enabled === true
-    && ['exitRegime', 'globalAllParameter'].includes(selectedRegimeLane)
-    && regimeAwareSearchBatch.some((variant) => variant?.lane === selectedRegimeLane);
+  const selectedGeneratedRegimeLane = trackedConfig.regimeExitResearch?.enabled === true
+    && ['exitRegime', 'globalAllParameter'].includes(selectedRegimeLane);
+  const generatedRegimeLane = selectedGeneratedRegimeLane
+    && (selectedRegimeLane === 'globalAllParameter'
+      || regimeAwareSearchBatch.some((variant) => variant?.lane === selectedRegimeLane));
 
   const searchVariants = generatedRegimeLane
     ? regimeAwareSearchBatch
@@ -1686,6 +1752,7 @@ export async function runScout(config) {
     searchBatch: searchVariants,
     offlineDataSummary,
     schedulerState,
+    regimeExitContext: regimeNoveltyContext,
   });
 
   const orchestration = buildScoutOrchestrationState({

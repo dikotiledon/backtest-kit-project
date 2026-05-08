@@ -3374,6 +3374,196 @@ test('buildRegimeAwareSearchBatch injects selected exitRegime candidates', () =>
   assert.ok(batch.every((variant) => variant.patch && Object.keys(variant.patch).length > 0));
 });
 
+function globalAllParameterChampion(configId = 'champ-repeat') {
+  return {
+    configId,
+    config: {
+      minPredSum: 1.8,
+      adxThreshold: 20,
+      slAtrMult: 0.5,
+      trailAtrMult: 1,
+      fusionV4LongAtrWeight: -0.25,
+      fusionV4LongEmaWeight: 0,
+      fusionV4ShortEmaWeight: 0,
+    },
+  };
+}
+
+function globalAllParameterManifest({ champion, variants }) {
+  return {
+    champion: { configId: champion.configId },
+    searchPlan: {
+      variants: variants.map((variant) => ({
+        lane: variant.lane,
+        patchFingerprint: variant.patchFingerprint,
+        metadata: variant.metadata,
+      })),
+    },
+  };
+}
+
+function buildGlobalAllParameterScoutManifest({ champion, searchBatch }) {
+  return buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-global-manifest',
+    championState: champion,
+    historyEventsBefore: [],
+    searchBatch,
+    primarySweep: {
+      topConfigs: [
+        { configId: champion.configId, score: 70, roiPct: 40, profitFactor: 1.5, maxDrawdownPct: 5, tradeCount: 200, config: { ...champion.config } },
+      ],
+    },
+    matrixCandidates: [],
+  }).manifest;
+}
+
+test('buildScoutOrchestrationState persists global patch fingerprints from real searchBatch input', () => {
+  const champion = globalAllParameterChampion('champ-real-manifest-persist');
+  const searchBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 2,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+
+  const manifest = buildGlobalAllParameterScoutManifest({ champion, searchBatch });
+  const persisted = manifest.searchPlan.variants;
+
+  assert.equal(searchBatch.length, 2);
+  assert.ok(searchBatch.every((variant) => variant.patchFingerprint));
+  assert.ok(searchBatch.every((variant) => variant.metadata?.patchFingerprint));
+  assert.deepEqual(persisted.map((variant) => variant.variantId), searchBatch.map((variant) => variant.variantId));
+  assert.deepEqual(persisted.map((variant) => variant.lane), ['globalAllParameter', 'globalAllParameter']);
+  assert.deepEqual(persisted.map((variant) => variant.family), searchBatch.map((variant) => variant.family));
+  assert.deepEqual(persisted.map((variant) => variant.patch), searchBatch.map((variant) => variant.patch));
+  assert.deepEqual(persisted.map((variant) => variant.patchFingerprint), searchBatch.map((variant) => variant.patchFingerprint));
+  assert.deepEqual(persisted.map((variant) => variant.metadata?.patchFingerprint), searchBatch.map((variant) => variant.metadata.patchFingerprint));
+  assert.deepEqual(persisted.map((variant) => variant.config), searchBatch.map((variant) => variant.config));
+});
+
+test('collectTestedGlobalPatchFingerprints reads fingerprints from buildScoutOrchestrationState manifest', () => {
+  const champion = globalAllParameterChampion('champ-real-manifest-collect');
+  const searchBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 2,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+  const manifest = buildGlobalAllParameterScoutManifest({ champion, searchBatch });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion,
+    manifests: [manifest],
+  });
+
+  assert.deepEqual([...fingerprints].sort(), searchBatch.map((variant) => variant.patchFingerprint).sort());
+});
+
+test('buildRegimeAwareSearchBatch skips duplicate globalAllParameter variants from history and manifests', () => {
+  const champion = globalAllParameterChampion('champ-repeat');
+  const first = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 2,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 3 },
+  });
+  const manifest = globalAllParameterManifest({ champion, variants: [first[0]] });
+  const historyEvents = [{ type: 'cycle-complete', manifest: globalAllParameterManifest({ champion, variants: [first[1]] }) }];
+
+  const second = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 2,
+    historyEvents,
+    regimeExitResearch: { enabled: true },
+    policy: {
+      globalAllParameterVariantsPerFamily: 3,
+      recentManifestsForNovelty: [manifest],
+    },
+  });
+
+  assert.equal(second.length, 2);
+  assert.equal(second.some((variant) => first.some((old) => old.patchFingerprint === variant.patchFingerprint)), false);
+});
+
+test('buildRegimeAwareSearchBatch returns exhausted globalAllParameter [] and does not fall back', () => {
+  const champion = globalAllParameterChampion('champ-exhausted-no-fallback');
+  const allVariants = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 6,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+  const manifest = globalAllParameterManifest({ champion, variants: allVariants });
+
+  const exhausted = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 6,
+    regimeExitResearch: { enabled: true },
+    policy: {
+      globalAllParameterVariantsPerFamily: 1,
+      recentManifestsForNovelty: [manifest],
+    },
+  });
+
+  assert.equal(allVariants.length, 6);
+  assert.deepEqual(exhausted, []);
+});
+
+test('buildRegimeExitStateForScout reports exhausted globalAllParameter lane with manifest-derived evidence', () => {
+  const champion = globalAllParameterChampion('champ-exhausted-summary');
+  const allVariants = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 6,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+  const recentManifestsForNovelty = [globalAllParameterManifest({ champion, variants: allVariants })];
+
+  const state = buildRegimeExitStateForScout({
+    config: {
+      maxConfigs: 6,
+      regimeExitResearch: {
+        enabled: true,
+        globalAllParameterEnabled: true,
+        exitRegimeEnabled: false,
+        robustnessEnabled: false,
+      },
+    },
+    championState: champion,
+    historyEventsBefore: [],
+    searchBatch: [],
+    schedulerState: {
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 0 },
+    },
+    regimeExitContext: { recentManifestsForNovelty },
+  });
+
+  assert.equal(state.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.candidateCount, 0);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.previewOnly, false);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.exhausted, true);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.testedPatchFingerprintCount, 6);
+});
+
 
 test('runScout offline-strict missing branch appends cycle history and returns skipped payload', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-offline-missing-'));

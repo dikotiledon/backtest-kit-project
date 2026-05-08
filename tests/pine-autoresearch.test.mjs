@@ -3442,6 +3442,7 @@ test('buildScoutOrchestrationState persists global patch fingerprints from real 
   const manifest = buildGlobalAllParameterScoutManifest({ champion, searchBatch });
   const persisted = manifest.searchPlan.variants;
 
+  assert.equal(manifest.globalNoveltyGuardVersion, 1);
   assert.equal(searchBatch.length, 2);
   assert.ok(searchBatch.every((variant) => variant.patchFingerprint));
   assert.ok(searchBatch.every((variant) => variant.metadata?.patchFingerprint));

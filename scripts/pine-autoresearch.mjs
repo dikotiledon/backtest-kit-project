@@ -720,6 +720,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       champion: championSummary,
       challenger: challengerSummary,
       primarySweep,
+      globalNoveltyGuardVersion: 1,
       searchPlan: {
         mode: config.searchPolicy.mode,
         exploitRatio: config.searchPolicy.exploitRatio,

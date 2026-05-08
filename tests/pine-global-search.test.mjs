@@ -2,10 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  buildChampionConfigFingerprint,
   buildGlobalMutationBatch,
   buildGlobalPatchFingerprint,
   validateGlobalMutationPatch,
 } from '../scripts/lib/pine-global-search.mjs';
+import { configFingerprint } from '../scripts/lib/pine-autoresearch.mjs';
 
 test('buildGlobalMutationBatch covers all declared supported families when requested', () => {
   const families = ['entry', 'filters', 'risk', 'fusion-weight', 'asymmetry', 'exit-state'];
@@ -113,15 +115,16 @@ test('frozen architecture key rejected when explicitly allowed', () => {
   assert.equal(result.reason, 'patch touches frozen key');
 });
 
-test('buildGlobalPatchFingerprint is stable and binds champion lane family and patch', () => {
+test('buildGlobalPatchFingerprint is stable and binds champion config lane family and patch', () => {
+  const championConfigFingerprint = configFingerprint({ minPredSum: 1.8, adxThreshold: 20 });
   const first = buildGlobalPatchFingerprint({
-    championId: 'champ-1',
+    championConfigFingerprint,
     lane: 'global-all-parameter',
     mutationFamily: 'entry',
     patch: { minPredSum: 2, adxThreshold: 22 },
   });
   const reordered = buildGlobalPatchFingerprint({
-    championId: 'champ-1',
+    championConfigFingerprint,
     lane: 'global-all-parameter',
     mutationFamily: 'entry',
     patch: { adxThreshold: 22, minPredSum: 2 },
@@ -132,7 +135,7 @@ test('buildGlobalPatchFingerprint is stable and binds champion lane family and p
   assert.notEqual(
     first,
     buildGlobalPatchFingerprint({
-      championId: 'champ-2',
+      championConfigFingerprint: configFingerprint({ minPredSum: 1.9, adxThreshold: 20 }),
       lane: 'global-all-parameter',
       mutationFamily: 'entry',
       patch: { minPredSum: 2, adxThreshold: 22 },
@@ -141,7 +144,7 @@ test('buildGlobalPatchFingerprint is stable and binds champion lane family and p
   assert.notEqual(
     first,
     buildGlobalPatchFingerprint({
-      championId: 'champ-1',
+      championConfigFingerprint,
       lane: 'local',
       mutationFamily: 'entry',
       patch: { minPredSum: 2, adxThreshold: 22 },
@@ -150,7 +153,7 @@ test('buildGlobalPatchFingerprint is stable and binds champion lane family and p
   assert.notEqual(
     first,
     buildGlobalPatchFingerprint({
-      championId: 'champ-1',
+      championConfigFingerprint,
       lane: 'global-all-parameter',
       mutationFamily: 'filters',
       patch: { minPredSum: 2, adxThreshold: 22 },
@@ -159,12 +162,107 @@ test('buildGlobalPatchFingerprint is stable and binds champion lane family and p
   assert.notEqual(
     first,
     buildGlobalPatchFingerprint({
-      championId: 'champ-1',
+      championConfigFingerprint,
       lane: 'global-all-parameter',
       mutationFamily: 'entry',
       patch: { minPredSum: 2.2, adxThreshold: 22 },
     }),
   );
+});
+
+test('buildGlobalPatchFingerprint rejects configId-only v2 fingerprints', () => {
+  assert.throws(
+    () => buildGlobalPatchFingerprint({
+      championId: 'legacy-config-id-only',
+      lane: 'global-all-parameter',
+      mutationFamily: 'entry',
+      patch: { minPredSum: 2 },
+    }),
+    /championConfigFingerprint is required/,
+  );
+});
+
+test('buildGlobalPatchFingerprint binds championConfigFingerprint not mutable configId', () => {
+  const championConfigFingerprint = configFingerprint({ minPredSum: 1.8, adxThreshold: 20 });
+  const first = buildGlobalPatchFingerprint({
+    championId: 'champ-old-id',
+    championConfigFingerprint,
+    lane: 'global-all-parameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+  const renamed = buildGlobalPatchFingerprint({
+    championId: 'champ-new-id',
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  assert.equal(first, renamed);
+});
+
+test('buildGlobalPatchFingerprint changes when same configId has different championConfigFingerprint', () => {
+  const first = buildGlobalPatchFingerprint({
+    championId: 'reused-id',
+    championConfigFingerprint: configFingerprint({ minPredSum: 1.8, adxThreshold: 20 }),
+    lane: 'global-all-parameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+  const changedConfig = buildGlobalPatchFingerprint({
+    championId: 'reused-id',
+    championConfigFingerprint: configFingerprint({ minPredSum: 2.4, adxThreshold: 20 }),
+    lane: 'global-all-parameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  assert.notEqual(first, changedConfig);
+});
+
+test('buildGlobalMutationBatch metadata includes originConfigId championConfigFingerprint and patchFingerprintVersion', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const [item] = buildGlobalMutationBatch({
+    champion: {
+      configId: 'mutable-label',
+      config: championConfig,
+    },
+    maxConfigs: 1,
+    families: ['entry'],
+  });
+
+  assert.equal(item.metadata.originConfigId, 'mutable-label');
+  assert.equal(item.metadata.championConfigFingerprint, configFingerprint(championConfig));
+  assert.equal(item.metadata.patchFingerprintVersion, 2);
+  assert.equal(item.metadata.patchFingerprint, item.patchFingerprint);
+  assert.equal(item.metadata.mutationFamily, 'entry');
+});
+
+
+test('buildGlobalMutationBatch computes championConfigFingerprint from current config before stale inherited metadata', () => {
+  const currentConfig = { configId: 'same-id', minPredSum: 2.4, adxThreshold: 20 };
+  const staleConfigFingerprint = buildChampionConfigFingerprint({ configId: 'same-id', minPredSum: 1.8, adxThreshold: 20 });
+  const currentConfigFingerprint = buildChampionConfigFingerprint(currentConfig);
+  const [item] = buildGlobalMutationBatch({
+    champion: {
+      configId: 'same-id',
+      config: currentConfig,
+      metadata: { championConfigFingerprint: staleConfigFingerprint },
+      championConfigFingerprint: staleConfigFingerprint,
+    },
+    maxConfigs: 1,
+    families: ['entry'],
+  });
+
+  assert.equal(item.metadata.championConfigFingerprint, currentConfigFingerprint);
+  assert.notEqual(item.metadata.championConfigFingerprint, staleConfigFingerprint);
+  assert.equal(item.patchFingerprint, buildGlobalPatchFingerprint({
+    championConfigFingerprint: currentConfigFingerprint,
+    lane: 'global-all-parameter',
+    mutationFamily: 'entry',
+    patch: item.patch,
+  }));
 });
 
 test('buildGlobalMutationBatch exposes stable patchFingerprint independent of object key order', () => {

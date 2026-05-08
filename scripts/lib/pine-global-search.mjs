@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 const GENERATOR_VERSION = 'global-search-v1';
+export const PATCH_FINGERPRINT_VERSION = 2;
 const DEFAULT_FAMILIES = ['entry', 'filters', 'risk', 'fusion-weight', 'asymmetry', 'exit-state'];
 const POSITIVE_KEYS = new Set([
   'minPredSum',
@@ -58,9 +59,77 @@ function stableJson(value) {
   return JSON.stringify(value);
 }
 
-export function buildGlobalPatchFingerprint({ championId = null, lane, mutationFamily, patch } = {}) {
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map((item) => stableValue(item));
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = stableValue(value[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+const CONFIG_IDENTITY_KEYS = new Set([
+  'configId',
+  'id',
+  'name',
+  'label',
+  'sourcePath',
+  'sourceRunId',
+  'promotedAt',
+  'configFingerprint',
+  'championConfigFingerprint',
+]);
+
+function stripConfigIdentity(value) {
+  if (Array.isArray(value)) return value.map((item) => stripConfigIdentity(item));
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        if (CONFIG_IDENTITY_KEYS.has(key)) return acc;
+        acc[key] = stripConfigIdentity(value[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+export function buildChampionConfigFingerprint(config = {}) {
+  return JSON.stringify(stableValue(stripConfigIdentity(config || {})));
+}
+
+function canonicalGlobalLane(lane) {
+  if (lane === 'globalAllParameter' || lane === 'global-all-parameter') return 'global-all-parameter';
+  return lane ?? null;
+}
+
+export function buildGlobalPatchFingerprint({ championConfigFingerprint = null, lane, mutationFamily, patch } = {}) {
+  if (typeof championConfigFingerprint !== 'string' || championConfigFingerprint.length === 0) {
+    throw new Error('championConfigFingerprint is required for global patch fingerprint v2');
+  }
   return createHash('sha256')
-    .update(stableJson({ championId: championId ?? null, lane, mutationFamily, patch: patch || {} }))
+    .update(stableJson({
+      championConfigFingerprint,
+      lane: canonicalGlobalLane(lane),
+      mutationFamily,
+      patch: Object.fromEntries(toPatchEntries(patch || {})),
+    }))
+    .digest('hex');
+}
+
+export function buildLegacyGlobalPatchFingerprint({ championId = null, lane, mutationFamily, patch } = {}) {
+  return createHash('sha256')
+    .update(stableJson({
+      championConfigFingerprint: null,
+      legacyChampionId: championId ?? null,
+      lane: canonicalGlobalLane(lane),
+      mutationFamily,
+      patch: Object.fromEntries(toPatchEntries(patch || {})),
+    }))
     .digest('hex');
 }
 
@@ -185,6 +254,12 @@ export function buildGlobalMutationBatch({
   );
   const emittedFingerprints = new Set();
   const originConfigId = source?.configId ?? source?.config?.configId ?? config?.configId ?? null;
+  const hasExplicitConfig = Boolean(source?.config && typeof source.config === 'object' && !Array.isArray(source.config));
+  const hasInheritedConfigFingerprint = typeof source?.championConfigFingerprint === 'string'
+    || typeof source?.metadata?.championConfigFingerprint === 'string';
+  const championConfigFingerprint = (hasExplicitConfig || !hasInheritedConfigFingerprint)
+    ? buildChampionConfigFingerprint(config)
+    : (source?.championConfigFingerprint ?? source?.metadata?.championConfigFingerprint ?? null);
   const out = [];
   const lane = 'global-all-parameter';
 
@@ -199,7 +274,7 @@ export function buildGlobalMutationBatch({
       if (!validation.ok) continue;
 
       const patchFingerprint = buildGlobalPatchFingerprint({
-        championId: originConfigId,
+        championConfigFingerprint,
         lane,
         mutationFamily: family,
         patch: normalizedPatch,
@@ -227,7 +302,9 @@ export function buildGlobalMutationBatch({
           originConfigId,
           generatorVersion: GENERATOR_VERSION,
           mutationFamily: family,
+          championConfigFingerprint,
           patchFingerprint,
+          patchFingerprintVersion: PATCH_FINGERPRINT_VERSION,
           ladderLevel: level,
         },
       });

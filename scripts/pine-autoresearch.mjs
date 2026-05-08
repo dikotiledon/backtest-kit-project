@@ -68,7 +68,11 @@ import { buildCandidateFamilyKey, summarizePromotionLineage } from './lib/pine-a
 import { normalizeRegimeExitResearchConfig } from './lib/pine-regime-exit-config.mjs';
 import { allocateRegimeExitLaneBudget, selectNextResearchLane } from './lib/pine-regime-exit-scheduler.mjs';
 import { buildExitFamilyCandidates } from './lib/pine-exit-generators.mjs';
-import { buildGlobalMutationBatch } from './lib/pine-global-search.mjs';
+import {
+  buildChampionConfigFingerprint,
+  buildGlobalMutationBatch,
+  buildGlobalPatchFingerprint,
+} from './lib/pine-global-search.mjs';
 
 const DEFAULT_REGIME_EXIT_STATE = {
   enabled: false,
@@ -835,14 +839,31 @@ export function manifestsDir(config) {
   return path.join(config.researchRoot, 'manifests');
 }
 
-function configIdentity(value) {
-  return value?.configId ?? value?.id ?? value?.name ?? value?.config?.configId ?? null;
+function championConfigIdentity(value) {
+  if (!value || typeof value !== 'object') return null;
+  if (value.config && typeof value.config === 'object' && !Array.isArray(value.config)) {
+    return buildChampionConfigFingerprint(value.config);
+  }
+  if (typeof value.championConfigFingerprint === 'string' && value.championConfigFingerprint.length > 0) {
+    return value.championConfigFingerprint;
+  }
+  if (typeof value.metadata?.championConfigFingerprint === 'string' && value.metadata.championConfigFingerprint.length > 0) {
+    return value.metadata.championConfigFingerprint;
+  }
+  return null;
 }
 
-function sameChampionIdentity(a, b) {
-  const left = configIdentity(a);
-  const right = configIdentity(b);
-  return left !== null && right !== null && left === right;
+function manifestChampionConfigIdentity(manifest) {
+  if (!manifest || typeof manifest !== 'object') return null;
+  const championIdentity = championConfigIdentity(manifest.champion ?? manifest.incumbent);
+  if (championIdentity !== null) return championIdentity;
+  if (typeof manifest.championConfigFingerprint === 'string' && manifest.championConfigFingerprint.length > 0) {
+    return manifest.championConfigFingerprint;
+  }
+  if (typeof manifest.metadata?.championConfigFingerprint === 'string' && manifest.metadata.championConfigFingerprint.length > 0) {
+    return manifest.metadata.championConfigFingerprint;
+  }
+  return null;
 }
 
 export async function loadRecentCompletedManifestsForNovelty({ config, limit = 24 } = {}) {
@@ -860,23 +881,82 @@ export async function loadRecentCompletedManifestsForNovelty({ config, limit = 2
   return manifests;
 }
 
+function isGlobalAllParameterLane(lane) {
+  return lane === 'globalAllParameter' || lane === 'global-all-parameter';
+}
+
+function variantChampionConfigIdentity(variant) {
+  const value = variant?.metadata?.championConfigFingerprint ?? variant?.championConfigFingerprint ?? null;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function variantMutationFamily(variant) {
+  const value = variant?.mutationFamily ?? variant?.metadata?.mutationFamily ?? variant?.family ?? null;
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function reconstructGlobalPatchFingerprint({ variant, championConfigFingerprint } = {}) {
+  const lane = variant?.lane;
+  const mutationFamily = variantMutationFamily(variant);
+  const patch = variant?.patch;
+  if (!isGlobalAllParameterLane(lane)) return null;
+  if (typeof championConfigFingerprint !== 'string' || championConfigFingerprint.length === 0) return null;
+  if (!mutationFamily) return null;
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return null;
+  try {
+    return buildGlobalPatchFingerprint({ championConfigFingerprint, lane, mutationFamily, patch });
+  } catch {
+    return null;
+  }
+}
+
+function variantStoredV2Fingerprints(variant) {
+  const version = variant?.patchFingerprintVersion ?? variant?.metadata?.patchFingerprintVersion ?? null;
+  if (Number(version) !== 2) return [];
+  return [variant?.patchFingerprint, variant?.metadata?.patchFingerprint]
+    .filter((value) => typeof value === 'string' && value.length > 0);
+}
+
 export function collectTestedGlobalPatchFingerprints({ champion, historyEvents = [], manifests = [] } = {}) {
   const fingerprints = new Set();
+  const currentChampionConfigFingerprint = championConfigIdentity(champion);
   const sources = [
     ...(Array.isArray(manifests) ? manifests : []),
     ...(Array.isArray(historyEvents) ? historyEvents.map((event) => event?.manifest).filter(Boolean) : []),
   ];
 
   for (const manifest of sources) {
-    if (!sameChampionIdentity(champion, manifest?.champion ?? manifest?.incumbent)) continue;
+    const manifestChampionConfigFingerprint = manifestChampionConfigIdentity(manifest);
+    const manifestMatchesChampion = currentChampionConfigFingerprint !== null
+      && manifestChampionConfigFingerprint !== null
+      && manifestChampionConfigFingerprint === currentChampionConfigFingerprint;
     const variants = Array.isArray(manifest?.searchPlan?.variants) ? manifest.searchPlan.variants : [];
     for (const variant of variants) {
-      const lane = variant?.lane;
-      if (lane !== 'globalAllParameter' && lane !== 'global-all-parameter') continue;
-      const direct = variant?.patchFingerprint;
-      const metadata = variant?.metadata?.patchFingerprint;
-      if (typeof direct === 'string' && direct.length > 0) fingerprints.add(direct);
-      if (typeof metadata === 'string' && metadata.length > 0) fingerprints.add(metadata);
+      if (!isGlobalAllParameterLane(variant?.lane)) continue;
+
+      const variantChampionConfigFingerprint = variantChampionConfigIdentity(variant);
+      const variantMatchesChampion = currentChampionConfigFingerprint !== null
+        && variantChampionConfigFingerprint !== null
+        && variantChampionConfigFingerprint === currentChampionConfigFingerprint;
+      if (!manifestMatchesChampion && !variantMatchesChampion) continue;
+
+      const fingerprintChampionConfig = variantChampionConfigFingerprint
+        ?? manifestChampionConfigFingerprint;
+      if (fingerprintChampionConfig === null) continue;
+      if (fingerprintChampionConfig !== currentChampionConfigFingerprint) continue;
+
+      const reconstructed = reconstructGlobalPatchFingerprint({
+        variant,
+        championConfigFingerprint: fingerprintChampionConfig,
+      });
+      if (reconstructed) {
+        fingerprints.add(reconstructed);
+        continue;
+      }
+
+      for (const stored of variantStoredV2Fingerprints(variant)) {
+        fingerprints.add(stored);
+      }
     }
   }
 

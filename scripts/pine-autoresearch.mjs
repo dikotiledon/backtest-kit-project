@@ -66,7 +66,7 @@ import {
 } from './lib/pine-autoresearch-tracks.mjs';
 import { buildCandidateFamilyKey, summarizePromotionLineage } from './lib/pine-autoresearch-lineage.mjs';
 import { normalizeRegimeExitResearchConfig } from './lib/pine-regime-exit-config.mjs';
-import { allocateRegimeExitLaneBudget, selectNextResearchLane } from './lib/pine-regime-exit-scheduler.mjs';
+import { allocateRegimeExitLaneBudget, resolveExhaustedResearchLanes, selectNextResearchLane } from './lib/pine-regime-exit-scheduler.mjs';
 import { buildExitFamilyCandidates } from './lib/pine-exit-generators.mjs';
 import {
   buildChampionConfigFingerprint,
@@ -86,6 +86,22 @@ const DEFAULT_REGIME_EXIT_STATE = {
   offlineDataSummary: null,
   shadowRegimeScoreboard: null,
 };
+
+function resolveRegimeLaneEnabled(regimeConfig = {}) {
+  const lanes = regimeConfig.lanes || regimeConfig.budget || {};
+  const ratioEnabled = (key) => !Number.isFinite(Number(lanes[key])) || Number(lanes[key]) > 0;
+  return {
+    exploit: regimeConfig.exploitEnabled !== false && ratioEnabled('exploitRatio'),
+    exitRegime: regimeConfig.exitRegimeEnabled !== false && ratioEnabled('exitRegimeRatio'),
+    globalAllParameter: regimeConfig.globalAllParameterEnabled !== false && ratioEnabled('globalAllParameterRatio'),
+    robustness: regimeConfig.robustnessLadderEnabled !== false && ratioEnabled('robustnessRatio'),
+  };
+}
+
+function enabledLaneKeys(lanesEnabled = {}) {
+  return ['exploit', 'exitRegime', 'globalAllParameter', 'robustness']
+    .filter((lane) => lanesEnabled[lane] !== false);
+}
 
 
 export function buildRegimeAwareSearchBatch({
@@ -213,16 +229,29 @@ export function buildRegimeExitStateForScout({
     maxConfigs: config.maxConfigs,
     lanes: regimeConfig.lanes,
   });
+  const lanesEnabled = resolveRegimeLaneEnabled(regimeConfig);
+  const championConfigFingerprint = championState?.config
+    ? buildChampionConfigFingerprint(championState.config)
+    : null;
+  const exhaustedLanes = resolveExhaustedResearchLanes({
+    schedulerState,
+    championConfigFingerprint,
+  });
   const selectedLane = selectNextResearchLane({
     stagnationLevel: schedulerState?.stagnationLevel ?? 0,
     budgetDebt: schedulerState?.budgetDebt || {},
-    lanesEnabled: {
-      exploit: true,
-      exitRegime: regimeConfig.exitRegimeEnabled !== false,
-      globalAllParameter: regimeConfig.globalAllParameterEnabled !== false,
-      robustness: regimeConfig.robustnessLadderEnabled !== false,
-    },
+    lanesEnabled,
+    schedulerState,
+    championConfigFingerprint,
   });
+  const enabledLanes = enabledLaneKeys(lanesEnabled);
+  const noLaneReason = selectedLane
+    ? null
+    : enabledLanes.length === 0
+      ? 'no-enabled-lanes'
+      : enabledLanes.every((lane) => exhaustedLanes.includes(lane))
+        ? 'all-enabled-lanes-exhausted'
+        : 'no-enabled-non-exhausted-lane';
 
   const generatorSummary = summarizeRegimeLaneGenerator({
     selectedLane,
@@ -283,6 +312,10 @@ export function buildRegimeExitStateForScout({
       laneBudgetAllocation,
       generatorSummary,
       stagnationLevel: schedulerState?.stagnationLevel ?? 0,
+      championConfigFingerprint,
+      exhaustedLanes,
+      enabledLanes,
+      noLaneReason,
     },
   };
 }
@@ -296,6 +329,70 @@ export function shouldSkipGlobalAllParameterSweep({ regimeExitState, searchBatch
     && searchBatch.length === 0
     && generatorSummary?.exhausted === true
     && generatorSummary?.countSource === 'exhausted';
+}
+
+function shouldSkipNoRegimeResearchLane({ regimeExitState } = {}) {
+  const scoreboard = regimeExitState?.shadowRegimeScoreboard;
+  return regimeExitState?.enabled === true
+    && scoreboard?.selectedLane == null
+    && typeof scoreboard?.noLaneReason === 'string'
+    && scoreboard.noLaneReason.length > 0;
+}
+
+function resolveNoLaneFallbackReason({ lanesEnabled = {}, exhaustedLanes = [] } = {}) {
+  const enabledLanes = enabledLaneKeys(lanesEnabled);
+  if (enabledLanes.length === 0) return 'no-enabled-lanes';
+  return enabledLanes.every((lane) => exhaustedLanes.includes(lane))
+    ? 'no-enabled-non-exhausted-lane'
+    : 'no-enabled-non-exhausted-lane';
+}
+
+function recordResearchLaneExhaustion({
+  state = {},
+  lane,
+  championConfigFingerprint,
+  exhaustedAt,
+  runId,
+  reason,
+  stagnationLevel = 0,
+  budgetDebt = {},
+  lanesEnabled = {},
+} = {}) {
+  if (!lane || !championConfigFingerprint) return state;
+  const base = clone(state || {});
+  const laneExhaustions = {
+    ...(base.laneExhaustions || {}),
+    [championConfigFingerprint]: {
+      ...(base.laneExhaustions?.[championConfigFingerprint] || {}),
+    },
+  };
+  const provisional = {
+    lane,
+    championConfigFingerprint,
+    exhaustedAt: exhaustedAt ?? null,
+    runId: runId ?? null,
+    reason: reason ?? 'lane-exhausted',
+  };
+  laneExhaustions[championConfigFingerprint][lane] = provisional;
+  const nextState = { ...base, laneExhaustions };
+  const nextSelectedLane = selectNextResearchLane({
+    stagnationLevel,
+    budgetDebt,
+    lanesEnabled,
+    schedulerState: nextState,
+    championConfigFingerprint,
+  });
+  const exhaustedLanes = resolveExhaustedResearchLanes({ schedulerState: nextState, championConfigFingerprint });
+  const entry = {
+    ...provisional,
+    nextSelectedLane: nextSelectedLane ?? null,
+    fallbackReason: nextSelectedLane ? null : resolveNoLaneFallbackReason({ lanesEnabled, exhaustedLanes }),
+  };
+  laneExhaustions[championConfigFingerprint][lane] = entry;
+  return {
+    ...nextState,
+    lastLaneExhaustion: entry,
+  };
 }
 
 export function buildGlobalAllParameterExhaustedManifest({
@@ -354,6 +451,80 @@ export function buildGlobalAllParameterExhaustedManifest({
     topCandidateSimilarity: null,
     promotionEligible: false,
     promotionEligibleReason: 'global-all-parameter-exhausted',
+    candidateFingerprint: trackState.candidateFingerprint ?? null,
+    rejectedCandidateFingerprint: null,
+    championFingerprint: trackState.championFingerprint ?? null,
+    labSetId: trackState.labSetId ?? null,
+    gridName: trackState.gridName ?? config.grid ?? null,
+    researchBudgetMode: normalizedRegimeExitState.researchBudgetMode ?? 'regime-exit',
+    resourceBudget: normalizedRegimeExitState.resourceBudget ?? null,
+    resourceUsageSummary: normalizedRegimeExitState.resourceUsageSummary ?? null,
+    checkpointState: normalizedRegimeExitState.checkpointState ?? null,
+    objectiveBreakdown: normalizedRegimeExitState.objectiveBreakdown ?? null,
+    multipleTestingPenalty: normalizedRegimeExitState.multipleTestingPenalty ?? null,
+    holdoutVerdict: normalizedRegimeExitState.holdoutVerdict ?? null,
+    offlineDataSummary: normalizedRegimeExitState.offlineDataSummary ?? null,
+    shadowRegimeScoreboard: normalizedRegimeExitState.shadowRegimeScoreboard ?? null,
+  };
+}
+
+export function buildNoRegimeResearchLaneManifest({
+  config = {},
+  runId,
+  championState,
+  regimeExitState = {},
+  schedulerState = {},
+  trackState = {},
+} = {}) {
+  const championSummary = summarizeResult(championState);
+  const normalizedRegimeExitState = { ...DEFAULT_REGIME_EXIT_STATE, ...(regimeExitState || {}) };
+  const generatedAt = isoNow();
+  const noLaneReason = normalizedRegimeExitState.shadowRegimeScoreboard?.noLaneReason ?? 'no-enabled-non-exhausted-lane';
+
+  return {
+    generatedAt,
+    matrixId: config.matrixId,
+    runId,
+    profile: config.selectedProfile,
+    primaryLab: config.primaryLab ?? null,
+    shadowLabs: config.shadowLabs ?? [],
+    blindHoldoutLabs: config.blindHoldoutLabs ?? [],
+    incumbent: championSummary,
+    champion: championSummary,
+    challenger: championSummary,
+    primarySweep: null,
+    searchPlan: {
+      mode: config.searchPolicy?.mode ?? null,
+      exploitRatio: config.searchPolicy?.exploitRatio ?? null,
+      variantCount: 0,
+      variants: [],
+    },
+    paretoShortlist: [],
+    matrixCandidates: [],
+    labResults: [],
+    matrixDecision: {
+      recommendation: 'hold',
+      reason: 'no-regime-research-lane',
+      summary: `Hold: no enabled non-exhausted regime research lane is available (${noLaneReason}).`,
+    },
+    researchState: {
+      steadyState: true,
+      noChangeStreak: Number(schedulerState?.noChangeStreak ?? 0) + 1,
+    },
+    noNewCandidate: true,
+    noNewCandidateStreak: Number(schedulerState?.noNewCandidateStreak ?? 0) + 1,
+    stagnationLevel: schedulerState?.stagnationLevel ?? 0,
+    stagnationReason: 'noRegimeResearchLane',
+    globalNoveltyGuardVersion: 1,
+    activeTrackId: trackState.activeTrackId ?? null,
+    windowSetId: trackState.windowSetId ?? null,
+    noveltySignature: trackState.noveltySignature ?? null,
+    rotationTrigger: trackState.rotationTrigger ?? null,
+    rotationReason: trackState.rotationReason ?? 'no-regime-research-lane',
+    sameTrackCycleStreak: trackState.sameTrackCycleStreak ?? 0,
+    topCandidateSimilarity: null,
+    promotionEligible: false,
+    promotionEligibleReason: 'no-regime-research-lane',
     candidateFingerprint: trackState.candidateFingerprint ?? null,
     rejectedCandidateFingerprint: null,
     championFingerprint: trackState.championFingerprint ?? null,
@@ -1938,6 +2109,65 @@ export async function runScout(config, dependencies = {}) {
     regimeExitContext: regimeNoveltyContext,
   });
 
+  if (shouldSkipNoRegimeResearchLane({ regimeExitState: regimeExitStateBeforeSweep })) {
+    const championFingerprint = configFingerprint(championState.config);
+    const noLaneManifest = buildNoRegimeResearchLaneManifest({
+      config: trackedConfig,
+      runId,
+      championState,
+      regimeExitState: regimeExitStateBeforeSweep,
+      schedulerState,
+      trackState: {
+        activeTrackId,
+        windowSetId,
+        rotationTrigger: hardRotationTrigger,
+        rotationReason: 'no-regime-research-lane',
+        candidateFingerprint: championFingerprint,
+        championFingerprint,
+        labSetId,
+        gridName,
+      },
+    });
+    const updatedSchedulerState = nextTrackState({
+      state: schedulerState,
+      policy: rotationPolicy,
+      manifest: buildGlobalAllParameterExhaustedSchedulerManifestInput({
+        manifest: noLaneManifest,
+        championState,
+      }),
+    });
+    await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
+    const finalNoLaneManifest = applySchedulerStateToManifest(noLaneManifest, updatedSchedulerState);
+    const finalizedArtifact = await finalizeAutoresearchManifest({
+      root: trackedConfig.researchRoot,
+      manifest: finalNoLaneManifest,
+    });
+    manifestFinalized = true;
+    await appendJsonl(historyPath(trackedConfig), {
+      timestamp: finalNoLaneManifest.generatedAt,
+      type: 'cycle',
+      runId,
+      championConfigId: finalNoLaneManifest.champion?.configId,
+      challengerConfigId: finalNoLaneManifest.challenger?.configId,
+      recommendation: finalNoLaneManifest.matrixDecision.recommendation,
+      summary: finalNoLaneManifest.matrixDecision.summary,
+      noNewCandidate: true,
+      noNewCandidateStreak: finalNoLaneManifest.noNewCandidateStreak,
+      stagnationLevel: finalNoLaneManifest.stagnationLevel,
+      stagnationReason: finalNoLaneManifest.stagnationReason,
+      noLaneReason: finalNoLaneManifest.shadowRegimeScoreboard?.noLaneReason ?? null,
+      globalNoveltyGuardVersion: finalNoLaneManifest.globalNoveltyGuardVersion,
+    });
+    const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
+    await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest: finalNoLaneManifest }));
+    return {
+      skipped: true,
+      reason: 'no-regime-research-lane',
+      manifest: finalNoLaneManifest,
+      manifestPath: finalizedArtifact.manifestPath,
+    };
+  }
+
   if (shouldSkipGlobalAllParameterSweep({ regimeExitState: regimeExitStateBeforeSweep, searchBatch: searchVariants })) {
     const championFingerprint = configFingerprint(championState.config);
     const exhaustedManifest = buildGlobalAllParameterExhaustedManifest({
@@ -1957,13 +2187,25 @@ export async function runScout(config, dependencies = {}) {
         gridName,
       },
     });
-    const updatedSchedulerState = nextTrackState({
+    const postExhaustionTrackState = nextTrackState({
       state: schedulerState,
       policy: rotationPolicy,
       manifest: buildGlobalAllParameterExhaustedSchedulerManifestInput({
         manifest: exhaustedManifest,
         championState,
       }),
+    });
+    const laneConfigFingerprint = buildChampionConfigFingerprint(championState.config);
+    const updatedSchedulerState = recordResearchLaneExhaustion({
+      state: postExhaustionTrackState,
+      lane: 'globalAllParameter',
+      championConfigFingerprint: laneConfigFingerprint,
+      exhaustedAt: exhaustedManifest.generatedAt,
+      runId,
+      reason: 'global-all-parameter-exhausted',
+      stagnationLevel: postExhaustionTrackState.stagnationLevel ?? schedulerState?.stagnationLevel ?? 0,
+      budgetDebt: postExhaustionTrackState.budgetDebt || schedulerState?.budgetDebt || {},
+      lanesEnabled: resolveRegimeLaneEnabled(trackedConfig.regimeExitResearch || {}),
     });
     await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
     const finalExhaustedManifest = applySchedulerStateToManifest(exhaustedManifest, updatedSchedulerState);

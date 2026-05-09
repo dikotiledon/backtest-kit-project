@@ -63,6 +63,7 @@ test('normalizeRegimeExitResearchConfig falls back invalid offline mode', () => 
 test('normalizeRegimeExitResearchConfig defaults subflags true when omitted', () => {
   const config = normalizeRegimeExitResearchConfig({ enabled: true });
 
+  assert.equal(config.exploitEnabled, true);
   assert.equal(config.exitRegimeEnabled, true);
   assert.equal(config.globalAllParameterEnabled, true);
   assert.equal(config.robustnessLadderEnabled, true);
@@ -72,6 +73,7 @@ test('normalizeRegimeExitResearchConfig defaults subflags true when omitted', ()
 
 test('normalizeRegimeExitResearchConfig preserves explicit false subflags', () => {
   const config = normalizeRegimeExitResearchConfig({
+    exploitEnabled: false,
     exitRegimeEnabled: false,
     globalAllParameterEnabled: false,
     robustnessLadderEnabled: false,
@@ -79,6 +81,7 @@ test('normalizeRegimeExitResearchConfig preserves explicit false subflags', () =
     childWorkerIsolationEnabled: false,
   });
 
+  assert.equal(config.exploitEnabled, false);
   assert.equal(config.exitRegimeEnabled, false);
   assert.equal(config.globalAllParameterEnabled, false);
   assert.equal(config.robustnessLadderEnabled, false);

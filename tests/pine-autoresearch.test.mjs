@@ -26,6 +26,7 @@ import {
   buildChampionConfigFingerprint,
   buildGlobalPatchFingerprint,
 } from '../scripts/lib/pine-global-search.mjs';
+import { selectNextResearchLane } from '../scripts/lib/pine-regime-exit-scheduler.mjs';
 import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs';
 import * as autoresearchCli from '../scripts/pine-autoresearch.mjs';
 import {
@@ -4013,6 +4014,111 @@ test('buildRegimeExitStateForScout reports exhausted globalAllParameter lane wit
   assert.equal(state.shadowRegimeScoreboard.generatorSummary.testedPatchFingerprintCount, 6);
 });
 
+test('buildRegimeExitStateForScout skips exhausted globalAllParameter lane for same champion when alternatives are enabled', () => {
+  const champion = globalAllParameterChampion('champ-exhausted-selector');
+  const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+  const state = buildRegimeExitStateForScout({
+    config: {
+      maxConfigs: 6,
+      regimeExitResearch: {
+        enabled: true,
+        globalAllParameterEnabled: true,
+        exitRegimeEnabled: true,
+        robustnessLadderEnabled: true,
+      },
+    },
+    championState: champion,
+    searchBatch: [],
+    schedulerState: {
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 1000, exitRegime: 0 },
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          globalAllParameter: {
+            lane: 'globalAllParameter',
+            championConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-global-exhausted',
+            reason: 'global-all-parameter-exhausted',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(state.shadowRegimeScoreboard.selectedLane, 'exitRegime');
+  assert.notEqual(state.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
+  assert.deepEqual(state.shadowRegimeScoreboard.exhaustedLanes, ['globalAllParameter']);
+});
+
+test('buildRegimeExitStateForScout ignores old globalAllParameter exhaustion after champion config changes', () => {
+  const oldChampion = globalAllParameterChampion('champ-old-exhausted');
+  const newChampion = {
+    ...globalAllParameterChampion('champ-new-config'),
+    config: { ...globalAllParameterChampion('champ-new-config').config, minPredSum: 2.1 },
+  };
+  const oldChampionConfigFingerprint = buildChampionConfigFingerprint(oldChampion.config);
+  const state = buildRegimeExitStateForScout({
+    config: {
+      maxConfigs: 6,
+      regimeExitResearch: {
+        enabled: true,
+        globalAllParameterEnabled: true,
+        exitRegimeEnabled: true,
+      },
+    },
+    championState: newChampion,
+    searchBatch: [],
+    schedulerState: {
+      stagnationLevel: 1,
+      laneExhaustions: {
+        [oldChampionConfigFingerprint]: {
+          globalAllParameter: {
+            lane: 'globalAllParameter',
+            championConfigFingerprint: oldChampionConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-old-global-exhausted',
+            reason: 'global-all-parameter-exhausted',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(state.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
+  assert.deepEqual(state.shadowRegimeScoreboard.exhaustedLanes, []);
+});
+
+test('selectNextResearchLane does not let preferred-lane budget debt override exhaustion', () => {
+  const championConfigFingerprint = buildChampionConfigFingerprint(globalAllParameterChampion('champ-debt').config);
+  const selectedLane = selectNextResearchLane({
+    stagnationLevel: 3,
+    budgetDebt: { globalAllParameter: 9999, exitRegime: 0, robustness: 0, exploit: 0 },
+    lanesEnabled: {
+      exploit: false,
+      exitRegime: true,
+      globalAllParameter: true,
+      robustness: true,
+    },
+    championConfigFingerprint,
+    schedulerState: {
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          globalAllParameter: {
+            lane: 'globalAllParameter',
+            championConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-global-exhausted',
+            reason: 'global-all-parameter-exhausted',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(selectedLane, 'exitRegime');
+});
+
 function exhaustedGlobalAllParameterRegimeState(champion = globalAllParameterChampion('champ-exhausted-helper')) {
   const allVariants = buildRegimeAwareSearchBatch({
     selectedLane: 'globalAllParameter',
@@ -4085,6 +4191,96 @@ test('buildGlobalAllParameterExhaustedManifest records exhausted globalAllParame
   assert.equal(manifest.shadowRegimeScoreboard.generatorSummary.testedPatchFingerprintCount, 6);
 });
 
+test('runScout records next non-global lane after exhausted globalAllParameter hold when alternatives are enabled', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-global-exhausted-next-lane-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-exhausted-next-lane-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        exitRegimeEnabled: true,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: true,
+        offline: { mode: 'local-first' },
+      },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-next-lane');
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-next-lane-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 0, exitRegime: 0 },
+      noNewCandidateStreak: 0,
+      globalAllParameterVariantsPerFamily: 1,
+    }), 'utf8');
+
+    const allVariants = buildRegimeAwareSearchBatch({
+      selectedLane: 'globalAllParameter',
+      champion,
+      maxConfigs: 6,
+      regimeExitResearch: { enabled: true },
+      policy: { globalAllParameterVariantsPerFamily: 1 },
+    });
+    await fs.writeFile(
+      path.join(autoresearchCli.manifestsDir(config), '000-prior-global.json'),
+      JSON.stringify(globalAllParameterManifest({ champion, variants: allVariants })),
+      'utf8',
+    );
+
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async () => {
+        throw new Error('primary sweep must not run while recording exhausted global lane');
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'global-all-parameter-exhausted');
+    const schedulerState = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), 'utf8'));
+    const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+    assert.equal(schedulerState.lastLaneExhaustion.lane, 'globalAllParameter');
+    assert.equal(schedulerState.lastLaneExhaustion.championConfigFingerprint, championConfigFingerprint);
+    assert.equal(schedulerState.lastLaneExhaustion.nextSelectedLane, 'exitRegime');
+    assert.notEqual(schedulerState.lastLaneExhaustion.nextSelectedLane, 'globalAllParameter');
+    assert.equal(schedulerState.laneExhaustions[championConfigFingerprint].globalAllParameter.nextSelectedLane, 'exitRegime');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('runScout skips primary sweep and updates scheduler state when globalAllParameter is exhausted', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-global-exhausted-'));
   try {
@@ -4119,6 +4315,12 @@ test('runScout skips primary sweep and updates scheduler state when globalAllPar
       pinnedData: { enabled: false },
       regimeExitResearch: {
         enabled: true,
+        lanes: {
+          exploitRatio: 0,
+          exitRegimeRatio: 0,
+          globalAllParameterRatio: 1,
+          robustnessRatio: 0,
+        },
         exitRegimeEnabled: false,
         globalAllParameterEnabled: true,
         robustnessLadderEnabled: false,
@@ -4179,6 +4381,105 @@ test('runScout skips primary sweep and updates scheduler state when globalAllPar
     const schedulerState = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), 'utf8'));
     assert.equal(schedulerState.noNewCandidateStreak, 1);
     assert.equal(schedulerState.lastChampionFingerprint, schedulerState.lastCandidateFingerprint);
+    const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+    assert.equal(schedulerState.lastLaneExhaustion.lane, 'globalAllParameter');
+    assert.equal(schedulerState.lastLaneExhaustion.championConfigFingerprint, championConfigFingerprint);
+    assert.equal(schedulerState.lastLaneExhaustion.reason, 'global-all-parameter-exhausted');
+    assert.equal(schedulerState.lastLaneExhaustion.nextSelectedLane, null);
+    assert.equal(schedulerState.lastLaneExhaustion.fallbackReason, 'no-enabled-non-exhausted-lane');
+    assert.equal(schedulerState.laneExhaustions[championConfigFingerprint].globalAllParameter.lane, 'globalAllParameter');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('runScout returns terminal no-lane hold when only globalAllParameter lane is boolean-enabled and already exhausted', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-no-lane-global-exhausted-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-exhausted-no-lane-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        exploitEnabled: false,
+        exitRegimeEnabled: false,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: false,
+        offline: { mode: 'local-first' },
+      },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-no-lane');
+    const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-no-lane-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 1000 },
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          globalAllParameter: {
+            lane: 'globalAllParameter',
+            championConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-global-exhausted',
+            reason: 'global-all-parameter-exhausted',
+            nextSelectedLane: null,
+            fallbackReason: 'no-enabled-non-exhausted-lane',
+          },
+        },
+      },
+    }), 'utf8');
+
+    const sweepCalls = [];
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async (...args) => {
+        sweepCalls.push(args);
+        throw new Error('primary sweep must not run when no regime lane is available');
+      },
+    });
+
+    assert.deepEqual(sweepCalls, []);
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'no-regime-research-lane');
+    assert.equal(result.manifest.primarySweep, null);
+    assert.equal(result.manifest.matrixDecision.recommendation, 'hold');
+    assert.equal(result.manifest.matrixDecision.reason, 'no-regime-research-lane');
+    assert.equal(result.manifest.shadowRegimeScoreboard.selectedLane, null);
+    assert.equal(result.manifest.shadowRegimeScoreboard.noLaneReason, 'all-enabled-lanes-exhausted');
+    assert.deepEqual(result.manifest.searchPlan.variants, []);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

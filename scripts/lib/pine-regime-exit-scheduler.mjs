@@ -83,9 +83,34 @@ function normalizeBudgetDebt(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
-export function selectNextResearchLane({ stagnationLevel = 0, budgetDebt = {}, lanesEnabled = {} }) {
+function normalizeLaneKey(lane) {
+  return LANE_KEYS.includes(lane) ? lane : null;
+}
+
+export function resolveExhaustedResearchLanes({ schedulerState = {}, championConfigFingerprint = null, exhaustedLanes = [] } = {}) {
+  const explicit = Array.isArray(exhaustedLanes)
+    ? exhaustedLanes.map(normalizeLaneKey).filter(Boolean)
+    : [];
+  const persisted = championConfigFingerprint && schedulerState?.laneExhaustions?.[championConfigFingerprint]
+    ? Object.keys(schedulerState.laneExhaustions[championConfigFingerprint]).map(normalizeLaneKey).filter(Boolean)
+    : [];
+  return [...new Set([...explicit, ...persisted])];
+}
+
+export function selectNextResearchLane({
+  stagnationLevel = 0,
+  budgetDebt = {},
+  lanesEnabled = {},
+  schedulerState = {},
+  championConfigFingerprint = null,
+  exhaustedLanes = [],
+} = {}) {
+  const exhausted = new Set(resolveExhaustedResearchLanes({ schedulerState, championConfigFingerprint, exhaustedLanes }));
   const enabledLanes = LANE_KEYS.filter((lane) => lanesEnabled[lane] !== false);
   if (enabledLanes.length === 0) return null;
+
+  const selectableLanes = enabledLanes.filter((lane) => !exhausted.has(lane));
+  if (selectableLanes.length === 0) return null;
 
   const normalizedStagnation = Math.max(0, Math.floor(Number(stagnationLevel) || 0));
   const metadata = STAGNATION_LANE_METADATA[Math.min(normalizedStagnation, 3)] ?? STAGNATION_LANE_METADATA[0];
@@ -98,9 +123,9 @@ export function selectNextResearchLane({ stagnationLevel = 0, budgetDebt = {}, l
   };
 
   const priority = priorityByStagnation[Math.min(normalizedStagnation, 3)] ?? priorityByStagnation[0];
-  const candidates = priority.filter((lane) => enabledLanes.includes(lane));
+  const candidates = priority.filter((lane) => selectableLanes.includes(lane));
 
-  if (candidates.length === 0) return enabledLanes.sort()[0];
+  if (candidates.length === 0) return selectableLanes.sort()[0];
 
   const preferredLane = candidates.includes(metadata.preferredLane) ? metadata.preferredLane : null;
 
@@ -116,5 +141,5 @@ export function selectNextResearchLane({ stagnationLevel = 0, budgetDebt = {}, l
     return priority.indexOf(a) - priority.indexOf(b);
   });
 
-  return candidates[0] ?? enabledLanes.sort()[0];
+  return candidates[0] ?? selectableLanes.sort()[0];
 }

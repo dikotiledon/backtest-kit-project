@@ -1155,13 +1155,6 @@ export function collectTestedGlobalPatchFingerprints({ champion, historyEvents =
         continue;
       }
 
-      const metadataMutationFamily = typeof variant?.metadata?.mutationFamily === 'string'
-        && variant.metadata.mutationFamily.length > 0;
-      if (manifestConfig !== null || (variantChampionConfigFingerprint !== null && metadataMutationFamily)) {
-        for (const stored of variantStoredV2Fingerprints(variant)) {
-          fingerprints.add(stored);
-        }
-      }
     }
   }
 

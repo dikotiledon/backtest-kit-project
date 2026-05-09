@@ -374,6 +374,7 @@ test('collectTestedGlobalPatchFingerprints collects minimal manifest matched by 
             {
               lane: 'globalAllParameter',
               patchFingerprint,
+              patch: { minPredSum: 2 },
               metadata: {
                 championConfigFingerprint,
                 patchFingerprintVersion: 2,
@@ -491,33 +492,53 @@ test('collectTestedGlobalPatchFingerprints rejects malformed stored fingerprint 
   assert.equal(fingerprints.has('also-bogus'), false);
 });
 
-test('collectTestedGlobalPatchFingerprints ignores stored-only fingerprints without config evidence', () => {
+test('collectTestedGlobalPatchFingerprints ignores stored-only fingerprints without patch or config evidence', () => {
   const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
   const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const manifests = [
+    {
+      champion: { configId: 'champ-current', config: championConfig },
+      searchPlan: {
+        variants: [
+          {
+            lane: 'globalAllParameter',
+            family: 'entry',
+            patchFingerprint: 'stored-only-manifest-config-poison',
+            metadata: {
+              championConfigFingerprint,
+              patchFingerprintVersion: 2,
+              patchFingerprint: 'stored-only-manifest-config-poison',
+            },
+          },
+        ],
+      },
+    },
+    {
+      championConfigFingerprint,
+      searchPlan: {
+        variants: [
+          {
+            lane: 'globalAllParameter',
+            family: 'entry',
+            patchFingerprint: 'stored-only-fingerprint-poison',
+            metadata: {
+              championConfigFingerprint,
+              patchFingerprintVersion: 2,
+              patchFingerprint: 'stored-only-fingerprint-poison',
+            },
+          },
+        ],
+      },
+    },
+  ];
+
   const fingerprints = collectTestedGlobalPatchFingerprints({
     champion: { configId: 'champ-current', config: championConfig },
-    manifests: [
-      {
-        championConfigFingerprint,
-        searchPlan: {
-          variants: [
-            {
-              lane: 'globalAllParameter',
-              family: 'entry',
-              patchFingerprint: 'stored-only-poison',
-              metadata: {
-                championConfigFingerprint,
-                patchFingerprintVersion: 2,
-                patchFingerprint: 'stored-only-poison',
-              },
-            },
-          ],
-        },
-      },
-    ],
+    manifests,
   });
 
-  assert.equal(fingerprints.has('stored-only-poison'), false);
+  assert.equal(fingerprints.has('stored-only-manifest-config-poison'), false);
+  assert.equal(fingerprints.has('stored-only-fingerprint-poison'), false);
   assert.equal(fingerprints.size, 0);
 });
 
@@ -3840,10 +3861,14 @@ function globalAllParameterChampion(configId = 'champ-repeat') {
 
 function globalAllParameterManifest({ champion, variants }) {
   return {
-    champion: { configId: champion.configId },
+    champion: { configId: champion.configId, config: { ...champion.config } },
     searchPlan: {
       variants: variants.map((variant) => ({
         lane: variant.lane,
+        family: variant.family,
+        mutationFamily: variant.mutationFamily,
+        patch: variant.patch,
+        config: variant.config,
         patchFingerprint: variant.patchFingerprint,
         metadata: variant.metadata,
       })),

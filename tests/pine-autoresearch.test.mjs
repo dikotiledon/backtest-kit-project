@@ -4411,7 +4411,7 @@ test('runScout skips primary sweep and updates scheduler state when globalAllPar
     assert.equal(schedulerState.lastLaneExhaustion.championConfigFingerprint, championConfigFingerprint);
     assert.equal(schedulerState.lastLaneExhaustion.reason, 'global-all-parameter-exhausted');
     assert.equal(schedulerState.lastLaneExhaustion.nextSelectedLane, null);
-    assert.equal(schedulerState.lastLaneExhaustion.fallbackReason, 'no-enabled-non-exhausted-lane');
+    assert.equal(schedulerState.lastLaneExhaustion.fallbackReason, 'all-enabled-lanes-exhausted');
     assert.equal(schedulerState.laneExhaustions[championConfigFingerprint].globalAllParameter.lane, 'globalAllParameter');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
@@ -4624,7 +4624,7 @@ test('runScout returns terminal no-lane hold when only globalAllParameter lane i
             runId: 'run-global-exhausted',
             reason: 'global-all-parameter-exhausted',
             nextSelectedLane: null,
-            fallbackReason: 'no-enabled-non-exhausted-lane',
+            fallbackReason: 'all-enabled-lanes-exhausted',
           },
         },
       },

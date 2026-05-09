@@ -343,7 +343,7 @@ function resolveNoLaneFallbackReason({ lanesEnabled = {}, exhaustedLanes = [] } 
   const enabledLanes = enabledLaneKeys(lanesEnabled);
   if (enabledLanes.length === 0) return 'no-enabled-lanes';
   return enabledLanes.every((lane) => exhaustedLanes.includes(lane))
-    ? 'no-enabled-non-exhausted-lane'
+    ? 'all-enabled-lanes-exhausted'
     : 'no-enabled-non-exhausted-lane';
 }
 

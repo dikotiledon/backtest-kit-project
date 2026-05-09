@@ -4,8 +4,8 @@
   "grid": "phase3-core",
   "searchPolicy": {
     "mode": "incumbent-local",
-    "exploitRatio": 0.8,
-    "freezeArchitecture": true,
+    "exploitRatio": 0.5,
+    "freezeArchitecture": false,
     "exploitFamilies": [
       "signal",
       "risk"
@@ -14,7 +14,7 @@
       "signal"
     ],
     "paretoShortlistSize": 4,
-    "matrixCandidateLimit": 3,
+    "matrixCandidateLimit": 4,
     "selfLoopEscape": {
       "enabled": true,
       "activateAfter": 1,
@@ -31,22 +31,22 @@
         "exit-state",
         "asymmetry"
       ],
-      "stagnationTemperatureBoost": 2
+      "stagnationTemperatureBoost": 4
     },
     "annealing": {
       "enabled": true,
       "baseTemperature": 0.4,
       "growthFactor": 1.8,
-      "maxTemperature": 4
+      "maxTemperature": 12
     }
   },
   "defaultProfile": "full",
   "researchBudget": {
-    "exitStateRatio": 0.4,
-    "trackIsolationRatio": 0.25,
-    "asymmetryRatio": 0.2,
-    "rotationHygieneRatio": 0.15,
-    "maxIncumbentNeighborRatio": 0.2
+    "exitStateRatio": 0.46,
+    "trackIsolationRatio": 0.5,
+    "asymmetryRatio": 0.4,
+    "rotationHygieneRatio": 0.2,
+    "maxIncumbentNeighborRatio": 0.4
   },
   "researchTracks": [
     {
@@ -76,24 +76,24 @@
         "requireCandidateChange": true
       },
       "stopPolicy": {
-        "maxNoChangeStreak": 4
+        "maxNoChangeStreak": 3
       }
     }
   ],
   "rotationPolicy": {
-    "noChangeStreakRotateAfter": 3,
-    "noNoveltyRotateAfter": 2,
-    "maxCyclesPerTrack": 6,
+    "noChangeStreakRotateAfter": 32,
+    "noNoveltyRotateAfter": 1,
+    "maxCyclesPerTrack": 63,
     "preferCurrentChampionUntil": 2,
     "cooldownCyclesAfterPromote": 1,
     "tabuLimit": 1000,
     "tabuBootstrapManifestLimit": 200,
     "stagnation": {
       "enabled": true,
-      "noNewCandidateEscalateAfter": 3,
-      "holdEscalateAfter": 5,
-      "highSimilarityThreshold": 0.9,
-      "maxStagnationLevel": 3
+      "noNewCandidateEscalateAfter": 2,
+      "holdEscalateAfter": 3,
+      "highSimilarityThreshold": 0.8,
+      "maxStagnationLevel": 2
     }
   },
   "noveltyPolicy": {
@@ -108,8 +108,8 @@
   "gatePolicy": {
     "requireCandidateChange": true,
     "requirePrimaryPromote": true,
-    "minShadowPassCount": 3,
-    "minShadowPassRatio": 0.6,
+    "minShadowPassCount": 2,
+    "minShadowPassRatio": 0.5,
     "minScoreDelta": 0,
     "minRoiDeltaPct": 0,
     "minProfitFactorDelta": 0,
@@ -170,7 +170,7 @@
       "minProfitFactorDelta": 0,
       "maxDrawdownDeltaPct": 0.75,
       "minTradeCount": 150,
-      "minTradeRatioVsIncumbent": 0.85
+      "minTradeRatioVsIncumbent": 0.75
     }
   },
   "shadowLabs": [
@@ -365,7 +365,7 @@
     "promotion": {
       "allowAutomaticRegimeSwitching": false,
       "requireGlobalChampionAnchor": true,
-      "minRoiDeltaPct": 5,
+      "minRoiDeltaPct": 4,
       "minProfitFactorDelta": 0.1,
       "minTradeCount": 60,
       "requireBlindHoldoutVerdict": true

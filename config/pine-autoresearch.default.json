@@ -357,8 +357,8 @@
       "robustnessRatio": 0.15
     },
     "resourceBudget": {
-      "maxConcurrentLabWorkers": 1,
-      "maxRowsPerAnalysisChunk": 5000,
+      "maxConcurrentLabWorkers": 4,
+      "maxRowsPerAnalysisChunk": 10000,
       "maxRetainedCandidatesPerLane": 25,
       "writeFullDebugArtifacts": false
     },

@@ -1144,6 +1144,15 @@ function variantMutationFamily(variant) {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+function variantPatchEvidence(variant) {
+  const patch = variant?.patch;
+  return patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : null;
+}
+
+function patchesEqual(left, right) {
+  return configFingerprint(left) === configFingerprint(right);
+}
+
 function reconstructPatchFromVariantConfig({ variant, championConfig } = {}) {
   const variantConfig = variant?.config;
   if (!championConfig || typeof championConfig !== 'object' || Array.isArray(championConfig)) return null;
@@ -1159,13 +1168,14 @@ function reconstructPatchFromVariantConfig({ variant, championConfig } = {}) {
 function reconstructGlobalPatchFingerprint({ variant, championConfigFingerprint, championConfig = null } = {}) {
   const lane = variant?.lane;
   const mutationFamily = variantMutationFamily(variant);
-  const patch = (variant?.patch && typeof variant.patch === 'object' && !Array.isArray(variant.patch))
-    ? variant.patch
-    : reconstructPatchFromVariantConfig({ variant, championConfig });
+  const patchEvidence = variantPatchEvidence(variant);
+  const configPatch = reconstructPatchFromVariantConfig({ variant, championConfig });
+  const patch = patchEvidence ?? configPatch;
   if (!isGlobalAllParameterLane(lane)) return null;
   if (typeof championConfigFingerprint !== 'string' || championConfigFingerprint.length === 0) return null;
   if (!mutationFamily) return null;
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) return null;
+  if (patchEvidence && configPatch && !patchesEqual(patchEvidence, configPatch)) return null;
   try {
     return buildGlobalPatchFingerprint({ championConfigFingerprint, lane, mutationFamily, patch });
   } catch {

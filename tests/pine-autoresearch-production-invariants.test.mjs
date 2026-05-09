@@ -71,7 +71,9 @@ function configuredProductionRoots({ env = process.env } = {}) {
 }
 
 function productionInvariantMode(env = process.env) {
-  return env.PINE_AUTORESEARCH_PRODUCTION_INVARIANTS === 'fixture-only' ? 'fixture-only' : 'required';
+  if (env.PINE_AUTORESEARCH_PRODUCTION_INVARIANTS === 'required') return 'required';
+  if (env.PINE_AUTORESEARCH_PRODUCTION_ROOT || env.PINE_AUTORESEARCH_PRODUCTION_DIGEST_ROOT) return 'required';
+  return 'fixture-only';
 }
 
 function invariantMessage(result) {
@@ -132,6 +134,32 @@ function variantStoredFingerprints(variant) {
     .filter((value) => typeof value === 'string' && value.length > 0);
 }
 
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map((item) => stableValue(item));
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = stableValue(value[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+function stableJson(value) {
+  return JSON.stringify(stableValue(value || {}));
+}
+
+function variantPatchEvidence(variant) {
+  const patch = variant?.patch;
+  return patch && typeof patch === 'object' && !Array.isArray(patch) ? patch : null;
+}
+
+function patchesEqual(left, right) {
+  return stableJson(left) === stableJson(right);
+}
+
 function reconstructPatchFromVariantConfig({ variant, championConfig }) {
   const variantConfig = variant?.config;
   if (!championConfig || typeof championConfig !== 'object' || Array.isArray(championConfig)) return null;
@@ -147,10 +175,11 @@ function reconstructPatchFromVariantConfig({ variant, championConfig }) {
 function reconstructGlobalPatchFingerprint({ variant, championConfigFingerprint, championConfig }) {
   if (!isGlobalAllParameterLane(variant?.lane)) return null;
   const mutationFamily = variantMutationFamily(variant);
-  const patch = variant?.patch && typeof variant.patch === 'object' && !Array.isArray(variant.patch)
-    ? variant.patch
-    : reconstructPatchFromVariantConfig({ variant, championConfig });
+  const patchEvidence = variantPatchEvidence(variant);
+  const configPatch = reconstructPatchFromVariantConfig({ variant, championConfig });
+  const patch = patchEvidence ?? configPatch;
   if (!championConfigFingerprint || !mutationFamily || !patch) return null;
+  if (patchEvidence && configPatch && !patchesEqual(patchEvidence, configPatch)) return null;
   try {
     return buildGlobalPatchFingerprint({
       championConfigFingerprint,
@@ -175,9 +204,11 @@ function readManifestFiles(manifestDir) {
     }));
 }
 
-function validateGlobalAllParameterNovelty(manifests = []) {
+function validateGlobalAllParameterNovelty(manifests = [], { requireEvidence = false } = {}) {
   const seen = new Map();
   const violations = [];
+  let globalManifestCount = 0;
+  let evaluatedManifestCount = 0;
 
   for (const { file, manifest } of manifests) {
     const variants = Array.isArray(manifest?.searchPlan?.variants) ? manifest.searchPlan.variants : [];
@@ -187,7 +218,9 @@ function validateGlobalAllParameterNovelty(manifests = []) {
           || typeof variant?.patchFingerprint === 'string'
           || typeof variant?.metadata?.patchFingerprint === 'string')
     ));
+    if (variants.some((variant) => isGlobalAllParameterLane(variant?.lane))) globalManifestCount += 1;
     if ((manifest?.globalNoveltyGuardVersion ?? 0) < 1 && !hasGlobalFingerprintEvidence) continue;
+    evaluatedManifestCount += 1;
     const manifestIdentity = manifestChampionConfigIdentity(manifest);
     const manifestConfig = manifestChampionConfig(manifest);
 
@@ -200,6 +233,15 @@ function validateGlobalAllParameterNovelty(manifests = []) {
         continue;
       }
 
+      const patchEvidence = variantPatchEvidence(variant);
+      const configPatch = reconstructPatchFromVariantConfig({ variant, championConfig: manifestConfig });
+      if (patchEvidence && configPatch && !patchesEqual(patchEvidence, configPatch)) {
+        violations.push({
+          code: 'global_patch_config_mismatch',
+          file,
+          variantId: variant?.variantId ?? null,
+        });
+      }
       const fingerprint = reconstructGlobalPatchFingerprint({
         variant,
         championConfigFingerprint,
@@ -238,6 +280,14 @@ function validateGlobalAllParameterNovelty(manifests = []) {
         seen.set(key, file);
       }
     }
+  }
+
+  if (requireEvidence && globalManifestCount > 0 && evaluatedManifestCount === 0) {
+    violations.push({
+      code: 'global_patch_novelty_evidence_missing',
+      globalManifestCount,
+      evaluatedManifestCount,
+    });
   }
 
   return violations;
@@ -287,7 +337,7 @@ function validateProductionArtifactInvariants({ researchRoot, digestRoot, requir
   const manifests = readManifestFiles(manifestDir);
   if (!fs.existsSync(manifestDir)) violations.push({ code: 'manifest_dir_missing', manifestDir });
   if (manifests.length === 0) violations.push({ code: 'manifest_dir_empty', manifestDir });
-  violations.push(...validateGlobalAllParameterNovelty(manifests));
+  violations.push(...validateGlobalAllParameterNovelty(manifests, { requireEvidence: requireRoot }));
 
   if (latestPointer.ok) {
     const runId = latestPointer.runId;
@@ -529,6 +579,25 @@ test('production artifact invariant catches duplicate collapse by champion confi
         },
       },
     },
+    {
+      file: 'run-d.json',
+      manifest: {
+        runId: 'run-d',
+        champion: { configId: 'champ-id-d', config: championConfig },
+        globalNoveltyGuardVersion: 1,
+        searchPlan: {
+          variants: [{
+            variantId: 'v-d',
+            lane: 'globalAllParameter',
+            mutationFamily: 'entry',
+            patch: { alpha: 99 },
+            config: { alpha: 2, beta: true },
+            patchFingerprintVersion: 2,
+            patchFingerprint: 'patch-config-disagreement-poison',
+          }],
+        },
+      },
+    },
   ];
 
   const violations = validateGlobalAllParameterNovelty(manifests);
@@ -537,6 +606,7 @@ test('production artifact invariant catches duplicate collapse by champion confi
   assert.ok(codes.includes('duplicate_global_patch_fingerprint'), JSON.stringify(violations, null, 2));
   assert.ok(codes.includes('global_patch_stored_fingerprint_mismatch'), JSON.stringify(violations, null, 2));
   assert.ok(codes.includes('global_patch_stored_only_fingerprint'), JSON.stringify(violations, null, 2));
+  assert.ok(codes.includes('global_patch_config_mismatch'), JSON.stringify(violations, null, 2));
   assert.equal(
     violations.find((violation) => violation.code === 'duplicate_global_patch_fingerprint')?.championConfigFingerprint,
     championConfigFingerprint,

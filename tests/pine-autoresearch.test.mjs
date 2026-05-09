@@ -453,6 +453,52 @@ test('collectTestedGlobalPatchFingerprints reconstructs legacy patch from varian
   assert.deepEqual([...fingerprints], [expected]);
 });
 
+test('collectTestedGlobalPatchFingerprints rejects variant patch config disagreement poison', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const actualPatchFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+  const poisonedPatchFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 9 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'champ-current', config: championConfig },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              patch: { minPredSum: 9 },
+              config: { minPredSum: 2, adxThreshold: 20 },
+              patchFingerprint: poisonedPatchFingerprint,
+              metadata: {
+                championConfigFingerprint,
+                patchFingerprintVersion: 2,
+                patchFingerprint: poisonedPatchFingerprint,
+              },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.equal(fingerprints.has(poisonedPatchFingerprint), false);
+  assert.equal(fingerprints.has(actualPatchFingerprint), false);
+  assert.equal(fingerprints.size, 0);
+});
+
 test('collectTestedGlobalPatchFingerprints rejects malformed stored fingerprint when reconstruction disagrees', () => {
   const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
   const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);

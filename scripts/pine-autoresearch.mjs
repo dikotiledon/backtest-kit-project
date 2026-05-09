@@ -468,6 +468,76 @@ export function buildGlobalAllParameterExhaustedManifest({
   };
 }
 
+export function buildOfflineDataMissingManifest({
+  config = {},
+  runId,
+  championState,
+  offlineDataSummary = null,
+} = {}) {
+  const championSummary = summarizeResult(championState);
+  const generatedAt = isoNow();
+
+  return {
+    generatedAt,
+    matrixId: config.matrixId,
+    runId,
+    profile: config.selectedProfile,
+    primaryLab: config.primaryLab ?? null,
+    shadowLabs: config.shadowLabs ?? [],
+    blindHoldoutLabs: config.blindHoldoutLabs ?? [],
+    incumbent: championSummary,
+    champion: championSummary,
+    challenger: championSummary,
+    primarySweep: null,
+    searchPlan: {
+      mode: config.searchPolicy?.mode ?? null,
+      exploitRatio: config.searchPolicy?.exploitRatio ?? null,
+      variantCount: 0,
+      variants: [],
+    },
+    paretoShortlist: [],
+    matrixCandidates: [],
+    labResults: [],
+    matrixDecision: {
+      recommendation: 'hold',
+      reason: 'offlineDataMissing',
+      summary: 'Hold: required offline data is missing for offline-strict autoresearch.',
+    },
+    researchState: {
+      steadyState: true,
+      noChangeStreak: 0,
+    },
+    noNewCandidate: true,
+    noNewCandidateStreak: 0,
+    stagnationLevel: 0,
+    stagnationReason: 'offlineDataMissing',
+    globalNoveltyGuardVersion: config.regimeExitResearch?.enabled ? 1 : null,
+    activeTrackId: null,
+    windowSetId: null,
+    noveltySignature: null,
+    rotationTrigger: null,
+    rotationReason: 'offlineDataMissing',
+    sameTrackCycleStreak: 0,
+    topCandidateSimilarity: null,
+    promotionEligible: false,
+    promotionEligibleReason: 'offlineDataMissing',
+    candidateFingerprint: championState?.config ? configFingerprint(championState.config) : null,
+    rejectedCandidateFingerprint: null,
+    championFingerprint: championState?.config ? configFingerprint(championState.config) : null,
+    labSetId: null,
+    gridName: config.grid ?? null,
+    researchBudgetMode: config.regimeExitResearch?.enabled ? 'regime-exit' : null,
+    resourceBudget: null,
+    resourceUsageSummary: null,
+    checkpointState: null,
+    objectiveBreakdown: null,
+    multipleTestingPenalty: null,
+    holdoutVerdict: null,
+    offlineDataSummary,
+    shadowRegimeScoreboard: null,
+  };
+}
+
 export function buildNoRegimeResearchLaneManifest({
   config = {},
   runId,
@@ -1746,6 +1816,7 @@ function buildCycleHistoryEvent(manifest = {}) {
     championFingerprint: manifest.championFingerprint ?? null,
     globalNoveltyGuardVersion: manifest.globalNoveltyGuardVersion ?? null,
     noLaneReason: manifest.shadowRegimeScoreboard?.noLaneReason ?? null,
+    offlineDataSummary: manifest.offlineDataSummary ?? null,
   };
 }
 
@@ -2021,8 +2092,29 @@ export async function runScout(config, dependencies = {}) {
   if (config.regimeExitResearch?.enabled) {
     offlineDataSummary = await buildOfflineDataPreflight(config);
     if (!offlineDataSummary.ok && offlineDataSummary.mode === 'offline-strict') {
-      await appendOfflineDataMissingEvent(config, runId, offlineDataSummary);
-      return buildOfflineDataMissingSkipResult({ offlineDataSummary });
+      const offlineManifest = buildOfflineDataMissingManifest({
+        config: trackedConfig,
+        runId,
+        championState,
+        offlineDataSummary,
+      });
+      const finalizedArtifact = await finalizeAutoresearchManifest({
+        root: trackedConfig.researchRoot,
+        manifest: offlineManifest,
+      });
+      manifestFinalized = true;
+      const artifactPaths = await writeScoutCycleArtifacts({
+        config: trackedConfig,
+        championState,
+        manifest: offlineManifest,
+        manifestPath: finalizedArtifact.manifestPath,
+      });
+      return {
+        ...buildOfflineDataMissingSkipResult({ offlineDataSummary }),
+        manifest: offlineManifest,
+        manifestPath: finalizedArtifact.manifestPath,
+        ...artifactPaths,
+      };
     }
   }
   const historyEventsBefore = await loadHistoryEvents(config);

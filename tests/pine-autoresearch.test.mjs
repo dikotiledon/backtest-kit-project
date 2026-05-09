@@ -4729,6 +4729,33 @@ test('runScout offline-strict missing branch appends cycle history and returns s
     assert.equal(result.skipped, true);
     assert.equal(result.reason, 'offlineDataMissing');
     assert.equal(result.promotionEligibleReason, 'offlineDataMissing');
+    assert.equal(result.manifestPath, path.join(autoresearchCli.manifestsDir(config), `${result.manifest.runId}.json`));
+    assert.equal(result.scoutPath, path.join(config.digestRoot, `${result.manifest.runId}.md`));
+    assert.equal(result.liveDigestPath, path.join(config.digestRoot, 'latest-digest.md'));
+    assert.ok(result.pruneResult);
+    assert.equal(result.manifest.primarySweep, null);
+    assert.equal(result.manifest.matrixDecision.recommendation, 'hold');
+    assert.equal(result.manifest.matrixDecision.reason, 'offlineDataMissing');
+    assert.equal(result.manifest.offlineDataSummary.reason, 'offlineDataMissing');
+
+    const latest = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'latest.json'), 'utf8'));
+    assert.equal(latest.manifestPath, result.manifestPath);
+    assert.equal(latest.runId, result.manifest.runId);
+
+    const persistedManifest = JSON.parse(await fs.readFile(result.manifestPath, 'utf8'));
+    assert.equal(persistedManifest.runId, result.manifest.runId);
+    assert.equal(persistedManifest.matrixDecision.reason, 'offlineDataMissing');
+
+    const scoutMarkdown = await fs.readFile(result.scoutPath, 'utf8');
+    assert.match(scoutMarkdown, /Primary sweep: \*\*skipped\*\*/);
+    assert.match(scoutMarkdown, /offlineDataMissing/);
+    assert.doesNotMatch(scoutMarkdown, /undefined/);
+
+    const latestDigest = await fs.readFile(path.join(config.digestRoot, 'latest-digest.md'), 'utf8');
+    assert.match(latestDigest, new RegExp(`Latest run: ${result.manifest.runId}`));
+
+    const historyMarkdown = await fs.readFile(path.join(config.digestRoot, 'history.md'), 'utf8');
+    assert.match(historyMarkdown, /offline-strict autoresearch/);
 
     const historyPath = path.join(config.researchRoot, 'history.jsonl');
     const historyRaw = await fs.readFile(historyPath, 'utf8');
@@ -4739,6 +4766,7 @@ test('runScout offline-strict missing branch appends cycle history and returns s
     assert.equal(cycleEvent.promotionEligible, false);
     assert.equal(cycleEvent.promotionEligibleReason, 'offlineDataMissing');
     assert.equal(cycleEvent.offlineDataSummary.reason, 'offlineDataMissing');
+    assert.equal(cycleEvent.runId, result.manifest.runId);
 
     const missingLab = cycleEvent.offlineDataSummary.missingLabs[0];
     assert.ok(missingLab);

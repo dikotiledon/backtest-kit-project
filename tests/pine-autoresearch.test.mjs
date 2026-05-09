@@ -4393,6 +4393,148 @@ test('runScout skips primary sweep and updates scheduler state when globalAllPar
   }
 });
 
+test('runScout exhausted globalAllParameter finalizes comparable artifacts and markdown without undefined', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-global-exhausted-artifacts-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-exhausted-artifacts-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        lanes: {
+          exploitRatio: 0,
+          exitRegimeRatio: 0,
+          globalAllParameterRatio: 1,
+          robustnessRatio: 0,
+        },
+        exitRegimeEnabled: false,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: false,
+        offline: { mode: 'local-first' },
+      },
+      retention: { keepLatestRuns: 1, pruneSweepRuns: true, pruneEvaluationRuns: true, prunePartialRuns: true },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-exhausted-artifacts');
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-exhausted-artifacts-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 0 },
+      noNewCandidateStreak: 0,
+      globalAllParameterVariantsPerFamily: 1,
+    }), 'utf8');
+
+    const allVariants = buildRegimeAwareSearchBatch({
+      selectedLane: 'globalAllParameter',
+      champion,
+      maxConfigs: 6,
+      regimeExitResearch: { enabled: true },
+      policy: { globalAllParameterVariantsPerFamily: 1 },
+    });
+    await fs.writeFile(
+      path.join(autoresearchCli.manifestsDir(config), '000-prior-global.json'),
+      JSON.stringify(globalAllParameterManifest({ champion, variants: allVariants })),
+      'utf8',
+    );
+
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async () => {
+        throw new Error('primary sweep must not run when globalAllParameter is exhausted');
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'global-all-parameter-exhausted');
+    assert.equal(result.manifestPath, path.join(autoresearchCli.manifestsDir(config), `${result.manifest.runId}.json`));
+    assert.equal(result.scoutPath, path.join(config.digestRoot, `${result.manifest.runId}.md`));
+    assert.equal(result.liveDigestPath, path.join(config.digestRoot, 'latest-digest.md'));
+    assert.ok(result.pruneResult);
+
+    const historyMarkdown = await fs.readFile(path.join(config.digestRoot, 'history.md'), 'utf8');
+    assert.match(historyMarkdown, /globalAllParameter novel patch space exhausted/);
+
+    const latestDigest = await fs.readFile(path.join(config.digestRoot, 'latest-digest.md'), 'utf8');
+    assert.match(latestDigest, new RegExp(`Latest run: ${result.manifest.runId}`));
+
+    const latest = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'latest.json'), 'utf8'));
+    assert.equal(latest.manifestPath, result.manifestPath);
+    assert.equal(latest.runId, result.manifest.runId);
+
+    const historyEvents = (await fs.readFile(path.join(config.researchRoot, 'history.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const cycleEvent = historyEvents.find((event) => event.runId === result.manifest.runId);
+    assert.ok(cycleEvent);
+    for (const key of [
+      'steadyState',
+      'noChangeStreak',
+      'activeTrackId',
+      'windowSetId',
+      'noveltySignature',
+      'rotationTrigger',
+      'rotationReason',
+      'sameTrackCycleStreak',
+      'topCandidateSimilarity',
+      'promotionEligible',
+      'promotionEligibleReason',
+      'noNewCandidate',
+      'noNewCandidateStreak',
+      'stagnationLevel',
+      'stagnationReason',
+      'lastEscalatedAt',
+      'rejectedCandidateFingerprint',
+      'globalNoveltyGuardVersion',
+    ]) {
+      assert.ok(Object.hasOwn(cycleEvent, key), `missing history field ${key}`);
+    }
+    assert.equal(cycleEvent.steadyState, true);
+    assert.equal(cycleEvent.noNewCandidate, true);
+    assert.equal(cycleEvent.promotionEligible, false);
+    assert.equal(cycleEvent.promotionEligibleReason, 'global-all-parameter-exhausted');
+
+    const scoutMarkdown = await fs.readFile(result.scoutPath, 'utf8');
+    assert.match(scoutMarkdown, /Primary sweep: \*\*skipped\*\*/);
+    assert.match(scoutMarkdown, /global-all-parameter-exhausted/);
+    assert.doesNotMatch(scoutMarkdown, /undefined/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('runScout returns terminal no-lane hold when only globalAllParameter lane is boolean-enabled and already exhausted', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-no-lane-global-exhausted-'));
   try {
@@ -4480,6 +4622,29 @@ test('runScout returns terminal no-lane hold when only globalAllParameter lane i
     assert.equal(result.manifest.shadowRegimeScoreboard.selectedLane, null);
     assert.equal(result.manifest.shadowRegimeScoreboard.noLaneReason, 'all-enabled-lanes-exhausted');
     assert.deepEqual(result.manifest.searchPlan.variants, []);
+    assert.equal(result.scoutPath, path.join(config.digestRoot, `${result.manifest.runId}.md`));
+    assert.equal(result.liveDigestPath, path.join(config.digestRoot, 'latest-digest.md'));
+    assert.ok(result.pruneResult);
+
+    const noLaneDigest = await fs.readFile(path.join(config.digestRoot, 'latest-digest.md'), 'utf8');
+    assert.match(noLaneDigest, new RegExp(`Latest run: ${result.manifest.runId}`));
+    const noLaneHistoryMarkdown = await fs.readFile(path.join(config.digestRoot, 'history.md'), 'utf8');
+    assert.match(noLaneHistoryMarkdown, /no enabled non-exhausted regime research lane/);
+    const noLaneScoutMarkdown = await fs.readFile(result.scoutPath, 'utf8');
+    assert.match(noLaneScoutMarkdown, /Primary sweep: \*\*skipped\*\*/);
+    assert.match(noLaneScoutMarkdown, /no-regime-research-lane/);
+    assert.doesNotMatch(noLaneScoutMarkdown, /undefined/);
+
+    const noLaneEvents = (await fs.readFile(path.join(config.researchRoot, 'history.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const noLaneEvent = noLaneEvents.find((event) => event.runId === result.manifest.runId);
+    assert.equal(noLaneEvent.noLaneReason, 'all-enabled-lanes-exhausted');
+    assert.equal(noLaneEvent.steadyState, true);
+    assert.equal(noLaneEvent.promotionEligible, false);
+    assert.equal(noLaneEvent.promotionEligibleReason, 'no-regime-research-lane');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

@@ -763,13 +763,20 @@ export function renderScoutMarkdown({ config, manifest }) {
   const steadyState = manifest.researchState?.steadyState || isSteadyStateCandidate(champion, challenger);
   const noChangeStreak = manifest.researchState?.noChangeStreak || 0;
   const bestAlternative = findBestAlternative(manifest.primarySweep, champion);
+  const primarySweepSkippedReason = manifest.primarySweep === null
+    ? (decision?.reason || manifest.stagnationReason || 'skipped')
+    : null;
+  const gridName = [manifest.primarySweep?.gridName, manifest.gridName]
+    .find((value) => value !== undefined && value !== null && value !== '' && value !== 'undefined') || 'n/a';
   const lines = [
     `# Pine Autoresearch Scout - ${config.matrixId}`,
     '',
     `- Generated: ${manifest.generatedAt}`,
     `- Run ID: ${manifest.runId}`,
-    `- Primary run dir: \`${manifest.primarySweep?.runDir || manifest.runDir}\``,
-    `- Grid: \`${manifest.primarySweep?.gridName || manifest.gridName}\``,
+    primarySweepSkippedReason
+      ? `- Primary sweep: **skipped** (reason: ${primarySweepSkippedReason})`
+      : `- Primary run dir: \`${manifest.primarySweep?.runDir || manifest.runDir || 'n/a'}\``,
+    `- Grid: \`${gridName}\``,
     `- Primary lab: ${manifest.primaryLab?.labId || config.primaryLab.labId}`,
     '',
     '## Champion',

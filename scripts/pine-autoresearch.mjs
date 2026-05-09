@@ -1723,6 +1723,50 @@ async function writeCurrentDigest(config, latestManifest, championState, previou
   return latestDigestPath(config);
 }
 
+function buildCycleHistoryEvent(manifest = {}) {
+  return {
+    timestamp: manifest.generatedAt,
+    type: 'cycle',
+    runId: manifest.runId,
+    championConfigId: manifest.champion?.configId,
+    challengerConfigId: manifest.challenger?.configId,
+    recommendation: manifest.matrixDecision?.recommendation,
+    summary: manifest.matrixDecision?.summary,
+    steadyState: manifest.researchState?.steadyState ?? false,
+    noChangeStreak: manifest.researchState?.noChangeStreak ?? 0,
+    activeTrackId: manifest.activeTrackId ?? null,
+    windowSetId: manifest.windowSetId ?? null,
+    noveltySignature: manifest.noveltySignature ?? null,
+    rotationTrigger: manifest.rotationTrigger ?? null,
+    rotationReason: manifest.rotationReason ?? null,
+    sameTrackCycleStreak: manifest.sameTrackCycleStreak ?? 0,
+    topCandidateSimilarity: manifest.topCandidateSimilarity ?? null,
+    promotionEligible: manifest.promotionEligible ?? false,
+    promotionEligibleReason: manifest.promotionEligibleReason ?? null,
+    noNewCandidate: manifest.noNewCandidate ?? false,
+    noNewCandidateStreak: manifest.noNewCandidateStreak ?? 0,
+    stagnationLevel: manifest.stagnationLevel ?? 0,
+    stagnationReason: manifest.stagnationReason ?? null,
+    lastEscalatedAt: manifest.lastEscalatedAt ?? null,
+    rejectedCandidateFingerprint: manifest.rejectedCandidateFingerprint ?? null,
+    candidateFingerprint: manifest.candidateFingerprint ?? null,
+    championFingerprint: manifest.championFingerprint ?? null,
+    globalNoveltyGuardVersion: manifest.globalNoveltyGuardVersion ?? null,
+    noLaneReason: manifest.shadowRegimeScoreboard?.noLaneReason ?? null,
+  };
+}
+
+async function writeScoutCycleArtifacts({ config, championState, manifest, manifestPath }) {
+  const scoutPath = path.join(config.digestRoot, `${manifest.runId}.md`);
+  await appendJsonl(historyPath(config), buildCycleHistoryEvent(manifest));
+  await writeText(scoutPath, renderScoutMarkdown({ config, manifest }));
+  const updatedHistoryEvents = await rebuildHistoryArtifacts(config, championState);
+  const previousManifest = await readPreviousManifest(config, path.basename(manifestPath));
+  const liveDigestPath = await writeCurrentDigest(config, { ...manifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);
+  const pruneResult = await pruneRunArtifacts(config);
+  return { scoutPath, liveDigestPath, pruneResult };
+}
+
 async function seedChampionState(config) {
   let latest = null;
   let seedPayload = null;
@@ -2143,28 +2187,18 @@ export async function runScout(config, dependencies = {}) {
       manifest: finalNoLaneManifest,
     });
     manifestFinalized = true;
-    await appendJsonl(historyPath(trackedConfig), {
-      timestamp: finalNoLaneManifest.generatedAt,
-      type: 'cycle',
-      runId,
-      championConfigId: finalNoLaneManifest.champion?.configId,
-      challengerConfigId: finalNoLaneManifest.challenger?.configId,
-      recommendation: finalNoLaneManifest.matrixDecision.recommendation,
-      summary: finalNoLaneManifest.matrixDecision.summary,
-      noNewCandidate: true,
-      noNewCandidateStreak: finalNoLaneManifest.noNewCandidateStreak,
-      stagnationLevel: finalNoLaneManifest.stagnationLevel,
-      stagnationReason: finalNoLaneManifest.stagnationReason,
-      noLaneReason: finalNoLaneManifest.shadowRegimeScoreboard?.noLaneReason ?? null,
-      globalNoveltyGuardVersion: finalNoLaneManifest.globalNoveltyGuardVersion,
+    const artifactPaths = await writeScoutCycleArtifacts({
+      config: trackedConfig,
+      championState,
+      manifest: finalNoLaneManifest,
+      manifestPath: finalizedArtifact.manifestPath,
     });
-    const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
-    await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest: finalNoLaneManifest }));
     return {
       skipped: true,
       reason: 'no-regime-research-lane',
       manifest: finalNoLaneManifest,
       manifestPath: finalizedArtifact.manifestPath,
+      ...artifactPaths,
     };
   }
 
@@ -2214,27 +2248,18 @@ export async function runScout(config, dependencies = {}) {
       manifest: finalExhaustedManifest,
     });
     manifestFinalized = true;
-    await appendJsonl(historyPath(trackedConfig), {
-      timestamp: finalExhaustedManifest.generatedAt,
-      type: 'cycle',
-      runId,
-      championConfigId: finalExhaustedManifest.champion?.configId,
-      challengerConfigId: finalExhaustedManifest.challenger?.configId,
-      recommendation: finalExhaustedManifest.matrixDecision.recommendation,
-      summary: finalExhaustedManifest.matrixDecision.summary,
-      noNewCandidate: true,
-      noNewCandidateStreak: finalExhaustedManifest.noNewCandidateStreak,
-      stagnationLevel: finalExhaustedManifest.stagnationLevel,
-      stagnationReason: finalExhaustedManifest.stagnationReason,
-      globalNoveltyGuardVersion: finalExhaustedManifest.globalNoveltyGuardVersion,
+    const artifactPaths = await writeScoutCycleArtifacts({
+      config: trackedConfig,
+      championState,
+      manifest: finalExhaustedManifest,
+      manifestPath: finalizedArtifact.manifestPath,
     });
-    const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
-    await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest: finalExhaustedManifest }));
     return {
       skipped: true,
       reason: 'global-all-parameter-exhausted',
       manifest: finalExhaustedManifest,
       manifestPath: finalizedArtifact.manifestPath,
+      ...artifactPaths,
     };
   }
 
@@ -2316,11 +2341,10 @@ export async function runScout(config, dependencies = {}) {
     },
     regimeExitState,
   });
-  const { steadyState, noChangeStreak, manifest } = orchestration;
+  const { manifest } = orchestration;
 
   const manifestName = `${runId}.json`;
   let manifestPath = path.join(manifestsDir(trackedConfig), manifestName);
-  const scoutPath = path.join(trackedConfig.digestRoot, `${runId}.md`);
 
   const updatedSchedulerState = nextTrackState({
     state: schedulerState,
@@ -2370,35 +2394,6 @@ export async function runScout(config, dependencies = {}) {
     });
   }
 
-  await appendJsonl(historyPath(trackedConfig), {
-    timestamp: finalManifest.generatedAt,
-    type: 'cycle',
-    runId,
-    championConfigId: finalManifest.champion?.configId,
-    challengerConfigId: finalManifest.challenger?.configId,
-    recommendation: finalManifest.matrixDecision.recommendation,
-    summary: finalManifest.matrixDecision.summary,
-    steadyState,
-    noChangeStreak,
-    activeTrackId: finalManifest.activeTrackId,
-    windowSetId: finalManifest.windowSetId,
-    noveltySignature: finalManifest.noveltySignature,
-    rotationTrigger: finalManifest.rotationTrigger,
-    rotationReason: finalManifest.rotationReason,
-    sameTrackCycleStreak: finalManifest.sameTrackCycleStreak,
-    topCandidateSimilarity: finalManifest.topCandidateSimilarity,
-    promotionEligible: finalManifest.promotionEligible,
-    promotionEligibleReason: finalManifest.promotionEligibleReason,
-    noNewCandidate: finalManifest.noNewCandidate,
-    noNewCandidateStreak: finalManifest.noNewCandidateStreak,
-    stagnationLevel: finalManifest.stagnationLevel,
-    stagnationReason: finalManifest.stagnationReason,
-    lastEscalatedAt: finalManifest.lastEscalatedAt,
-    rejectedCandidateFingerprint: finalManifest.rejectedCandidateFingerprint,
-  });
-
-  await writeText(scoutPath, renderScoutMarkdown({ config: trackedConfig, manifest: finalManifest }));
-
   const asymmetryAnalysis = buildScoutRegimeAnalysisArtifact({
     matrixId: trackedConfig.matrixId,
     runId,
@@ -2409,12 +2404,14 @@ export async function runScout(config, dependencies = {}) {
   const asymmetryPath = path.join(asymmetryDir, `${runId}-asymmetry.md`);
   await writeText(asymmetryPath, asymmetryAnalysis.artifact.markdown);
 
-  const updatedHistoryEvents = await rebuildHistoryArtifacts(trackedConfig, championState);
-  const previousManifest = await readPreviousManifest(trackedConfig, manifestName);
-  const liveDigestPath = await writeCurrentDigest(trackedConfig, { ...finalManifest, manifestPath }, championState, previousManifest, updatedHistoryEvents);
-  const pruneResult = await pruneRunArtifacts(trackedConfig);
+  const artifactPaths = await writeScoutCycleArtifacts({
+    config: trackedConfig,
+    championState,
+    manifest: finalManifest,
+    manifestPath,
+  });
 
-  return { manifest: finalManifest, manifestPath, scoutPath, liveDigestPath, pruneResult };
+  return { manifest: finalManifest, manifestPath, ...artifactPaths };
   } catch (error) {
     if (!manifestFinalized) {
       await markAutoresearchRunIncompleteUnlessManifestExists({

@@ -43,6 +43,7 @@ export function normalizeRegimeExitResearchConfig(raw = {}) {
   const promotion = normalizePromotion(raw.promotion);
   return {
     enabled: raw.enabled === true,
+    exploitEnabled: raw.exploitEnabled !== false,
     exitRegimeEnabled: raw.exitRegimeEnabled !== false,
     globalAllParameterEnabled: raw.globalAllParameterEnabled !== false,
     robustnessLadderEnabled: raw.robustnessLadderEnabled !== false,

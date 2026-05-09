@@ -16,11 +16,17 @@ import {
   partitionLabs,
   planArtifactPrune,
   renderDigestMarkdown,
+  configFingerprint,
   sameConfig,
   selectChampionBootstrapSource,
   selectRobustMatrixCandidate,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
+import {
+  buildChampionConfigFingerprint,
+  buildGlobalPatchFingerprint,
+} from '../scripts/lib/pine-global-search.mjs';
+import { selectNextResearchLane } from '../scripts/lib/pine-regime-exit-scheduler.mjs';
 import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs';
 import * as autoresearchCli from '../scripts/pine-autoresearch.mjs';
 import {
@@ -48,6 +54,10 @@ import {
   buildOfflineDataMissingSkipResult,
   buildRegimeExitStateForScout,
   buildRegimeAwareSearchBatch,
+  collectTestedGlobalPatchFingerprints,
+  loadRecentCompletedManifestsForNovelty,
+  shouldSkipGlobalAllParameterSweep,
+  buildGlobalAllParameterExhaustedManifest,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -240,6 +250,549 @@ test('pine autoresearch exposes neutral evaluator seams for external lanes', () 
   assert.equal(typeof ensureChampionState, 'function');
   assert.equal(typeof latestManifestPath, 'function');
   assert.equal(typeof manifestsDir, 'function');
+});
+
+test('collectTestedGlobalPatchFingerprints reads v2 manifest searchPlan variants for same champion only', () => {
+  const currentChampion = { configId: 'champ-current', config: { minPredSum: 1.8, adxThreshold: 20 } };
+  const championConfigFingerprint = buildChampionConfigFingerprint(currentChampion.config);
+  const entryPatch = { minPredSum: 2 };
+  const filtersPatch = { adxThreshold: 22 };
+  const entryFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: entryPatch,
+  });
+  const filtersFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'global-all-parameter',
+    mutationFamily: 'filters',
+    patch: filtersPatch,
+  });
+  const manifests = [
+    {
+      champion: { configId: 'champ-current', config: { adxThreshold: 20, minPredSum: 1.8 } },
+      searchPlan: {
+        variants: [
+          {
+            lane: 'globalAllParameter',
+            patchFingerprint: entryFingerprint,
+            patch: entryPatch,
+            mutationFamily: 'entry',
+            metadata: {
+              championConfigFingerprint,
+              patchFingerprintVersion: 2,
+              patchFingerprint: entryFingerprint,
+            },
+          },
+          {
+            lane: 'global-all-parameter',
+            patchFingerprint: filtersFingerprint,
+            patch: filtersPatch,
+            family: 'filters',
+            metadata: {
+              championConfigFingerprint,
+              patchFingerprintVersion: 2,
+            },
+          },
+          {
+            lane: 'exitRegime',
+            patchFingerprint: 'fp-exit-regime',
+          },
+        ],
+      },
+    },
+    {
+      champion: { configId: 'other-champ', config: { minPredSum: 2.6, adxThreshold: 20 } },
+      searchPlan: {
+        variants: [
+          { lane: 'globalAllParameter', patchFingerprint: 'fp-other', metadata: { patchFingerprintVersion: 2 } },
+        ],
+      },
+    },
+  ];
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: currentChampion,
+    manifests,
+  });
+
+  assert.deepEqual([...fingerprints].sort(), [entryFingerprint, filtersFingerprint].sort());
+});
+
+test('collectTestedGlobalPatchFingerprints matches same championConfigFingerprint across configId changes', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const patch = { minPredSum: 2 };
+  const patchFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch,
+  });
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'new-label', config: { adxThreshold: 20, minPredSum: 1.8 } },
+    manifests: [
+      {
+        champion: { configId: 'old-label', config: championConfig },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              patchFingerprint,
+              patch,
+              mutationFamily: 'entry',
+              metadata: { championConfigFingerprint, patchFingerprintVersion: 2 },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [patchFingerprint]);
+});
+
+
+test('collectTestedGlobalPatchFingerprints collects minimal manifest matched by variant championConfigFingerprint', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const patchFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'new-id', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'old-id' },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              patchFingerprint,
+              patch: { minPredSum: 2 },
+              metadata: {
+                championConfigFingerprint,
+                patchFingerprintVersion: 2,
+                mutationFamily: 'entry',
+              },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [patchFingerprint]);
+});
+
+test('collectTestedGlobalPatchFingerprints reconstructs v2 fingerprint from legacy manifest patch evidence', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const patch = { minPredSum: 2 };
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch,
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'champ-legacy', config: { adxThreshold: 20, minPredSum: 1.8 } },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              patch,
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+});
+
+test('collectTestedGlobalPatchFingerprints reconstructs legacy patch from variant config and champion config', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'champ-legacy', config: championConfig },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              config: { minPredSum: 2, adxThreshold: 20 },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+});
+
+test('collectTestedGlobalPatchFingerprints rejects malformed stored fingerprint when reconstruction disagrees', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'champ-legacy', config: championConfig },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              patch: { minPredSum: 2 },
+              patchFingerprint: 'bogus-stored-fingerprint',
+              metadata: {
+                championConfigFingerprint,
+                patchFingerprintVersion: 2,
+                patchFingerprint: 'also-bogus',
+              },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+  assert.equal(fingerprints.has('bogus-stored-fingerprint'), false);
+  assert.equal(fingerprints.has('also-bogus'), false);
+});
+
+test('collectTestedGlobalPatchFingerprints ignores stored-only fingerprints without patch or config evidence', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const manifests = [
+    {
+      champion: { configId: 'champ-current', config: championConfig },
+      searchPlan: {
+        variants: [
+          {
+            lane: 'globalAllParameter',
+            family: 'entry',
+            patchFingerprint: 'stored-only-manifest-config-poison',
+            metadata: {
+              championConfigFingerprint,
+              patchFingerprintVersion: 2,
+              patchFingerprint: 'stored-only-manifest-config-poison',
+            },
+          },
+        ],
+      },
+    },
+    {
+      championConfigFingerprint,
+      searchPlan: {
+        variants: [
+          {
+            lane: 'globalAllParameter',
+            family: 'entry',
+            patchFingerprint: 'stored-only-fingerprint-poison',
+            metadata: {
+              championConfigFingerprint,
+              patchFingerprintVersion: 2,
+              patchFingerprint: 'stored-only-fingerprint-poison',
+            },
+          },
+        ],
+      },
+    },
+  ];
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests,
+  });
+
+  assert.equal(fingerprints.has('stored-only-manifest-config-poison'), false);
+  assert.equal(fingerprints.has('stored-only-fingerprint-poison'), false);
+  assert.equal(fingerprints.size, 0);
+});
+
+test('collectTestedGlobalPatchFingerprints reconstructs config-only variant when manifest has fingerprint but no champion config', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'legacy-summary', config: null },
+        championConfigFingerprint,
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              config: { minPredSum: 2, adxThreshold: 20 },
+              patchFingerprint: expected,
+              metadata: { patchFingerprintVersion: 2, patchFingerprint: expected },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+});
+
+test('collectTestedGlobalPatchFingerprints uses current config for variant-matched stale manifest config reconstruction', () => {
+  const currentConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const staleConfig = { minPredSum: 1.1, adxThreshold: 20 };
+  const currentFingerprint = buildChampionConfigFingerprint(currentConfig);
+  const staleFingerprint = buildChampionConfigFingerprint(staleConfig);
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint: currentFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+  const staleBogus = buildGlobalPatchFingerprint({
+    championConfigFingerprint: currentFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2, adxThreshold: 20 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: currentConfig },
+    manifests: [
+      {
+        champion: { configId: 'champ-stale', config: staleConfig },
+        championConfigFingerprint: staleFingerprint,
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              config: { minPredSum: 2, adxThreshold: 20 },
+              metadata: { championConfigFingerprint: currentFingerprint },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+  assert.equal(fingerprints.has(staleBogus), false);
+});
+
+test('collectTestedGlobalPatchFingerprints does not collect old fingerprints for same configId changed config', () => {
+  const oldConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const newConfig = { minPredSum: 2.4, adxThreshold: 20 };
+  const oldConfigFingerprint = buildChampionConfigFingerprint(oldConfig);
+  const oldPatchFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint: oldConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'reused-id', config: newConfig },
+    manifests: [
+      {
+        champion: { configId: 'reused-id', config: oldConfig },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              patchFingerprint: oldPatchFingerprint,
+              patch: { minPredSum: 2 },
+              mutationFamily: 'entry',
+              metadata: {
+                championConfigFingerprint: oldConfigFingerprint,
+                patchFingerprintVersion: 2,
+              },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.equal(fingerprints.has(oldPatchFingerprint), false);
+  assert.equal(fingerprints.size, 0);
+});
+
+test('collectTestedGlobalPatchFingerprints ignores minimal legacy manifest matched only by reused configId', () => {
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'same-id', config: { minPredSum: 2.4, adxThreshold: 20 } },
+    manifests: [
+      {
+        champion: { configId: 'same-id' },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              patch: { minPredSum: 2 },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.equal(fingerprints.size, 0);
+});
+
+test('collectTestedGlobalPatchFingerprints accepts future history event manifests', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const patch = { minPredSum: 2 };
+  const patchFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch,
+  });
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    historyEvents: [
+      {
+        type: 'cycle-complete',
+        manifest: {
+          champion: { configId: 'champ-current', config: championConfig },
+          searchPlan: {
+            variants: [
+              {
+                lane: 'globalAllParameter',
+                patchFingerprint,
+                patch,
+                mutationFamily: 'entry',
+                metadata: { championConfigFingerprint, patchFingerprintVersion: 2 },
+              },
+            ],
+          },
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [patchFingerprint]);
+});
+
+test('loadRecentCompletedManifestsForNovelty reads recent manifests and ignores missing or malformed files', async () => {
+  const missingRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-novelty-missing-'));
+  assert.deepEqual(await loadRecentCompletedManifestsForNovelty({ config: { researchRoot: missingRoot } }), []);
+
+  const researchRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-novelty-manifests-'));
+  const config = { researchRoot };
+  const dir = manifestsDir(config);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, '001-old.json'), JSON.stringify({ runId: 'old' }), 'utf8');
+  await fs.writeFile(path.join(dir, '002-valid.json'), JSON.stringify({ runId: 'valid' }), 'utf8');
+  await fs.writeFile(path.join(dir, '003-malformed.json'), '{', 'utf8');
+  await fs.writeFile(path.join(dir, '004-new.json'), JSON.stringify({ runId: 'new' }), 'utf8');
+  await fs.writeFile(path.join(dir, 'ignored.txt'), JSON.stringify({ runId: 'ignored' }), 'utf8');
+
+  const manifests = await loadRecentCompletedManifestsForNovelty({ config, limit: 3 });
+
+  assert.deepEqual(manifests.map((manifest) => manifest.runId), ['valid', 'new']);
+});
+
+test('loadRecentCompletedManifestsForNovelty can scan all retained manifests for novelty', async () => {
+  const researchRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-novelty-all-'));
+  const config = { researchRoot };
+  const dir = manifestsDir(config);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, '001-old.json'), JSON.stringify({ runId: 'old' }), 'utf8');
+  await fs.writeFile(path.join(dir, '002-middle.json'), JSON.stringify({ runId: 'middle' }), 'utf8');
+  await fs.writeFile(path.join(dir, '003-new.json'), JSON.stringify({ runId: 'new' }), 'utf8');
+
+  const recentOnly = await loadRecentCompletedManifestsForNovelty({ config, limit: 1 });
+  const allRetained = await loadRecentCompletedManifestsForNovelty({ config, limit: null });
+
+  assert.deepEqual(recentOnly.map((manifest) => manifest.runId), ['new']);
+  assert.deepEqual(allRetained.map((manifest) => manifest.runId), ['old', 'middle', 'new']);
+});
+
+test('buildRegimeAwareSearchBatch skips tested global patch outside recent manifest window when all retained manifests are loaded', async () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const testedPatch = { minPredSum: 2 };
+  const expectedFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: testedPatch,
+  });
+  const researchRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-novelty-window-'));
+  const config = { researchRoot };
+  const dir = manifestsDir(config);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, '001-old-tested.json'), JSON.stringify({
+    runId: 'old-tested',
+    champion: { configId: 'old-id', config: championConfig },
+    searchPlan: {
+      variants: [{ lane: 'globalAllParameter', family: 'entry', patch: testedPatch }],
+    },
+  }), 'utf8');
+  await fs.writeFile(path.join(dir, '002-middle.json'), JSON.stringify({ runId: 'middle' }), 'utf8');
+  await fs.writeFile(path.join(dir, '003-new.json'), JSON.stringify({ runId: 'new' }), 'utf8');
+
+  const recentOnly = await loadRecentCompletedManifestsForNovelty({ config, limit: 1 });
+  const allRetained = await loadRecentCompletedManifestsForNovelty({ config, limit: null });
+  assert.equal(collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'current-id', config: championConfig },
+    manifests: recentOnly,
+  }).has(expectedFingerprint), false);
+
+  const blockedBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion: { configId: 'current-id', config: championConfig },
+    maxConfigs: 1,
+    policy: {
+      recentManifestsForNovelty: allRetained,
+      globalAllParameterVariantsPerFamily: 1,
+    },
+    regimeExitResearch: { enabled: true },
+  });
+
+  assert.equal(blockedBatch.some((variant) => variant.patchFingerprint === expectedFingerprint), false);
+  assert.deepEqual(blockedBatch.map((variant) => variant.family), ['filters']);
 });
 
 for (const helpArgs of [['--help'], ['-h'], ['help']]) {
@@ -3289,6 +3842,837 @@ test('buildRegimeAwareSearchBatch injects selected exitRegime candidates', () =>
   assert.ok(batch.every((variant) => variant.variantId));
   assert.ok(batch.every((variant) => variant.config));
   assert.ok(batch.every((variant) => variant.patch && Object.keys(variant.patch).length > 0));
+});
+
+function globalAllParameterChampion(configId = 'champ-repeat') {
+  return {
+    configId,
+    config: {
+      minPredSum: 1.8,
+      adxThreshold: 20,
+      slAtrMult: 0.5,
+      trailAtrMult: 1,
+      fusionV4LongAtrWeight: -0.25,
+      fusionV4LongEmaWeight: 0,
+      fusionV4ShortEmaWeight: 0,
+    },
+  };
+}
+
+function globalAllParameterManifest({ champion, variants }) {
+  return {
+    champion: { configId: champion.configId, config: { ...champion.config } },
+    searchPlan: {
+      variants: variants.map((variant) => ({
+        lane: variant.lane,
+        family: variant.family,
+        mutationFamily: variant.mutationFamily,
+        patch: variant.patch,
+        config: variant.config,
+        patchFingerprint: variant.patchFingerprint,
+        metadata: variant.metadata,
+      })),
+    },
+  };
+}
+
+function buildGlobalAllParameterScoutManifest({ champion, searchBatch }) {
+  return buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-global-manifest',
+    championState: champion,
+    historyEventsBefore: [],
+    searchBatch,
+    primarySweep: {
+      topConfigs: [
+        { configId: champion.configId, score: 70, roiPct: 40, profitFactor: 1.5, maxDrawdownPct: 5, tradeCount: 200, config: { ...champion.config } },
+      ],
+    },
+    matrixCandidates: [],
+  }).manifest;
+}
+
+test('buildScoutOrchestrationState persists global patch fingerprints from real searchBatch input', () => {
+  const champion = globalAllParameterChampion('champ-real-manifest-persist');
+  const searchBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 2,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+
+  const manifest = buildGlobalAllParameterScoutManifest({ champion, searchBatch });
+  const persisted = manifest.searchPlan.variants;
+
+  assert.equal(manifest.globalNoveltyGuardVersion, 1);
+  assert.equal(searchBatch.length, 2);
+  assert.ok(searchBatch.every((variant) => variant.patchFingerprint));
+  assert.ok(searchBatch.every((variant) => variant.metadata?.patchFingerprint));
+  assert.deepEqual(persisted.map((variant) => variant.variantId), searchBatch.map((variant) => variant.variantId));
+  assert.deepEqual(persisted.map((variant) => variant.lane), ['globalAllParameter', 'globalAllParameter']);
+  assert.deepEqual(persisted.map((variant) => variant.family), searchBatch.map((variant) => variant.family));
+  assert.deepEqual(persisted.map((variant) => variant.patch), searchBatch.map((variant) => variant.patch));
+  assert.deepEqual(persisted.map((variant) => variant.patchFingerprint), searchBatch.map((variant) => variant.patchFingerprint));
+  assert.deepEqual(persisted.map((variant) => variant.metadata?.patchFingerprint), searchBatch.map((variant) => variant.metadata.patchFingerprint));
+  assert.deepEqual(persisted.map((variant) => variant.config), searchBatch.map((variant) => variant.config));
+});
+
+test('collectTestedGlobalPatchFingerprints reads fingerprints from buildScoutOrchestrationState manifest', () => {
+  const champion = globalAllParameterChampion('champ-real-manifest-collect');
+  const searchBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 2,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+  const manifest = buildGlobalAllParameterScoutManifest({ champion, searchBatch });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion,
+    manifests: [manifest],
+  });
+
+  assert.deepEqual([...fingerprints].sort(), searchBatch.map((variant) => variant.patchFingerprint).sort());
+});
+
+test('buildRegimeAwareSearchBatch skips duplicate globalAllParameter variants from history and manifests', () => {
+  const champion = globalAllParameterChampion('champ-repeat');
+  const first = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 2,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 3 },
+  });
+  const manifest = globalAllParameterManifest({ champion, variants: [first[0]] });
+  const historyEvents = [{ type: 'cycle-complete', manifest: globalAllParameterManifest({ champion, variants: [first[1]] }) }];
+
+  const second = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 2,
+    historyEvents,
+    regimeExitResearch: { enabled: true },
+    policy: {
+      globalAllParameterVariantsPerFamily: 3,
+      recentManifestsForNovelty: [manifest],
+    },
+  });
+
+  assert.equal(second.length, 2);
+  assert.equal(second.some((variant) => first.some((old) => old.patchFingerprint === variant.patchFingerprint)), false);
+});
+
+test('buildRegimeAwareSearchBatch returns exhausted globalAllParameter [] and does not fall back', () => {
+  const champion = globalAllParameterChampion('champ-exhausted-no-fallback');
+  const allVariants = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 6,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+  const manifest = globalAllParameterManifest({ champion, variants: allVariants });
+
+  const exhausted = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 6,
+    regimeExitResearch: { enabled: true },
+    policy: {
+      globalAllParameterVariantsPerFamily: 1,
+      recentManifestsForNovelty: [manifest],
+    },
+  });
+
+  assert.equal(allVariants.length, 6);
+  assert.deepEqual(exhausted, []);
+});
+
+test('buildRegimeExitStateForScout reports exhausted globalAllParameter lane with manifest-derived evidence', () => {
+  const champion = globalAllParameterChampion('champ-exhausted-summary');
+  const allVariants = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 6,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+  const recentManifestsForNovelty = [globalAllParameterManifest({ champion, variants: allVariants })];
+
+  const state = buildRegimeExitStateForScout({
+    config: {
+      maxConfigs: 6,
+      regimeExitResearch: {
+        enabled: true,
+        globalAllParameterEnabled: true,
+        exitRegimeEnabled: false,
+        robustnessEnabled: false,
+      },
+    },
+    championState: champion,
+    historyEventsBefore: [],
+    searchBatch: [],
+    schedulerState: {
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 0 },
+    },
+    regimeExitContext: { recentManifestsForNovelty },
+  });
+
+  assert.equal(state.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.candidateCount, 0);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.previewOnly, false);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.exhausted, true);
+  assert.equal(state.shadowRegimeScoreboard.generatorSummary.testedPatchFingerprintCount, 6);
+});
+
+test('buildRegimeExitStateForScout skips exhausted globalAllParameter lane for same champion when alternatives are enabled', () => {
+  const champion = globalAllParameterChampion('champ-exhausted-selector');
+  const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+  const state = buildRegimeExitStateForScout({
+    config: {
+      maxConfigs: 6,
+      regimeExitResearch: {
+        enabled: true,
+        globalAllParameterEnabled: true,
+        exitRegimeEnabled: true,
+        robustnessLadderEnabled: true,
+      },
+    },
+    championState: champion,
+    searchBatch: [],
+    schedulerState: {
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 1000, exitRegime: 0 },
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          globalAllParameter: {
+            lane: 'globalAllParameter',
+            championConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-global-exhausted',
+            reason: 'global-all-parameter-exhausted',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(state.shadowRegimeScoreboard.selectedLane, 'exitRegime');
+  assert.notEqual(state.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
+  assert.deepEqual(state.shadowRegimeScoreboard.exhaustedLanes, ['globalAllParameter']);
+});
+
+test('buildRegimeExitStateForScout ignores old globalAllParameter exhaustion after champion config changes', () => {
+  const oldChampion = globalAllParameterChampion('champ-old-exhausted');
+  const newChampion = {
+    ...globalAllParameterChampion('champ-new-config'),
+    config: { ...globalAllParameterChampion('champ-new-config').config, minPredSum: 2.1 },
+  };
+  const oldChampionConfigFingerprint = buildChampionConfigFingerprint(oldChampion.config);
+  const state = buildRegimeExitStateForScout({
+    config: {
+      maxConfigs: 6,
+      regimeExitResearch: {
+        enabled: true,
+        globalAllParameterEnabled: true,
+        exitRegimeEnabled: true,
+      },
+    },
+    championState: newChampion,
+    searchBatch: [],
+    schedulerState: {
+      stagnationLevel: 1,
+      laneExhaustions: {
+        [oldChampionConfigFingerprint]: {
+          globalAllParameter: {
+            lane: 'globalAllParameter',
+            championConfigFingerprint: oldChampionConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-old-global-exhausted',
+            reason: 'global-all-parameter-exhausted',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(state.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
+  assert.deepEqual(state.shadowRegimeScoreboard.exhaustedLanes, []);
+});
+
+test('selectNextResearchLane does not let preferred-lane budget debt override exhaustion', () => {
+  const championConfigFingerprint = buildChampionConfigFingerprint(globalAllParameterChampion('champ-debt').config);
+  const selectedLane = selectNextResearchLane({
+    stagnationLevel: 3,
+    budgetDebt: { globalAllParameter: 9999, exitRegime: 0, robustness: 0, exploit: 0 },
+    lanesEnabled: {
+      exploit: false,
+      exitRegime: true,
+      globalAllParameter: true,
+      robustness: true,
+    },
+    championConfigFingerprint,
+    schedulerState: {
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          globalAllParameter: {
+            lane: 'globalAllParameter',
+            championConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-global-exhausted',
+            reason: 'global-all-parameter-exhausted',
+          },
+        },
+      },
+    },
+  });
+
+  assert.equal(selectedLane, 'exitRegime');
+});
+
+function exhaustedGlobalAllParameterRegimeState(champion = globalAllParameterChampion('champ-exhausted-helper')) {
+  const allVariants = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion,
+    maxConfigs: 6,
+    regimeExitResearch: { enabled: true },
+    policy: { globalAllParameterVariantsPerFamily: 1 },
+  });
+  return buildRegimeExitStateForScout({
+    config: {
+      matrixId: 'pine-autoresearch',
+      maxConfigs: 6,
+      regimeExitResearch: {
+        enabled: true,
+        globalAllParameterEnabled: true,
+        exitRegimeEnabled: false,
+        robustnessEnabled: false,
+      },
+    },
+    championState: champion,
+    searchBatch: [],
+    schedulerState: { stagnationLevel: 1, budgetDebt: { globalAllParameter: 0 } },
+    regimeExitContext: { recentManifestsForNovelty: [globalAllParameterManifest({ champion, variants: allVariants })] },
+  });
+}
+
+test('shouldSkipGlobalAllParameterSweep returns true only for exhausted empty globalAllParameter sweep', () => {
+  const champion = globalAllParameterChampion('champ-skip-helper');
+  const regimeExitState = exhaustedGlobalAllParameterRegimeState(champion);
+
+  assert.equal(shouldSkipGlobalAllParameterSweep({ regimeExitState, searchBatch: [] }), true);
+  assert.equal(shouldSkipGlobalAllParameterSweep({ regimeExitState, searchBatch: [{ variantId: 'novel' }] }), false);
+  assert.equal(shouldSkipGlobalAllParameterSweep({ regimeExitState: { ...regimeExitState, enabled: false }, searchBatch: [] }), false);
+  assert.equal(shouldSkipGlobalAllParameterSweep({
+    regimeExitState: {
+      ...regimeExitState,
+      shadowRegimeScoreboard: {
+        ...regimeExitState.shadowRegimeScoreboard,
+        selectedLane: 'exitRegime',
+      },
+    },
+    searchBatch: [],
+  }), false);
+});
+
+test('buildGlobalAllParameterExhaustedManifest records exhausted globalAllParameter evidence', () => {
+  const champion = globalAllParameterChampion('champ-exhausted-manifest');
+  const regimeExitState = exhaustedGlobalAllParameterRegimeState(champion);
+  const manifest = buildGlobalAllParameterExhaustedManifest({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8 },
+    },
+    runId: 'run-exhausted-manifest',
+    championState: champion,
+    regimeExitState,
+    schedulerState: { noNewCandidateStreak: 2, stagnationLevel: 1 },
+  });
+
+  assert.equal(manifest.globalNoveltyGuardVersion, 1);
+  assert.equal(manifest.searchPlan.variantCount, 0);
+  assert.deepEqual(manifest.searchPlan.variants, []);
+  assert.equal(manifest.matrixDecision.recommendation, 'hold');
+  assert.equal(manifest.matrixDecision.reason, 'global-all-parameter-exhausted');
+  assert.equal(manifest.primarySweep, null);
+  assert.equal(manifest.noNewCandidate, true);
+  assert.equal(manifest.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
+  assert.equal(manifest.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
+  assert.equal(manifest.shadowRegimeScoreboard.generatorSummary.testedPatchFingerprintCount, 6);
+});
+
+test('runScout records next non-global lane after exhausted globalAllParameter hold when alternatives are enabled', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-global-exhausted-next-lane-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-exhausted-next-lane-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        exitRegimeEnabled: true,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: true,
+        offline: { mode: 'local-first' },
+      },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-next-lane');
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-next-lane-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 0, exitRegime: 0 },
+      noNewCandidateStreak: 0,
+      globalAllParameterVariantsPerFamily: 1,
+    }), 'utf8');
+
+    const allVariants = buildRegimeAwareSearchBatch({
+      selectedLane: 'globalAllParameter',
+      champion,
+      maxConfigs: 6,
+      regimeExitResearch: { enabled: true },
+      policy: { globalAllParameterVariantsPerFamily: 1 },
+    });
+    await fs.writeFile(
+      path.join(autoresearchCli.manifestsDir(config), '000-prior-global.json'),
+      JSON.stringify(globalAllParameterManifest({ champion, variants: allVariants })),
+      'utf8',
+    );
+
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async () => {
+        throw new Error('primary sweep must not run while recording exhausted global lane');
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'global-all-parameter-exhausted');
+    const schedulerState = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), 'utf8'));
+    const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+    assert.equal(schedulerState.lastLaneExhaustion.lane, 'globalAllParameter');
+    assert.equal(schedulerState.lastLaneExhaustion.championConfigFingerprint, championConfigFingerprint);
+    assert.equal(schedulerState.lastLaneExhaustion.nextSelectedLane, 'exitRegime');
+    assert.notEqual(schedulerState.lastLaneExhaustion.nextSelectedLane, 'globalAllParameter');
+    assert.equal(schedulerState.laneExhaustions[championConfigFingerprint].globalAllParameter.nextSelectedLane, 'exitRegime');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('runScout skips primary sweep and updates scheduler state when globalAllParameter is exhausted', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-global-exhausted-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-exhausted-runscout-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        lanes: {
+          exploitRatio: 0,
+          exitRegimeRatio: 0,
+          globalAllParameterRatio: 1,
+          robustnessRatio: 0,
+        },
+        exitRegimeEnabled: false,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: false,
+        offline: { mode: 'local-first' },
+      },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-exhausted');
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-exhausted-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 0 },
+      noNewCandidateStreak: 0,
+      globalAllParameterVariantsPerFamily: 1,
+    }), 'utf8');
+
+    const allVariants = buildRegimeAwareSearchBatch({
+      selectedLane: 'globalAllParameter',
+      champion,
+      maxConfigs: 6,
+      regimeExitResearch: { enabled: true },
+      policy: { globalAllParameterVariantsPerFamily: 1 },
+    });
+    await fs.writeFile(
+      path.join(autoresearchCli.manifestsDir(config), '000-prior-global.json'),
+      JSON.stringify(globalAllParameterManifest({ champion, variants: allVariants })),
+      'utf8',
+    );
+
+    const sweepCalls = [];
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async (...args) => {
+        sweepCalls.push(args);
+        throw new Error('primary sweep must not run when globalAllParameter is exhausted');
+      },
+    });
+
+    assert.deepEqual(sweepCalls, []);
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'global-all-parameter-exhausted');
+    assert.equal(result.manifest.globalNoveltyGuardVersion, 1);
+    assert.equal(result.manifest.searchPlan.variantCount, 0);
+    assert.deepEqual(result.manifest.searchPlan.variants, []);
+    assert.equal(result.manifest.matrixDecision.reason, 'global-all-parameter-exhausted');
+    assert.equal(result.manifest.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
+    assert.equal(result.manifestPath, path.join(autoresearchCli.manifestsDir(config), `${result.manifest.runId}.json`));
+
+    const variantFilePath = path.join(config.researchRoot, `${result.manifest.runId}-variants.json`);
+    assert.equal(await readIfExists(variantFilePath), null);
+
+    const schedulerState = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), 'utf8'));
+    assert.equal(schedulerState.noNewCandidateStreak, 1);
+    assert.equal(schedulerState.lastChampionFingerprint, schedulerState.lastCandidateFingerprint);
+    const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+    assert.equal(schedulerState.lastLaneExhaustion.lane, 'globalAllParameter');
+    assert.equal(schedulerState.lastLaneExhaustion.championConfigFingerprint, championConfigFingerprint);
+    assert.equal(schedulerState.lastLaneExhaustion.reason, 'global-all-parameter-exhausted');
+    assert.equal(schedulerState.lastLaneExhaustion.nextSelectedLane, null);
+    assert.equal(schedulerState.lastLaneExhaustion.fallbackReason, 'no-enabled-non-exhausted-lane');
+    assert.equal(schedulerState.laneExhaustions[championConfigFingerprint].globalAllParameter.lane, 'globalAllParameter');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('runScout exhausted globalAllParameter finalizes comparable artifacts and markdown without undefined', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-global-exhausted-artifacts-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-exhausted-artifacts-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        lanes: {
+          exploitRatio: 0,
+          exitRegimeRatio: 0,
+          globalAllParameterRatio: 1,
+          robustnessRatio: 0,
+        },
+        exitRegimeEnabled: false,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: false,
+        offline: { mode: 'local-first' },
+      },
+      retention: { keepLatestRuns: 1, pruneSweepRuns: true, pruneEvaluationRuns: true, prunePartialRuns: true },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-exhausted-artifacts');
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-exhausted-artifacts-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 0 },
+      noNewCandidateStreak: 0,
+      globalAllParameterVariantsPerFamily: 1,
+    }), 'utf8');
+
+    const allVariants = buildRegimeAwareSearchBatch({
+      selectedLane: 'globalAllParameter',
+      champion,
+      maxConfigs: 6,
+      regimeExitResearch: { enabled: true },
+      policy: { globalAllParameterVariantsPerFamily: 1 },
+    });
+    await fs.writeFile(
+      path.join(autoresearchCli.manifestsDir(config), '000-prior-global.json'),
+      JSON.stringify(globalAllParameterManifest({ champion, variants: allVariants })),
+      'utf8',
+    );
+
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async () => {
+        throw new Error('primary sweep must not run when globalAllParameter is exhausted');
+      },
+    });
+
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'global-all-parameter-exhausted');
+    assert.equal(result.manifestPath, path.join(autoresearchCli.manifestsDir(config), `${result.manifest.runId}.json`));
+    assert.equal(result.scoutPath, path.join(config.digestRoot, `${result.manifest.runId}.md`));
+    assert.equal(result.liveDigestPath, path.join(config.digestRoot, 'latest-digest.md'));
+    assert.ok(result.pruneResult);
+
+    const historyMarkdown = await fs.readFile(path.join(config.digestRoot, 'history.md'), 'utf8');
+    assert.match(historyMarkdown, /globalAllParameter novel patch space exhausted/);
+
+    const latestDigest = await fs.readFile(path.join(config.digestRoot, 'latest-digest.md'), 'utf8');
+    assert.match(latestDigest, new RegExp(`Latest run: ${result.manifest.runId}`));
+
+    const latest = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'latest.json'), 'utf8'));
+    assert.equal(latest.manifestPath, result.manifestPath);
+    assert.equal(latest.runId, result.manifest.runId);
+
+    const historyEvents = (await fs.readFile(path.join(config.researchRoot, 'history.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const cycleEvent = historyEvents.find((event) => event.runId === result.manifest.runId);
+    assert.ok(cycleEvent);
+    for (const key of [
+      'steadyState',
+      'noChangeStreak',
+      'activeTrackId',
+      'windowSetId',
+      'noveltySignature',
+      'rotationTrigger',
+      'rotationReason',
+      'sameTrackCycleStreak',
+      'topCandidateSimilarity',
+      'promotionEligible',
+      'promotionEligibleReason',
+      'noNewCandidate',
+      'noNewCandidateStreak',
+      'stagnationLevel',
+      'stagnationReason',
+      'lastEscalatedAt',
+      'rejectedCandidateFingerprint',
+      'globalNoveltyGuardVersion',
+    ]) {
+      assert.ok(Object.hasOwn(cycleEvent, key), `missing history field ${key}`);
+    }
+    assert.equal(cycleEvent.steadyState, true);
+    assert.equal(cycleEvent.noNewCandidate, true);
+    assert.equal(cycleEvent.promotionEligible, false);
+    assert.equal(cycleEvent.promotionEligibleReason, 'global-all-parameter-exhausted');
+
+    const scoutMarkdown = await fs.readFile(result.scoutPath, 'utf8');
+    assert.match(scoutMarkdown, /Primary sweep: \*\*skipped\*\*/);
+    assert.match(scoutMarkdown, /global-all-parameter-exhausted/);
+    assert.doesNotMatch(scoutMarkdown, /undefined/);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('runScout returns terminal no-lane hold when only globalAllParameter lane is boolean-enabled and already exhausted', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-no-lane-global-exhausted-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-exhausted-no-lane-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        exploitEnabled: false,
+        exitRegimeEnabled: false,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: false,
+        offline: { mode: 'local-first' },
+      },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-no-lane');
+    const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-no-lane-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 1000 },
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          globalAllParameter: {
+            lane: 'globalAllParameter',
+            championConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-global-exhausted',
+            reason: 'global-all-parameter-exhausted',
+            nextSelectedLane: null,
+            fallbackReason: 'no-enabled-non-exhausted-lane',
+          },
+        },
+      },
+    }), 'utf8');
+
+    const sweepCalls = [];
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async (...args) => {
+        sweepCalls.push(args);
+        throw new Error('primary sweep must not run when no regime lane is available');
+      },
+    });
+
+    assert.deepEqual(sweepCalls, []);
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'no-regime-research-lane');
+    assert.equal(result.manifest.primarySweep, null);
+    assert.equal(result.manifest.matrixDecision.recommendation, 'hold');
+    assert.equal(result.manifest.matrixDecision.reason, 'no-regime-research-lane');
+    assert.equal(result.manifest.shadowRegimeScoreboard.selectedLane, null);
+    assert.equal(result.manifest.shadowRegimeScoreboard.noLaneReason, 'all-enabled-lanes-exhausted');
+    assert.deepEqual(result.manifest.searchPlan.variants, []);
+    assert.equal(result.scoutPath, path.join(config.digestRoot, `${result.manifest.runId}.md`));
+    assert.equal(result.liveDigestPath, path.join(config.digestRoot, 'latest-digest.md'));
+    assert.ok(result.pruneResult);
+
+    const noLaneDigest = await fs.readFile(path.join(config.digestRoot, 'latest-digest.md'), 'utf8');
+    assert.match(noLaneDigest, new RegExp(`Latest run: ${result.manifest.runId}`));
+    const noLaneHistoryMarkdown = await fs.readFile(path.join(config.digestRoot, 'history.md'), 'utf8');
+    assert.match(noLaneHistoryMarkdown, /no enabled non-exhausted regime research lane/);
+    const noLaneScoutMarkdown = await fs.readFile(result.scoutPath, 'utf8');
+    assert.match(noLaneScoutMarkdown, /Primary sweep: \*\*skipped\*\*/);
+    assert.match(noLaneScoutMarkdown, /no-regime-research-lane/);
+    assert.doesNotMatch(noLaneScoutMarkdown, /undefined/);
+
+    const noLaneEvents = (await fs.readFile(path.join(config.researchRoot, 'history.jsonl'), 'utf8'))
+      .trim()
+      .split('\n')
+      .filter(Boolean)
+      .map((line) => JSON.parse(line));
+    const noLaneEvent = noLaneEvents.find((event) => event.runId === result.manifest.runId);
+    assert.equal(noLaneEvent.noLaneReason, 'all-enabled-lanes-exhausted');
+    assert.equal(noLaneEvent.steadyState, true);
+    assert.equal(noLaneEvent.promotionEligible, false);
+    assert.equal(noLaneEvent.promotionEligibleReason, 'no-regime-research-lane');
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 

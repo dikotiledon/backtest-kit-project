@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
 const GENERATOR_VERSION = 'global-search-v1';
+export const PATCH_FINGERPRINT_VERSION = 2;
 const DEFAULT_FAMILIES = ['entry', 'filters', 'risk', 'fusion-weight', 'asymmetry', 'exit-state'];
 const POSITIVE_KEYS = new Set([
   'minPredSum',
@@ -45,6 +46,91 @@ function normalizeMaxConfigs(maxConfigs) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function stableJson(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableJson(item)).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(value[key])}`)
+      .join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map((item) => stableValue(item));
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        acc[key] = stableValue(value[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+const CONFIG_IDENTITY_KEYS = new Set([
+  'configId',
+  'id',
+  'name',
+  'label',
+  'sourcePath',
+  'sourceRunId',
+  'promotedAt',
+  'configFingerprint',
+  'championConfigFingerprint',
+]);
+
+function stripConfigIdentity(value) {
+  if (Array.isArray(value)) return value.map((item) => stripConfigIdentity(item));
+  if (value && typeof value === 'object') {
+    return Object.keys(value)
+      .sort()
+      .reduce((acc, key) => {
+        if (CONFIG_IDENTITY_KEYS.has(key)) return acc;
+        acc[key] = stripConfigIdentity(value[key]);
+        return acc;
+      }, {});
+  }
+  return value;
+}
+
+export function buildChampionConfigFingerprint(config = {}) {
+  return JSON.stringify(stableValue(stripConfigIdentity(config || {})));
+}
+
+function canonicalGlobalLane(lane) {
+  if (lane === 'globalAllParameter' || lane === 'global-all-parameter') return 'global-all-parameter';
+  return lane ?? null;
+}
+
+export function buildGlobalPatchFingerprint({ championConfigFingerprint = null, lane, mutationFamily, patch } = {}) {
+  if (typeof championConfigFingerprint !== 'string' || championConfigFingerprint.length === 0) {
+    throw new Error('championConfigFingerprint is required for global patch fingerprint v2');
+  }
+  return createHash('sha256')
+    .update(stableJson({
+      championConfigFingerprint,
+      lane: canonicalGlobalLane(lane),
+      mutationFamily,
+      patch: Object.fromEntries(toPatchEntries(patch || {})),
+    }))
+    .digest('hex');
+}
+
+export function buildLegacyGlobalPatchFingerprint({ championId = null, lane, mutationFamily, patch } = {}) {
+  return createHash('sha256')
+    .update(stableJson({
+      championConfigFingerprint: null,
+      legacyChampionId: championId ?? null,
+      lane: canonicalGlobalLane(lane),
+      mutationFamily,
+      patch: Object.fromEntries(toPatchEntries(patch || {})),
+    }))
+    .digest('hex');
 }
 
 function toPatchEntries(patch) {
@@ -94,37 +180,43 @@ export function validateGlobalMutationPatch(patch, { frozenKeys, allowArchitectu
   return { ok: true };
 }
 
-function buildFamilyPatch({ family, config }) {
+function signedStep(level, baseStep) {
+  const magnitude = Math.ceil(level / 2) * baseStep;
+  return level % 2 === 1 ? magnitude : -magnitude;
+}
+
+function buildFamilyPatch({ family, config, level = 1 }) {
   const c = config || {};
 
   if (family === 'entry') {
-    const minPredSum = clamp(numberOr(c.minPredSum, 2) + 0.2, 0.1, 10);
+    const minPredSum = clamp(numberOr(c.minPredSum, 2) + signedStep(level, 0.2), 0.1, 10);
     return { minPredSum };
   }
 
   if (family === 'filters') {
-    const adxThreshold = clamp(numberOr(c.adxThreshold, 20) + 2, 1, 100);
+    const adxThreshold = clamp(numberOr(c.adxThreshold, 20) + signedStep(level, 2), 1, 100);
     return { adxThreshold };
   }
 
   if (family === 'risk') {
-    const slAtrMult = clamp(numberOr(c.slAtrMult, 1) + 0.1, 0.1, 20);
+    const slAtrMult = clamp(numberOr(c.slAtrMult, 1) + signedStep(level, 0.1), 0.1, 20);
     return { slAtrMult };
   }
 
   if (family === 'fusion-weight') {
-    const fusionV4LongAtrWeight = clamp(numberOr(c.fusionV4LongAtrWeight, -0.25) + 0.1, -5, 5);
+    const fusionV4LongAtrWeight = clamp(numberOr(c.fusionV4LongAtrWeight, -0.25) + signedStep(level, 0.1), -5, 5);
     return { fusionV4LongAtrWeight };
   }
 
   if (family === 'asymmetry') {
-    const fusionV4LongEmaWeight = clamp(numberOr(c.fusionV4LongEmaWeight, 0) + 0.1, -5, 5);
-    const fusionV4ShortEmaWeight = clamp(numberOr(c.fusionV4ShortEmaWeight, 0) - 0.1, -5, 5);
+    const delta = signedStep(level, 0.1);
+    const fusionV4LongEmaWeight = clamp(numberOr(c.fusionV4LongEmaWeight, 0) + delta, -5, 5);
+    const fusionV4ShortEmaWeight = clamp(numberOr(c.fusionV4ShortEmaWeight, 0) - delta, -5, 5);
     return { fusionV4LongEmaWeight, fusionV4ShortEmaWeight };
   }
 
   if (family === 'exit-state') {
-    const trailAtrMult = clamp(numberOr(c.trailAtrMult, 1) + 0.1, 0.1, 20);
+    const trailAtrMult = clamp(numberOr(c.trailAtrMult, 1) + signedStep(level, 0.1), 0.1, 20);
     return { trailAtrMult };
   }
 
@@ -137,43 +229,88 @@ function sourceConfig(source) {
   return {};
 }
 
-export function buildGlobalMutationBatch({ incumbent, champion, maxConfigs, frozenKeys, families } = {}) {
+export function buildGlobalMutationBatch({
+  incumbent,
+  champion,
+  maxConfigs,
+  frozenKeys,
+  families,
+  variantsPerFamily = 1,
+  testedPatchFingerprints,
+} = {}) {
   const source = incumbent ?? champion;
   const config = sourceConfig(source);
   const selectedFamilies = Array.isArray(families) && families.length > 0 ? families : DEFAULT_FAMILIES;
   const limit = normalizeMaxConfigs(maxConfigs);
   if (limit === 0) return [];
 
+  const safeVariantsPerFamily = Math.max(1, Math.floor(Number(variantsPerFamily) || 1));
+  const testedFingerprints = new Set(
+    Array.isArray(testedPatchFingerprints)
+      ? testedPatchFingerprints
+      : testedPatchFingerprints instanceof Set
+        ? [...testedPatchFingerprints]
+        : [],
+  );
+  const emittedFingerprints = new Set();
   const originConfigId = source?.configId ?? source?.config?.configId ?? config?.configId ?? null;
+  const hasExplicitConfig = Boolean(source?.config && typeof source.config === 'object' && !Array.isArray(source.config));
+  const hasInheritedConfigFingerprint = typeof source?.championConfigFingerprint === 'string'
+    || typeof source?.metadata?.championConfigFingerprint === 'string';
+  const championConfigFingerprint = (hasExplicitConfig || !hasInheritedConfigFingerprint)
+    ? buildChampionConfigFingerprint(config)
+    : (source?.championConfigFingerprint ?? source?.metadata?.championConfigFingerprint ?? null);
   const out = [];
+  const lane = 'global-all-parameter';
+
   for (const family of selectedFamilies) {
-    const patch = buildFamilyPatch({ family, config });
-    if (!patch || typeof patch !== 'object') continue;
-    if (hasFrozenKey(patch, frozenKeys)) continue;
+    for (let level = 1; level <= safeVariantsPerFamily; level += 1) {
+      const patch = buildFamilyPatch({ family, config, level });
+      if (!patch || typeof patch !== 'object') continue;
+      if (hasFrozenKey(patch, frozenKeys)) continue;
 
-    const normalizedPatch = Object.fromEntries(toPatchEntries(patch));
-    const validation = validateGlobalMutationPatch(normalizedPatch, { frozenKeys });
-    if (!validation.ok) continue;
+      const normalizedPatch = Object.fromEntries(toPatchEntries(patch));
+      const validation = validateGlobalMutationPatch(normalizedPatch, { frozenKeys });
+      if (!validation.ok) continue;
 
-    const lane = 'global-all-parameter';
-    out.push({
-      candidateId: buildCandidateId({ lane, mutationFamily: family, patch: normalizedPatch }),
-      variantId: `${lane}-${family}`,
-      lane,
-      family,
-      mutationFamily: family,
-      axis: family,
-      patch: normalizedPatch,
-      config: { ...config, ...normalizedPatch },
-      touchedKeys: Object.keys(normalizedPatch),
-      metadata: {
-        originConfigId,
-        generatorVersion: GENERATOR_VERSION,
+      const patchFingerprint = buildGlobalPatchFingerprint({
+        championConfigFingerprint,
+        lane,
         mutationFamily: family,
-      },
-    });
+        patch: normalizedPatch,
+      });
+      if (testedFingerprints.has(patchFingerprint)) continue;
+      if (emittedFingerprints.has(patchFingerprint)) continue;
+      if (Object.entries(normalizedPatch).every(([key, value]) => Object.is(config?.[key], value))) continue;
+      emittedFingerprints.add(patchFingerprint);
 
-    if (out.length >= limit) break;
+      const variantId = safeVariantsPerFamily === 1
+        ? `${lane}-${family}`
+        : `${lane}-${family}-p${String(level).padStart(2, '0')}`;
+      out.push({
+        candidateId: buildCandidateId({ lane, mutationFamily: family, patch: normalizedPatch }),
+        variantId,
+        lane,
+        family,
+        mutationFamily: family,
+        axis: family,
+        patch: normalizedPatch,
+        config: { ...config, ...normalizedPatch },
+        touchedKeys: Object.keys(normalizedPatch),
+        patchFingerprint,
+        metadata: {
+          originConfigId,
+          generatorVersion: GENERATOR_VERSION,
+          mutationFamily: family,
+          championConfigFingerprint,
+          patchFingerprint,
+          patchFingerprintVersion: PATCH_FINGERPRINT_VERSION,
+          ladderLevel: level,
+        },
+      });
+
+      if (out.length >= limit) return out;
+    }
   }
 
   return out;

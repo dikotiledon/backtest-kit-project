@@ -17,6 +17,29 @@ function normalizeNonNegativeInteger(value, fallback = 0) {
   return Math.max(0, Math.floor(numeric));
 }
 
+function normalizeLaneExhaustions(value = {}) {
+  if (!isPlainObject(value)) return {};
+  const normalized = {};
+  for (const [championConfigFingerprint, lanes] of Object.entries(value)) {
+    if (typeof championConfigFingerprint !== 'string' || championConfigFingerprint.length === 0) continue;
+    if (!isPlainObject(lanes)) continue;
+    const normalizedLanes = {};
+    for (const [lane, entry] of Object.entries(lanes)) {
+      if (typeof lane !== 'string' || lane.length === 0) continue;
+      if (!isPlainObject(entry)) continue;
+      normalizedLanes[lane] = {
+        ...clone(entry),
+        lane: typeof entry.lane === 'string' && entry.lane.length > 0 ? entry.lane : lane,
+        championConfigFingerprint: typeof entry.championConfigFingerprint === 'string' && entry.championConfigFingerprint.length > 0
+          ? entry.championConfigFingerprint
+          : championConfigFingerprint,
+      };
+    }
+    if (Object.keys(normalizedLanes).length > 0) normalized[championConfigFingerprint] = normalizedLanes;
+  }
+  return normalized;
+}
+
 function stableValue(value) {
   if (Array.isArray(value)) {
     return value.map((item) => stableValue(item));
@@ -153,6 +176,8 @@ export function defaultSchedulerState() {
     lastEscalatedAt: null,
     blockedPromotionFingerprints: [],
     tabuRejectedFingerprints: [],
+    laneExhaustions: {},
+    lastLaneExhaustion: null,
   };
 }
 
@@ -340,6 +365,8 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
       ? [...previous.blockedPromotionFingerprints]
       : [],
     tabuRejectedFingerprints,
+    laneExhaustions: normalizeLaneExhaustions(previous.laneExhaustions),
+    lastLaneExhaustion: isPlainObject(previous.lastLaneExhaustion) ? clone(previous.lastLaneExhaustion) : null,
   };
 }
 
@@ -376,5 +403,7 @@ function normalizeSchedulerState(state = {}) {
     tabuRejectedFingerprints: Array.isArray(state.tabuRejectedFingerprints)
       ? [...state.tabuRejectedFingerprints]
       : base.tabuRejectedFingerprints,
+    laneExhaustions: normalizeLaneExhaustions(state.laneExhaustions),
+    lastLaneExhaustion: isPlainObject(state.lastLaneExhaustion) ? clone(state.lastLaneExhaustion) : base.lastLaneExhaustion,
   };
 }

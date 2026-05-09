@@ -1072,6 +1072,42 @@ test('normalizeVariantRecords accepts metadata-backed search variants', () => {
   ]);
 });
 
+test('normalizeVariantRecords preserves global novelty evidence from search variants', () => {
+  const records = normalizeVariantRecords([
+    {
+      variantId: 'global-entry',
+      lane: 'globalAllParameter',
+      family: 'entry',
+      mutationFamily: 'entry',
+      patch: { minPredSum: 2 },
+      patchFingerprint: 'fp-v2-entry',
+      metadata: {
+        championConfigFingerprint: 'champion-fp',
+        patchFingerprintVersion: 2,
+        patchFingerprint: 'fp-v2-entry',
+      },
+      config: { minPredSum: 2, adxThreshold: 20 },
+    },
+  ]);
+
+  assert.deepEqual(records, [
+    {
+      variantId: 'global-entry',
+      lane: 'globalAllParameter',
+      family: 'entry',
+      mutationFamily: 'entry',
+      patch: { minPredSum: 2 },
+      patchFingerprint: 'fp-v2-entry',
+      metadata: {
+        championConfigFingerprint: 'champion-fp',
+        patchFingerprintVersion: 2,
+        patchFingerprint: 'fp-v2-entry',
+      },
+      config: { minPredSum: 2, adxThreshold: 20 },
+    },
+  ]);
+});
+
 test('normalizeVariantRecords also accepts legacy plain combo arrays', () => {
   const records = normalizeVariantRecords([{ neighborsCount: 24, adxThreshold: 20 }]);
   assert.deepEqual(records, [

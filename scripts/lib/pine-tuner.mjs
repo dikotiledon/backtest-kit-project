@@ -1,12 +1,17 @@
 export function normalizeVariantRecords(rawVariants = []) {
   return rawVariants.map((item, index) => {
     if (item?.config && typeof item.config === 'object') {
-      return {
+      const record = {
         variantId: item.variantId || `variant-${index + 1}`,
         lane: item.lane || 'legacy',
         family: item.family || 'legacy',
         config: { ...item.config },
       };
+      if (item.mutationFamily !== undefined) record.mutationFamily = item.mutationFamily;
+      if (item.patch && typeof item.patch === 'object' && !Array.isArray(item.patch)) record.patch = { ...item.patch };
+      if (item.patchFingerprint !== undefined) record.patchFingerprint = item.patchFingerprint;
+      if (item.metadata && typeof item.metadata === 'object' && !Array.isArray(item.metadata)) record.metadata = { ...item.metadata };
+      return record;
     }
 
     return {

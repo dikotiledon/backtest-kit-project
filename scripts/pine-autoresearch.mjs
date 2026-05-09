@@ -866,12 +866,20 @@ function manifestChampionConfigIdentity(manifest) {
   return null;
 }
 
+function manifestChampionConfig(manifest) {
+  const value = manifest?.champion ?? manifest?.incumbent ?? null;
+  if (value?.config && typeof value.config === 'object' && !Array.isArray(value.config)) return value.config;
+  return null;
+}
+
 export async function loadRecentCompletedManifestsForNovelty({ config, limit = 24 } = {}) {
-  const safeLimit = Math.max(0, Math.floor(Number(limit) || 0));
+  const unbounded = limit === null || limit === undefined || limit === 'all';
+  const safeLimit = unbounded ? null : Math.max(0, Math.floor(Number(limit) || 0));
   if (safeLimit === 0) return [];
-  const files = (await listManifestFiles(config)).slice(-safeLimit);
+  const files = await listManifestFiles(config);
+  const selectedFiles = unbounded ? files : files.slice(-safeLimit);
   const manifests = [];
-  for (const fileName of files) {
+  for (const fileName of selectedFiles) {
     try {
       manifests.push(await readJson(path.join(manifestsDir(config), fileName)));
     } catch {
@@ -895,10 +903,24 @@ function variantMutationFamily(variant) {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
-function reconstructGlobalPatchFingerprint({ variant, championConfigFingerprint } = {}) {
+function reconstructPatchFromVariantConfig({ variant, championConfig } = {}) {
+  const variantConfig = variant?.config;
+  if (!championConfig || typeof championConfig !== 'object' || Array.isArray(championConfig)) return null;
+  if (!variantConfig || typeof variantConfig !== 'object' || Array.isArray(variantConfig)) return null;
+  const patch = {};
+  const keys = new Set([...Object.keys(variantConfig), ...Object.keys(championConfig)]);
+  for (const key of [...keys].sort()) {
+    if (!Object.is(variantConfig[key], championConfig[key])) patch[key] = variantConfig[key];
+  }
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function reconstructGlobalPatchFingerprint({ variant, championConfigFingerprint, championConfig = null } = {}) {
   const lane = variant?.lane;
   const mutationFamily = variantMutationFamily(variant);
-  const patch = variant?.patch;
+  const patch = (variant?.patch && typeof variant.patch === 'object' && !Array.isArray(variant.patch))
+    ? variant.patch
+    : reconstructPatchFromVariantConfig({ variant, championConfig });
   if (!isGlobalAllParameterLane(lane)) return null;
   if (typeof championConfigFingerprint !== 'string' || championConfigFingerprint.length === 0) return null;
   if (!mutationFamily) return null;
@@ -920,6 +942,9 @@ function variantStoredV2Fingerprints(variant) {
 export function collectTestedGlobalPatchFingerprints({ champion, historyEvents = [], manifests = [] } = {}) {
   const fingerprints = new Set();
   const currentChampionConfigFingerprint = championConfigIdentity(champion);
+  const currentChampionConfig = champion?.config && typeof champion.config === 'object' && !Array.isArray(champion.config)
+    ? champion.config
+    : null;
   const sources = [
     ...(Array.isArray(manifests) ? manifests : []),
     ...(Array.isArray(historyEvents) ? historyEvents.map((event) => event?.manifest).filter(Boolean) : []),
@@ -945,17 +970,26 @@ export function collectTestedGlobalPatchFingerprints({ champion, historyEvents =
       if (fingerprintChampionConfig === null) continue;
       if (fingerprintChampionConfig !== currentChampionConfigFingerprint) continue;
 
+      const manifestConfig = manifestChampionConfig(manifest);
+      const reconstructionConfig = manifestMatchesChampion
+        ? (manifestConfig ?? currentChampionConfig)
+        : (variantMatchesChampion ? currentChampionConfig : null);
       const reconstructed = reconstructGlobalPatchFingerprint({
         variant,
         championConfigFingerprint: fingerprintChampionConfig,
+        championConfig: reconstructionConfig,
       });
       if (reconstructed) {
         fingerprints.add(reconstructed);
         continue;
       }
 
-      for (const stored of variantStoredV2Fingerprints(variant)) {
-        fingerprints.add(stored);
+      const metadataMutationFamily = typeof variant?.metadata?.mutationFamily === 'string'
+        && variant.metadata.mutationFamily.length > 0;
+      if (manifestConfig !== null || (variantChampionConfigFingerprint !== null && metadataMutationFamily)) {
+        for (const stored of variantStoredV2Fingerprints(variant)) {
+          fingerprints.add(stored);
+        }
       }
     }
   }
@@ -1840,7 +1874,7 @@ export async function runScout(config, dependencies = {}) {
 
   const recentManifestsForNovelty = await loadRecentCompletedManifestsForNovelty({
     config: trackedConfig,
-    limit: trackedConfig.rotationPolicy?.tabuBootstrapManifestLimit ?? 24,
+    limit: null,
   });
   const championSource = { configId: championState.configId, config: championState.config };
   const testedGlobalPatchFingerprints = collectTestedGlobalPatchFingerprints({

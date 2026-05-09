@@ -420,6 +420,182 @@ test('collectTestedGlobalPatchFingerprints reconstructs v2 fingerprint from lega
   assert.deepEqual([...fingerprints], [expected]);
 });
 
+test('collectTestedGlobalPatchFingerprints reconstructs legacy patch from variant config and champion config', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'champ-legacy', config: championConfig },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              config: { minPredSum: 2, adxThreshold: 20 },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+});
+
+test('collectTestedGlobalPatchFingerprints rejects malformed stored fingerprint when reconstruction disagrees', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'champ-legacy', config: championConfig },
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              patch: { minPredSum: 2 },
+              patchFingerprint: 'bogus-stored-fingerprint',
+              metadata: {
+                championConfigFingerprint,
+                patchFingerprintVersion: 2,
+                patchFingerprint: 'also-bogus',
+              },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+  assert.equal(fingerprints.has('bogus-stored-fingerprint'), false);
+  assert.equal(fingerprints.has('also-bogus'), false);
+});
+
+test('collectTestedGlobalPatchFingerprints ignores stored-only fingerprints without config evidence', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        championConfigFingerprint,
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              patchFingerprint: 'stored-only-poison',
+              metadata: {
+                championConfigFingerprint,
+                patchFingerprintVersion: 2,
+                patchFingerprint: 'stored-only-poison',
+              },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.equal(fingerprints.has('stored-only-poison'), false);
+  assert.equal(fingerprints.size, 0);
+});
+
+test('collectTestedGlobalPatchFingerprints reconstructs config-only variant when manifest has fingerprint but no champion config', () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: championConfig },
+    manifests: [
+      {
+        champion: { configId: 'legacy-summary', config: null },
+        championConfigFingerprint,
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              config: { minPredSum: 2, adxThreshold: 20 },
+              patchFingerprint: expected,
+              metadata: { patchFingerprintVersion: 2, patchFingerprint: expected },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+});
+
+test('collectTestedGlobalPatchFingerprints uses current config for variant-matched stale manifest config reconstruction', () => {
+  const currentConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const staleConfig = { minPredSum: 1.1, adxThreshold: 20 };
+  const currentFingerprint = buildChampionConfigFingerprint(currentConfig);
+  const staleFingerprint = buildChampionConfigFingerprint(staleConfig);
+  const expected = buildGlobalPatchFingerprint({
+    championConfigFingerprint: currentFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2 },
+  });
+  const staleBogus = buildGlobalPatchFingerprint({
+    championConfigFingerprint: currentFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: { minPredSum: 2, adxThreshold: 20 },
+  });
+
+  const fingerprints = collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'champ-current', config: currentConfig },
+    manifests: [
+      {
+        champion: { configId: 'champ-stale', config: staleConfig },
+        championConfigFingerprint: staleFingerprint,
+        searchPlan: {
+          variants: [
+            {
+              lane: 'globalAllParameter',
+              family: 'entry',
+              config: { minPredSum: 2, adxThreshold: 20 },
+              metadata: { championConfigFingerprint: currentFingerprint },
+            },
+          ],
+        },
+      },
+    ],
+  });
+
+  assert.deepEqual([...fingerprints], [expected]);
+  assert.equal(fingerprints.has(staleBogus), false);
+});
+
 test('collectTestedGlobalPatchFingerprints does not collect old fingerprints for same configId changed config', () => {
   const oldConfig = { minPredSum: 1.8, adxThreshold: 20 };
   const newConfig = { minPredSum: 2.4, adxThreshold: 20 };
@@ -533,6 +709,68 @@ test('loadRecentCompletedManifestsForNovelty reads recent manifests and ignores 
   const manifests = await loadRecentCompletedManifestsForNovelty({ config, limit: 3 });
 
   assert.deepEqual(manifests.map((manifest) => manifest.runId), ['valid', 'new']);
+});
+
+test('loadRecentCompletedManifestsForNovelty can scan all retained manifests for novelty', async () => {
+  const researchRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-novelty-all-'));
+  const config = { researchRoot };
+  const dir = manifestsDir(config);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, '001-old.json'), JSON.stringify({ runId: 'old' }), 'utf8');
+  await fs.writeFile(path.join(dir, '002-middle.json'), JSON.stringify({ runId: 'middle' }), 'utf8');
+  await fs.writeFile(path.join(dir, '003-new.json'), JSON.stringify({ runId: 'new' }), 'utf8');
+
+  const recentOnly = await loadRecentCompletedManifestsForNovelty({ config, limit: 1 });
+  const allRetained = await loadRecentCompletedManifestsForNovelty({ config, limit: null });
+
+  assert.deepEqual(recentOnly.map((manifest) => manifest.runId), ['new']);
+  assert.deepEqual(allRetained.map((manifest) => manifest.runId), ['old', 'middle', 'new']);
+});
+
+test('buildRegimeAwareSearchBatch skips tested global patch outside recent manifest window when all retained manifests are loaded', async () => {
+  const championConfig = { minPredSum: 1.8, adxThreshold: 20 };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const testedPatch = { minPredSum: 2 };
+  const expectedFingerprint = buildGlobalPatchFingerprint({
+    championConfigFingerprint,
+    lane: 'globalAllParameter',
+    mutationFamily: 'entry',
+    patch: testedPatch,
+  });
+  const researchRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-novelty-window-'));
+  const config = { researchRoot };
+  const dir = manifestsDir(config);
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, '001-old-tested.json'), JSON.stringify({
+    runId: 'old-tested',
+    champion: { configId: 'old-id', config: championConfig },
+    searchPlan: {
+      variants: [{ lane: 'globalAllParameter', family: 'entry', patch: testedPatch }],
+    },
+  }), 'utf8');
+  await fs.writeFile(path.join(dir, '002-middle.json'), JSON.stringify({ runId: 'middle' }), 'utf8');
+  await fs.writeFile(path.join(dir, '003-new.json'), JSON.stringify({ runId: 'new' }), 'utf8');
+
+  const recentOnly = await loadRecentCompletedManifestsForNovelty({ config, limit: 1 });
+  const allRetained = await loadRecentCompletedManifestsForNovelty({ config, limit: null });
+  assert.equal(collectTestedGlobalPatchFingerprints({
+    champion: { configId: 'current-id', config: championConfig },
+    manifests: recentOnly,
+  }).has(expectedFingerprint), false);
+
+  const blockedBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion: { configId: 'current-id', config: championConfig },
+    maxConfigs: 1,
+    policy: {
+      recentManifestsForNovelty: allRetained,
+      globalAllParameterVariantsPerFamily: 1,
+    },
+    regimeExitResearch: { enabled: true },
+  });
+
+  assert.equal(blockedBatch.some((variant) => variant.patchFingerprint === expectedFingerprint), false);
+  assert.deepEqual(blockedBatch.map((variant) => variant.family), ['filters']);
 });
 
 for (const helpArgs of [['--help'], ['-h'], ['help']]) {

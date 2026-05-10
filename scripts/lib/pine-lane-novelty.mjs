@@ -33,10 +33,30 @@ function sortedPatch(patch = {}) {
   return Object.fromEntries(Object.entries(patch || {}).sort(([left], [right]) => compareCodePoints(left, right)));
 }
 
+function isPlainObject(value) {
+  return value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function sameConfigValue(left, right) {
+  return stableJson(left) === stableJson(right);
+}
+
+export function canonicalGeneratedLane(lane) {
+  if (lane === 'exitRegime' || lane === 'exit-regime') return 'exitRegime';
+  if (lane === 'globalAllParameter' || lane === 'global-all-parameter') return 'globalAllParameter';
+  return lane ?? null;
+}
+
 function sourceConfig(source) {
   if (source?.config && typeof source.config === 'object' && !Array.isArray(source.config)) return source.config;
   if (source && typeof source === 'object' && !Array.isArray(source)) return source;
   return {};
+}
+
+function sourceHasConfig(source) {
+  if (isPlainObject(source?.config)) return true;
+  if (!isPlainObject(source)) return false;
+  return !Object.hasOwn(source, 'championConfigFingerprint') && !Object.hasOwn(source, 'metadata');
 }
 
 function championFingerprint(source) {
@@ -56,7 +76,7 @@ export function buildLanePatchFingerprint({ championConfigFingerprint, lane, mut
   return createHash('sha256')
     .update(stableJson({
       championConfigFingerprint,
-      lane: lane ?? null,
+      lane: canonicalGeneratedLane(lane),
       mutationFamily: mutationFamily ?? null,
       patch: sortedPatch(patch),
       version: LANE_PATCH_FINGERPRINT_VERSION,
@@ -81,13 +101,57 @@ function manifestVariants(manifest) {
   return [];
 }
 
-function validPatchFingerprint(value) {
-  return typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+function configVerifiedPatch({ championConfig, patch, variantConfig }) {
+  if (!isPlainObject(variantConfig)) return patch;
+  if (!isPlainObject(championConfig)) return null;
+
+  for (const [key, value] of Object.entries(variantConfig)) {
+    const isPatchKey = Object.hasOwn(patch, key);
+    if (isPatchKey) {
+      if (!sameConfigValue(value, patch[key])) return null;
+      continue;
+    }
+    if (!Object.hasOwn(championConfig, key)) return null;
+    if (!sameConfigValue(value, championConfig[key])) return null;
+  }
+
+  for (const [key, value] of Object.entries(patch)) {
+    if (!Object.hasOwn(variantConfig, key)) return null;
+    if (!sameConfigValue(variantConfig[key], value)) return null;
+  }
+
+  return patch;
+}
+
+function patchFromVariantEvidence({ championConfig, variant }) {
+  if (isPlainObject(variant?.patch)) {
+    return configVerifiedPatch({
+      championConfig,
+      patch: variant.patch,
+      variantConfig: variant?.config,
+    });
+  }
+
+  if (!isPlainObject(variant?.config) || !isPlainObject(championConfig)) return null;
+
+  for (const key of Object.keys(championConfig)) {
+    if (!Object.hasOwn(variant.config, key)) return null;
+  }
+
+  const patch = {};
+  for (const [key, value] of Object.entries(variant.config)) {
+    if (Object.hasOwn(championConfig, key) && sameConfigValue(value, championConfig[key])) continue;
+    patch[key] = value;
+  }
+
+  return Object.keys(patch).length > 0 ? patch : null;
 }
 
 export function collectTestedLanePatchFingerprints({ champion, lane, manifests = [], historyEvents = [] } = {}) {
   const out = new Set();
   const expectedChampion = championFingerprint(champion);
+  const expectedLane = canonicalGeneratedLane(lane);
+  const fallbackChampionConfig = sourceHasConfig(champion) ? sourceConfig(champion) : null;
   const sources = [
     ...(Array.isArray(manifests) ? manifests : []),
     ...(Array.isArray(historyEvents) ? historyEvents.map((event) => event?.manifest).filter(Boolean) : []),
@@ -96,10 +160,11 @@ export function collectTestedLanePatchFingerprints({ champion, lane, manifests =
   for (const manifest of sources) {
     const manifestFingerprint = manifestChampionFingerprint(manifest);
     const authoritativeManifestFingerprint = manifestHasChampionConfig(manifest) ? manifestFingerprint : null;
+    const championConfig = manifestHasChampionConfig(manifest) ? manifest.champion.config : fallbackChampionConfig;
 
     for (const variant of manifestVariants(manifest)) {
-      const variantLane = variant?.lane ?? null;
-      if (lane && variantLane !== lane) continue;
+      const variantLane = canonicalGeneratedLane(variant?.lane ?? null);
+      if (expectedLane && variantLane !== expectedLane) continue;
 
       const variantChampion = authoritativeManifestFingerprint
         ?? variant?.championConfigFingerprint
@@ -107,20 +172,15 @@ export function collectTestedLanePatchFingerprints({ champion, lane, manifests =
         ?? manifestFingerprint;
       if (variantChampion !== expectedChampion) continue;
 
-      if (variant?.patch && typeof variant.patch === 'object' && !Array.isArray(variant.patch)) {
-        out.add(buildLanePatchFingerprint({
-          championConfigFingerprint: expectedChampion,
-          lane: variantLane ?? lane,
-          mutationFamily: variant?.mutationFamily ?? variant?.family ?? null,
-          patch: variant.patch,
-        }));
-        continue;
-      }
+      const patch = patchFromVariantEvidence({ championConfig, variant });
+      if (!patch) continue;
 
-      const existingFingerprint = variant?.patchFingerprint ?? variant?.metadata?.patchFingerprint;
-      if (validPatchFingerprint(existingFingerprint)) {
-        out.add(existingFingerprint);
-      }
+      out.add(buildLanePatchFingerprint({
+        championConfigFingerprint: expectedChampion,
+        lane: variantLane ?? expectedLane,
+        mutationFamily: variant?.mutationFamily ?? variant?.family ?? null,
+        patch,
+      }));
     }
   }
 

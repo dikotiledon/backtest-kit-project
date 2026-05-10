@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   buildLanePatchFingerprint,
+  canonicalGeneratedLane,
   collectTestedLanePatchFingerprints,
   filterNovelLaneCandidates,
 } from '../scripts/lib/pine-lane-novelty.mjs';
@@ -31,6 +32,23 @@ test('buildLanePatchFingerprint binds champion config lane family and patch', ()
   assert.notEqual(first, buildLanePatchFingerprint({ championConfigFingerprint, lane: 'globalAllParameter', mutationFamily: 'exit', patch: { slAtrMult: 0.4 } }));
   assert.notEqual(first, buildLanePatchFingerprint({ championConfigFingerprint, lane: 'exitRegime', mutationFamily: 'risk', patch: { slAtrMult: 0.4 } }));
   assert.notEqual(first, buildLanePatchFingerprint({ championConfigFingerprint, lane: 'exitRegime', mutationFamily: 'exit', patch: { slAtrMult: 0.3 } }));
+});
+
+test('buildLanePatchFingerprint canonicalizes generated lane aliases', () => {
+  assert.equal(canonicalGeneratedLane('exitRegime'), 'exitRegime');
+  assert.equal(canonicalGeneratedLane('exit-regime'), 'exitRegime');
+  assert.equal(canonicalGeneratedLane('globalAllParameter'), 'globalAllParameter');
+  assert.equal(canonicalGeneratedLane('global-all-parameter'), 'globalAllParameter');
+  assert.equal(canonicalGeneratedLane(undefined), null);
+
+  assert.equal(
+    buildLanePatchFingerprint({ championConfigFingerprint, lane: 'exitRegime', mutationFamily: 'exit', patch: { slAtrMult: 0.4 } }),
+    buildLanePatchFingerprint({ championConfigFingerprint, lane: 'exit-regime', mutationFamily: 'exit', patch: { slAtrMult: 0.4 } }),
+  );
+  assert.equal(
+    buildLanePatchFingerprint({ championConfigFingerprint, lane: 'globalAllParameter', mutationFamily: 'global', patch: { minPredSum: 1.9 } }),
+    buildLanePatchFingerprint({ championConfigFingerprint, lane: 'global-all-parameter', mutationFamily: 'global', patch: { minPredSum: 1.9 } }),
+  );
 });
 
 test('collectTestedLanePatchFingerprints reads matching lane fingerprints from manifests and history', () => {
@@ -136,6 +154,140 @@ test('collectTestedLanePatchFingerprints recomputes stale stored patch fingerpri
 
   assert.deepEqual([...fingerprints], [authoritativePatchFingerprint]);
   assert.notDeepEqual([...fingerprints], [stalePatchFingerprint]);
+});
+
+test('collectTestedLanePatchFingerprints rejects stored-only fingerprints without patch or config evidence', () => {
+  const storedOnlyFingerprint = 'a'.repeat(64);
+  const manifest = {
+    champion: { config: championConfig },
+    searchPlan: {
+      variants: [{
+        lane: 'exitRegime',
+        mutationFamily: 'exit',
+        patchFingerprint: storedOnlyFingerprint,
+        metadata: { championConfigFingerprint, patchFingerprint: storedOnlyFingerprint },
+      }],
+    },
+  };
+
+  const fingerprints = collectTestedLanePatchFingerprints({
+    champion: { config: championConfig },
+    lane: 'exitRegime',
+    manifests: [manifest],
+  });
+
+  assert.deepEqual([...fingerprints], []);
+});
+
+test('collectTestedLanePatchFingerprints reconstructs patch fingerprints from full config evidence', () => {
+  const patch = { slAtrMult: 0.4 };
+  const patchFingerprint = buildLanePatchFingerprint({
+    championConfigFingerprint,
+    lane: 'exitRegime',
+    mutationFamily: 'exit',
+    patch,
+  });
+  const manifest = {
+    champion: { config: championConfig },
+    searchPlan: {
+      variants: [{
+        lane: 'exitRegime',
+        mutationFamily: 'exit',
+        config: { ...championConfig, ...patch },
+      }],
+    },
+  };
+
+  const fingerprints = collectTestedLanePatchFingerprints({
+    champion: { config: championConfig },
+    lane: 'exitRegime',
+    manifests: [manifest],
+  });
+
+  assert.deepEqual([...fingerprints], [patchFingerprint]);
+});
+
+test('collectTestedLanePatchFingerprints rejects partial config-only evidence', () => {
+  const manifest = {
+    champion: { config: championConfig },
+    searchPlan: {
+      variants: [{
+        lane: 'exitRegime',
+        mutationFamily: 'exit',
+        config: { slAtrMult: 0.4 },
+      }],
+    },
+  };
+
+  const fingerprints = collectTestedLanePatchFingerprints({
+    champion: { config: championConfig },
+    lane: 'exitRegime',
+    manifests: [manifest],
+  });
+
+  assert.deepEqual([...fingerprints], []);
+});
+
+test('collectTestedLanePatchFingerprints rejects malformed stored fingerprint when reconstruction disagrees', () => {
+  const patch = { slAtrMult: 0.4 };
+  const wrongStoredFingerprint = 'b'.repeat(64);
+  const authoritativePatchFingerprint = buildLanePatchFingerprint({
+    championConfigFingerprint,
+    lane: 'exitRegime',
+    mutationFamily: 'exit',
+    patch,
+  });
+  const manifest = {
+    champion: { config: championConfig },
+    searchPlan: {
+      variants: [{
+        lane: 'exitRegime',
+        mutationFamily: 'exit',
+        patch,
+        patchFingerprint: wrongStoredFingerprint,
+        metadata: { championConfigFingerprint, patchFingerprint: wrongStoredFingerprint },
+      }],
+    },
+  };
+
+  const fingerprints = collectTestedLanePatchFingerprints({
+    champion: { config: championConfig },
+    lane: 'exitRegime',
+    manifests: [manifest],
+  });
+
+  assert.deepEqual([...fingerprints], [authoritativePatchFingerprint]);
+});
+
+test('collectTestedLanePatchFingerprints rejects variant patch and config disagreement', () => {
+  const patch = { slAtrMult: 0.4 };
+  const patchFingerprint = buildLanePatchFingerprint({
+    championConfigFingerprint,
+    lane: 'exitRegime',
+    mutationFamily: 'exit',
+    patch,
+  });
+  const manifest = {
+    champion: { config: championConfig },
+    searchPlan: {
+      variants: [{
+        lane: 'exitRegime',
+        mutationFamily: 'exit',
+        patch,
+        config: { ...championConfig, slAtrMult: 0.9 },
+        patchFingerprint,
+        metadata: { championConfigFingerprint, patchFingerprint },
+      }],
+    },
+  };
+
+  const fingerprints = collectTestedLanePatchFingerprints({
+    champion: { config: championConfig },
+    lane: 'exitRegime',
+    manifests: [manifest],
+  });
+
+  assert.deepEqual([...fingerprints], []);
 });
 
 test('collectTestedLanePatchFingerprints does not let stale manifest metadata override current variant metadata', () => {

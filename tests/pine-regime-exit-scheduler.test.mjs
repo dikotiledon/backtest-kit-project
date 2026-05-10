@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   allocateRegimeExitLaneBudget,
+  resolveExhaustedResearchLanes,
   selectNextResearchLane,
   STAGNATION_LANE_METADATA,
 } from '../scripts/lib/pine-regime-exit-scheduler.mjs';
@@ -94,6 +95,80 @@ test('stagnation metadata strictPromotionGates only enabled at level 3', () => {
   assert.equal(STAGNATION_LANE_METADATA[1].strictPromotionGates, false);
   assert.equal(STAGNATION_LANE_METADATA[2].strictPromotionGates, false);
   assert.equal(STAGNATION_LANE_METADATA[3].strictPromotionGates, true);
+});
+
+test('resolveExhaustedResearchLanes canonicalizes explicit generated lane aliases', () => {
+  assert.deepEqual(
+    resolveExhaustedResearchLanes({
+      exhaustedLanes: ['exit-regime', 'global-all-parameter', 'exitRegime', 'globalAllParameter', 'unknown-lane'],
+    }),
+    ['exitRegime', 'globalAllParameter'],
+  );
+});
+
+test('resolveExhaustedResearchLanes returns canonical lane order after alias de-duplication', () => {
+  assert.deepEqual(
+    resolveExhaustedResearchLanes({
+      exhaustedLanes: ['global-all-parameter', 'exit-regime', 'globalAllParameter', 'exitRegime'],
+    }),
+    ['exitRegime', 'globalAllParameter'],
+  );
+});
+
+test('resolveExhaustedResearchLanes canonicalizes persisted generated lane aliases', () => {
+  const championConfigFingerprint = 'champion-fp';
+  const schedulerState = {
+    laneExhaustions: {
+      [championConfigFingerprint]: {
+        'exit-regime': { reason: 'exit-regime-exhausted' },
+        'global-all-parameter': { reason: 'global-all-parameter-exhausted' },
+        'not-a-lane': { reason: 'ignored' },
+      },
+    },
+  };
+
+  assert.deepEqual(
+    resolveExhaustedResearchLanes({ schedulerState, championConfigFingerprint }),
+    ['exitRegime', 'globalAllParameter'],
+  );
+});
+
+test('selectNextResearchLane skips dashed persisted exitRegime exhaustion', () => {
+  const championConfigFingerprint = 'champion-fp';
+  const lane = selectNextResearchLane({
+    stagnationLevel: 0,
+    budgetDebt: { exitRegime: 100, globalAllParameter: 0, exploit: 0, robustness: 0 },
+    lanesEnabled: { exploit: false, exitRegime: true, globalAllParameter: true, robustness: false },
+    schedulerState: {
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          'exit-regime': { reason: 'exit-regime-exhausted' },
+        },
+      },
+    },
+    championConfigFingerprint,
+  });
+
+  assert.equal(lane, 'globalAllParameter');
+});
+
+test('selectNextResearchLane returns null when only lane is dashed persisted exhausted alias', () => {
+  const championConfigFingerprint = 'champion-fp';
+  const lane = selectNextResearchLane({
+    stagnationLevel: 1,
+    budgetDebt: { globalAllParameter: 100 },
+    lanesEnabled: { exploit: false, exitRegime: false, globalAllParameter: true, robustness: false },
+    schedulerState: {
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          'global-all-parameter': { reason: 'global-all-parameter-exhausted' },
+        },
+      },
+    },
+    championConfigFingerprint,
+  });
+
+  assert.equal(lane, null);
 });
 
 test('selectNextResearchLane uses stagnation preferences as zero-debt tie breakers 0/1/2/3', () => {

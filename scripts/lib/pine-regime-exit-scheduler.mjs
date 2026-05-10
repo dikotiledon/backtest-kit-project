@@ -84,6 +84,8 @@ function normalizeBudgetDebt(value) {
 }
 
 function normalizeLaneKey(lane) {
+  if (lane === 'exit-regime') return 'exitRegime';
+  if (lane === 'global-all-parameter') return 'globalAllParameter';
   return LANE_KEYS.includes(lane) ? lane : null;
 }
 
@@ -94,7 +96,8 @@ export function resolveExhaustedResearchLanes({ schedulerState = {}, championCon
   const persisted = championConfigFingerprint && schedulerState?.laneExhaustions?.[championConfigFingerprint]
     ? Object.keys(schedulerState.laneExhaustions[championConfigFingerprint]).map(normalizeLaneKey).filter(Boolean)
     : [];
-  return [...new Set([...explicit, ...persisted])];
+  const exhausted = new Set([...explicit, ...persisted]);
+  return LANE_KEYS.filter((lane) => exhausted.has(lane));
 }
 
 export function selectNextResearchLane({

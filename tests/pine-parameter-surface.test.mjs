@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import {
+  __parameterSurfaceInternals,
   buildParameterLadder,
   buildSurfaceMutationCandidates,
   parameterSurfaceCatalog,
@@ -80,6 +81,25 @@ test('all enabled catalog keys have patch support', () => {
   }
 });
 
+test('parameter surface code-point comparator differs from locale collation for ambiguous strings', () => {
+  const { compareCodePoints } = __parameterSurfaceInternals;
+
+  assert.equal(Math.sign(compareCodePoints('A', 'a')), -1);
+  assert.equal(Math.sign('A'.localeCompare('a')), 1);
+  assert.equal(Math.sign(compareCodePoints('ä', 'z')), 1);
+  assert.equal(Math.sign('ä'.localeCompare('z')), -1);
+});
+
+test('parameterSurfaceCatalog uses code-point ordering inside a family', () => {
+  const { compareCodePoints } = __parameterSurfaceInternals;
+  const fusionKeys = parameterSurfaceCatalog({
+    families: ['fusion'],
+    includeArchitecture: true,
+  }).map((item) => item.key);
+
+  assert.deepEqual(fusionKeys, [...fusionKeys].sort(compareCodePoints));
+});
+
 test('strategicParameterFamilies groups broad optimization surface', () => {
   const families = strategicParameterFamilies();
 
@@ -135,6 +155,20 @@ test('buildSurfaceMutationCandidates interleaves families so small cycles are br
   assert.equal(families.size >= 5, true);
   assert.equal(families.has('risk'), true);
   assert.equal(families.has('exit'), true);
+});
+
+test('buildSurfaceMutationCandidates keeps deterministic fallback ordering for unknown families', () => {
+  const candidates = buildSurfaceMutationCandidates({
+    champion,
+    maxConfigs: 6,
+    levels: 1,
+    families: ['avwap-context', 'channel-context', 'context-aggregator'],
+  });
+
+  assert.deepEqual(
+    candidates.map((candidate) => candidate.family).slice(0, 3),
+    ['avwap-context', 'channel-context', 'context-aggregator'],
+  );
 });
 
 test('surface mutation candidates carry patch metadata and merged config', () => {

@@ -4940,6 +4940,117 @@ test('runScout returns terminal no-lane hold when only globalAllParameter lane i
 });
 
 
+test('runScout treats dashed persisted global lane exhaustion as terminal no-lane hold', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-no-lane-global-dashed-exhausted-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'global-dashed-exhausted-no-lane-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 6,
+      minTrades: 1,
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        globalAllParameterVariantsPerFamily: 1,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        exploitEnabled: false,
+        exitRegimeEnabled: false,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: false,
+        offline: { mode: 'local-first' },
+      },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-no-lane-dashed');
+    const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-no-lane-dashed-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 1,
+      budgetDebt: { globalAllParameter: 1000 },
+      laneExhaustions: {
+        [championConfigFingerprint]: {
+          'global-all-parameter': {
+            lane: 'global-all-parameter',
+            championConfigFingerprint,
+            exhaustedAt: '2026-05-09T00:00:00.000Z',
+            runId: 'run-global-dashed-exhausted',
+            reason: 'global-all-parameter-exhausted',
+            nextSelectedLane: null,
+            fallbackReason: 'all-enabled-lanes-exhausted',
+          },
+        },
+      },
+    }), 'utf8');
+
+    const sweepCalls = [];
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async (...args) => {
+        sweepCalls.push(args);
+        throw new Error('primary sweep must not run when dashed persisted global lane is exhausted');
+      },
+    });
+
+    assert.deepEqual(sweepCalls, []);
+    assert.equal(result.skipped, true);
+    assert.equal(result.reason, 'no-regime-research-lane');
+    assert.equal(result.manifest.primarySweep, null);
+    assert.equal(result.manifest.matrixDecision.recommendation, 'hold');
+    assert.equal(result.manifest.matrixDecision.reason, 'no-regime-research-lane');
+    assert.equal(result.manifest.shadowRegimeScoreboard.selectedLane, null);
+    assert.equal(result.manifest.shadowRegimeScoreboard.noLaneReason, 'all-enabled-lanes-exhausted');
+    assert.deepEqual(result.manifest.searchPlan.variants, []);
+
+    const persistedSchedulerState = JSON.parse(await fs.readFile(
+      path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`),
+      'utf8',
+    ));
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(
+        persistedSchedulerState.laneExhaustions[championConfigFingerprint],
+        'global-all-parameter',
+      ),
+      true,
+    );
+    assert.equal(
+      Object.prototype.hasOwnProperty.call(
+        persistedSchedulerState.laneExhaustions[championConfigFingerprint],
+        'globalAllParameter',
+      ),
+      false,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('runScout offline-strict missing branch appends cycle history and returns skipped payload', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-offline-missing-'));
   try {

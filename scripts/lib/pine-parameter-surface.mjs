@@ -149,6 +149,21 @@ function familyOrderRank(family) {
   return index === -1 ? FAMILY_PRIORITY.length : index;
 }
 
+function compareCodePoints(left, right) {
+  if (left === right) return 0;
+  const leftPoints = Array.from(String(left));
+  const rightPoints = Array.from(String(right));
+  const limit = Math.min(leftPoints.length, rightPoints.length);
+
+  for (let index = 0; index < limit; index += 1) {
+    const leftCodePoint = leftPoints[index].codePointAt(0);
+    const rightCodePoint = rightPoints[index].codePointAt(0);
+    if (leftCodePoint !== rightCodePoint) return leftCodePoint - rightCodePoint;
+  }
+
+  return leftPoints.length - rightPoints.length;
+}
+
 function roundNumeric(value, step = 1) {
   const stepText = String(step);
   const decimals = stepText.includes('.') ? stepText.split('.')[1].length : 0;
@@ -223,7 +238,7 @@ export function parameterSurfaceCatalog({ families = null, includeArchitecture =
     .filter((item) => !familySet || familySet.has(item.family))
     .filter((item) => includeArchitecture || item.architecture !== true)
     .map((item) => ({ ...item }))
-    .sort((a, b) => familyOrderRank(a.family) - familyOrderRank(b.family) || a.key.localeCompare(b.key));
+    .sort((a, b) => familyOrderRank(a.family) - familyOrderRank(b.family) || compareCodePoints(a.key, b.key));
 }
 
 export function parameterSurfaceKeys(options = {}) {
@@ -269,7 +284,7 @@ export function buildSurfaceMutationCandidates({ champion, incumbent, maxConfigs
   }
 
   const queues = [...grouped.entries()]
-    .sort(([left], [right]) => familyOrderRank(left) - familyOrderRank(right) || left.localeCompare(right))
+    .sort(([left], [right]) => familyOrderRank(left) - familyOrderRank(right) || compareCodePoints(left, right))
     .map(([family, specs]) => ({ family, candidates: familyCandidates(specs, config, levels) }))
     .filter((queue) => queue.candidates.length > 0);
 
@@ -292,4 +307,5 @@ export const __parameterSurfaceInternals = {
   ARCHITECTURE_KEYS,
   FAMILY_PRIORITY,
   RAW_SURFACE,
+  compareCodePoints,
 };

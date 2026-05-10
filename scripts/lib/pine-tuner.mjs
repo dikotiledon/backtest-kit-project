@@ -627,6 +627,20 @@ const PATCHERS = {
   divCautionPenaltyValue: floatInputPatcher('divCautionPenaltyValue', 'Divergence Caution Penalty'),
 };
 
+function sortPatchKeys(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
+export function patchableParameterKeys() {
+  return Object.keys(PATCHERS).sort(sortPatchKeys);
+}
+
+export function hasPatchSupport(key) {
+  return typeof key === 'string' && Object.prototype.hasOwnProperty.call(PATCHERS, key);
+}
+
 export function buildPatchPlan(config) {
   return Object.entries(config)
     .filter(([key]) => PATCHERS[key])

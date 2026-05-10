@@ -9,6 +9,8 @@ import assert from 'node:assert/strict';
 
 import {
   buildPatchPlan,
+  hasPatchSupport,
+  patchableParameterKeys,
   applyPatchPlan,
   cartesianProduct,
   filterSweepCombos,
@@ -179,6 +181,27 @@ test('buildPatchPlan ignores deprecated side toggles and still patches exit mult
   });
 
   assert.deepEqual(plan.map((step) => step.key), ['slAtrMult', 'tpAtrMult']);
+});
+
+test('patchableParameterKeys exposes deterministic patcher key list', () => {
+  const keys = patchableParameterKeys();
+
+  assert.equal(Array.isArray(keys), true);
+  assert.equal(keys.length >= 90, true);
+  assert.deepEqual(keys, [...keys].sort());
+  assert.equal(keys.includes('minPredSum'), true);
+  assert.equal(keys.includes('slAtrMult'), true);
+  assert.equal(keys.includes('trailAtrMult'), true);
+  assert.equal(keys.includes('divRsiLen'), true);
+  assert.equal(keys.includes('showDash'), false);
+});
+
+test('hasPatchSupport returns true only for existing patchers', () => {
+  assert.equal(hasPatchSupport('minPredSum'), true);
+  assert.equal(hasPatchSupport('tpAtrMult'), true);
+  assert.equal(hasPatchSupport('useAdverseDivergenceTighten'), true);
+  assert.equal(hasPatchSupport('showDash'), false);
+  assert.equal(hasPatchSupport('missingParam'), false);
 });
 
 test('applyPatchPlan patches filter toggles and thresholds for focused sweeps', () => {

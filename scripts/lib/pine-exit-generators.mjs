@@ -1,8 +1,19 @@
 import { createHash } from 'node:crypto';
 
+import { filterNovelLaneCandidates } from './pine-lane-novelty.mjs';
+import { buildSurfaceMutationCandidates, parameterSurfaceCatalog } from './pine-parameter-surface.mjs';
+
 export const PARTIAL_TAKE_PROFIT_STATUS = 'blockedByPineFeasibility';
 
-export const SUPPORTED_EXIT_PATCH_KEYS = ['slAtrMult', 'tpAtrMult', 'trailAtrMult', 'useTrailingStop'];
+export const SUPPORTED_EXIT_PATCH_KEYS = [
+  'useStopsTP', 'riskAtrLen', 'slAtrMult', 'tpAtrMult',
+  'useSignalExits', 'useTrailingStop', 'trailAtrLen', 'trailAtrMult', 'trailActivateR',
+  'useFailedFollowThroughTighten', 'followThroughBars', 'followThroughMinProgressAtr', 'followThroughTightenTrailAtrMult',
+  'useTimeStop', 'timeStopBars', 'timeStopMinUnrealizedAtr',
+  'useContextCautionTighten', 'contextCautionDelta', 'contextCautionTrailAtrMult',
+  'usePostEntrySqueezeCollapseTighten', 'postEntrySqueezeCollapseBars', 'postEntrySqueezeCollapseTrailAtrMult',
+  'useAdverseDivergenceTighten', 'adverseDivergenceBars', 'adverseDivergenceTrailAtrMult',
+];
 
 export const BLOCKED_EXIT_FAMILIES = {
   'breakeven-stop': 'unsupportedByPipeline',
@@ -11,26 +22,32 @@ export const BLOCKED_EXIT_FAMILIES = {
   'partial-take-profit': PARTIAL_TAKE_PROFIT_STATUS,
 };
 
-const NUMERIC_LIMITS = {
-  slAtrMult: { minExclusive: 0, maxInclusive: 20 },
-  trailAtrMult: { minExclusive: 0, maxInclusive: 20 },
-  tpAtrMult: { minExclusive: 0, maxInclusive: 50 },
-};
-
-const BOOLEAN_KEYS = new Set(['useTrailingStop']);
+const EXIT_SURFACE_FAMILIES = ['risk', 'exit', 'exit-state'];
 const SUPPORTED_KEYS = new Set(SUPPORTED_EXIT_PATCH_KEYS);
+const SURFACE_SPEC_BY_KEY = new Map(
+  parameterSurfaceCatalog({ families: EXIT_SURFACE_FAMILIES })
+    .filter((spec) => SUPPORTED_KEYS.has(spec.key))
+    .map((spec) => [spec.key, spec]),
+);
+const BOOLEAN_KEYS = new Set(SUPPORTED_EXIT_PATCH_KEYS.filter((key) => key.startsWith('use')));
 
-function coerceFiniteNumber(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
+function compareCodePoints(left, right) {
+  if (left === right) return 0;
+  const leftPoints = Array.from(String(left));
+  const rightPoints = Array.from(String(right));
+  const limit = Math.min(leftPoints.length, rightPoints.length);
 
-function positive(value, fallback) {
-  return Math.max(0.1, coerceFiniteNumber(value, fallback));
+  for (let index = 0; index < limit; index += 1) {
+    const leftCodePoint = leftPoints[index].codePointAt(0);
+    const rightCodePoint = rightPoints[index].codePointAt(0);
+    if (leftCodePoint !== rightCodePoint) return leftCodePoint - rightCodePoint;
+  }
+
+  return leftPoints.length - rightPoints.length;
 }
 
 function canonicalPatch(patch) {
-  return Object.fromEntries(Object.entries(patch).sort(([a], [b]) => a.localeCompare(b)));
+  return Object.fromEntries(Object.entries(patch).sort(([left], [right]) => compareCodePoints(left, right)));
 }
 
 function buildCandidateId({ exitFamily, regimeSliceId, patch }) {
@@ -46,18 +63,41 @@ function normalizeMaxConfigs(maxConfigs) {
   return Math.max(0, Math.floor(parsed));
 }
 
+function axisPriority(candidate) {
+  const index = SUPPORTED_EXIT_PATCH_KEYS.indexOf(candidate?.metadata?.axis);
+  return index === -1 ? SUPPORTED_EXIT_PATCH_KEYS.length : index;
+}
+
+function prioritizeFirstPassByAxis(candidates) {
+  const remaining = [...candidates];
+  const prioritized = [];
+  const seenAxes = new Set();
+
+  for (const key of SUPPORTED_EXIT_PATCH_KEYS) {
+    const index = remaining.findIndex((candidate) => candidate?.metadata?.axis === key && !seenAxes.has(key));
+    if (index === -1) continue;
+    const [candidate] = remaining.splice(index, 1);
+    prioritized.push(candidate);
+    seenAxes.add(key);
+  }
+
+  remaining.sort((left, right) => axisPriority(left) - axisPriority(right));
+  return [...prioritized, ...remaining];
+}
+
 export function validateExitPatch(patch = {}) {
   if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
     return { ok: false, reason: 'patch must be an object' };
   }
 
   for (const key of Object.keys(patch)) {
-    if (!SUPPORTED_KEYS.has(key)) {
+    if (!SUPPORTED_KEYS.has(key) || !SURFACE_SPEC_BY_KEY.has(key)) {
       return { ok: false, reason: 'unsupportedExitPatchKey', key };
     }
 
     const value = patch[key];
-    if (BOOLEAN_KEYS.has(key)) {
+    const spec = SURFACE_SPEC_BY_KEY.get(key);
+    if (BOOLEAN_KEYS.has(key) || spec.type === 'bool') {
       if (typeof value !== 'boolean') {
         return { ok: false, reason: `${key} must be boolean` };
       }
@@ -68,8 +108,15 @@ export function validateExitPatch(patch = {}) {
       return { ok: false, reason: `${key} must be finite` };
     }
 
-    const limits = NUMERIC_LIMITS[key];
-    if (!limits || value <= limits.minExclusive || value > limits.maxInclusive) {
+    if (spec.type === 'int' && !Number.isInteger(value)) {
+      return { ok: false, reason: `${key} must be integer` };
+    }
+
+    if (Number.isFinite(spec.min) && value < spec.min) {
+      return { ok: false, reason: `${key} out of range` };
+    }
+
+    if (Number.isFinite(spec.max) && value > spec.max) {
       return { ok: false, reason: `${key} out of range` };
     }
   }
@@ -85,61 +132,50 @@ function sourceConfig(source) {
 
 function normalizeBase(source) {
   const config = sourceConfig(source);
-  return {
-    config,
-    slAtrMult: positive(config.slAtrMult, 1),
-    tpAtrMult: positive(config.tpAtrMult, 2.5),
-    useTrailingStop: config.useTrailingStop === true,
-    trailAtrMult: positive(config.trailAtrMult, 1),
-  };
+  return { config };
 }
 
-export function buildExitFamilyCandidates({ incumbent, champion, regimeSliceId, maxConfigs } = {}) {
+export function buildExitFamilyCandidates({ incumbent, champion, regimeSliceId, maxConfigs, testedPatchFingerprints } = {}) {
   const limit = normalizeMaxConfigs(maxConfigs);
   if (limit === 0) return [];
 
   const source = incumbent ?? champion;
   const base = normalizeBase(source);
-  const patchPool = [
-    {
-      exitFamily: 'atr-stop-take-profit',
-      patch: {
-        slAtrMult: Math.min(20, Math.max(0.1, base.slAtrMult - 0.25)),
-        tpAtrMult: Math.min(50, Math.max(0.1, base.tpAtrMult + 0.5)),
-      },
-      metadata: { axis: 'atr-core' },
-    },
-    {
-      exitFamily: 'trailing-stop',
-      patch: {
-        useTrailingStop: !base.useTrailingStop,
-        trailAtrMult: Math.min(20, Math.max(0.1, base.trailAtrMult)),
-      },
-      metadata: { axis: 'trailing-toggle' },
-    },
-  ];
-
-  return patchPool
+  const rawCandidates = buildSurfaceMutationCandidates({
+    champion: source,
+    maxConfigs: limit * 6,
+    families: EXIT_SURFACE_FAMILIES,
+    levels: 6,
+  })
     .map((item) => {
       const patch = canonicalPatch(item.patch);
-      const candidateId = buildCandidateId({ exitFamily: item.exitFamily, regimeSliceId, patch });
+      const exitFamily = item.family === 'risk' ? 'atr-stop-take-profit' : item.family;
+      const candidateId = buildCandidateId({ exitFamily, regimeSliceId, patch });
       return {
         candidateId,
-        lane: 'exit-regime',
-        family: 'exit-state',
-        exitFamily: item.exitFamily,
+        lane: 'exitRegime',
+        family: item.family,
+        mutationFamily: item.family,
+        exitFamily,
         regimeSliceId,
         patch,
-        variantId: `exit-regime-${candidateId}`,
+        variantId: `exit-regime-${item.family}-${item.axis}-${candidateId}`,
         config: { ...base.config, ...patch },
         metadata: {
-          ...item.metadata,
+          ...(item.metadata || {}),
+          axis: item.axis,
           partialTakeProfit: PARTIAL_TAKE_PROFIT_STATUS,
           blockedFamilies: BLOCKED_EXIT_FAMILIES,
           ...(source?.id ? { originConfigId: source.id } : {}),
         },
       };
     })
-    .filter((item) => validateExitPatch(item.patch).ok)
-    .slice(0, limit);
+    .filter((item) => validateExitPatch(item.patch).ok);
+
+  return filterNovelLaneCandidates({
+    candidates: prioritizeFirstPassByAxis(rawCandidates),
+    champion: source,
+    lane: 'exitRegime',
+    testedPatchFingerprints,
+  }).slice(0, limit);
 }

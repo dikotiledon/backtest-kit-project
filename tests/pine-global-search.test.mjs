@@ -9,16 +9,16 @@ import {
 } from '../scripts/lib/pine-global-search.mjs';
 import { configFingerprint } from '../scripts/lib/pine-autoresearch.mjs';
 
-test('buildGlobalMutationBatch covers all declared supported families when requested', () => {
-  const families = ['entry', 'filters', 'risk', 'fusion-weight', 'asymmetry', 'exit-state'];
+test('buildGlobalMutationBatch covers requested supported surface families', () => {
+  const families = ['entry', 'filters', 'risk', 'exit-state'];
   const batch = buildGlobalMutationBatch({
     incumbent: { config: {} },
-    maxConfigs: 20,
+    maxConfigs: 8,
     families,
   });
 
-  assert.equal(batch.length, families.length);
-  assert.deepEqual(batch.map((item) => item.mutationFamily), families);
+  assert.deepEqual([...new Set(batch.map((item) => item.mutationFamily))].sort(), families.sort());
+  assert.equal(batch.every((item) => families.includes(item.mutationFamily)), true);
 });
 
 test('buildGlobalMutationBatch skips unsupported family', () => {
@@ -28,7 +28,8 @@ test('buildGlobalMutationBatch skips unsupported family', () => {
     families: ['entry', 'unsupported-family', 'risk'],
   });
 
-  assert.deepEqual(batch.map((item) => item.mutationFamily), ['entry', 'risk']);
+  assert.deepEqual([...new Set(batch.map((item) => item.mutationFamily))].sort(), ['entry', 'risk']);
+  assert.equal(batch.every((item) => ['entry', 'risk'].includes(item.mutationFamily)), true);
 });
 
 test('validateGlobalMutationPatch rejects frozen key explicitly', () => {
@@ -46,6 +47,15 @@ test('validateGlobalMutationPatch rejects bad boolean values', () => {
 test('validateGlobalMutationPatch rejects non-finite numeric values', () => {
   assert.equal(validateGlobalMutationPatch({ minPredSum: Number.NaN }).ok, false);
   assert.equal(validateGlobalMutationPatch({ minPredSum: Number.POSITIVE_INFINITY }).ok, false);
+});
+
+test('validateGlobalMutationPatch rejects values outside parameter surface bounds', () => {
+  assert.equal(validateGlobalMutationPatch({ minPredSum: -1 }).ok, false);
+  assert.equal(validateGlobalMutationPatch({ adxThreshold: -5 }).ok, false);
+  assert.equal(validateGlobalMutationPatch({ trailActivateR: -0.25 }).ok, false);
+  assert.equal(validateGlobalMutationPatch({ squeezeBoostValue: -0.1 }).ok, false);
+  assert.equal(validateGlobalMutationPatch({ tpAtrMult: 51 }).ok, false);
+  assert.equal(validateGlobalMutationPatch({ timeStopBars: 8.5 }).ok, false);
 });
 
 test('maxConfigs edge cases normalized deterministically', () => {
@@ -82,7 +92,7 @@ test('candidate metadata includes originConfigId and generatorVersion', () => {
   });
 
   assert.equal(item.metadata.originConfigId, 'origin-42');
-  assert.equal(item.metadata.generatorVersion, 'global-search-v1');
+  assert.equal(item.metadata.generatorVersion, 'global-search-v2-parameter-surface');
   assert.equal(item.metadata.mutationFamily, 'entry');
 });
 
@@ -307,7 +317,7 @@ test('buildGlobalMutationBatch exposes stable patchFingerprint independent of ob
   assert.equal(first.metadata.mutationFamily, 'entry');
 });
 
-test('buildGlobalMutationBatch can emit deterministic ladder variants for one family', () => {
+test('buildGlobalMutationBatch emits deterministic surface variants for one family', () => {
   const batch = buildGlobalMutationBatch({
     champion: {
       configId: 'champ-ladder',
@@ -329,13 +339,13 @@ test('buildGlobalMutationBatch can emit deterministic ladder variants for one fa
   assert.equal(batch.length, 3);
   assert.deepEqual(batch.map((item) => item.patch), [
     { minPredSum: 2 },
+    { useTrendXConf: true },
     { minPredSum: 1.6 },
-    { minPredSum: 2.2 },
   ]);
   assert.deepEqual(batch.map((item) => item.variantId), [
-    'global-all-parameter-entry-p01',
-    'global-all-parameter-entry-p02',
-    'global-all-parameter-entry-p03',
+    'global-all-parameter-entry-minPredSum-p001',
+    'global-all-parameter-entry-useTrendXConf-p002',
+    'global-all-parameter-entry-minPredSum-p003',
   ]);
   assert.equal(new Set(batch.map((item) => item.patchFingerprint)).size, 3);
 });
@@ -370,9 +380,9 @@ test('buildGlobalMutationBatch skips previously tested patch fingerprints', () =
   });
 
   assert.equal(second.length, 2);
-  assert.deepEqual(second.map((item) => item.variantId), [
-    'global-all-parameter-entry-p02',
-    'global-all-parameter-entry-p03',
+  assert.deepEqual(second.map((item) => item.patch), [
+    { useTrendXConf: true },
+    { minPredSum: 1.6 },
   ]);
   assert.equal(second.some((item) => item.patchFingerprint === first[0].patchFingerprint), false);
 });
@@ -388,10 +398,12 @@ test('buildGlobalMutationBatch de-dupes same-batch patches and skips no-op patch
     variantsPerFamily: 3,
   });
 
-  assert.deepEqual(duplicateBatch.map((item) => item.variantId), [
-    'global-all-parameter-entry-p01',
-    'global-all-parameter-entry-p02',
-  ]);
+  assert.equal(
+    duplicateBatch.every((item) =>
+      Object.entries(item.patch).some(([key, value]) => !Object.is({ minPredSum: 9.9 }[key], value)),
+    ),
+    true,
+  );
   assert.equal(new Set(duplicateBatch.map((item) => item.patchFingerprint)).size, duplicateBatch.length);
 
   const champion = {
@@ -420,4 +432,76 @@ test('buildGlobalMutationBatch de-dupes same-batch patches and skips no-op patch
     true,
   );
   assert.equal(new Set(noOpSkippedBatch.map((item) => item.patchFingerprint)).size, noOpSkippedBatch.length);
+});
+
+
+test('buildGlobalMutationBatch uses broad parameter surface beyond six legacy families', () => {
+  const champion = {
+    configId: 'broad-global-champion',
+    config: {
+      neighborsCount: 32,
+      h: 8,
+      r: 8,
+      x: 25,
+      lag: 2,
+      minPredSum: 1.8,
+      adxThreshold: 20,
+      fusionV4LongAtrWeight: -0.25,
+      supertrendFactor: 1.5,
+      squeezeLength: 20,
+      divRsiLen: 21,
+      riskAtrLen: 14,
+      slAtrMult: 0.5,
+      tpAtrMult: 7.6,
+      trailAtrMult: 1,
+      useTrailingStop: true,
+      useTimeStop: false,
+      timeStopBars: 8,
+    },
+  };
+
+  const batch = buildGlobalMutationBatch({
+    champion,
+    maxConfigs: 80,
+    variantsPerFamily: 4,
+  });
+
+  const keys = new Set(batch.flatMap((item) => Object.keys(item.patch)));
+  assert.equal(batch.length >= 50, true);
+  assert.equal(keys.has('neighborsCount'), true);
+  assert.equal(keys.has('h'), true);
+  assert.equal(keys.has('supertrendFactor'), true);
+  assert.equal(keys.has('squeezeLength'), true);
+  assert.equal(keys.has('divRsiLen'), true);
+  assert.equal(keys.has('riskAtrLen'), true);
+  assert.equal(keys.has('tpAtrMult'), true);
+  assert.equal(keys.has('useTimeStop'), true);
+  assert.equal(keys.has('showDash'), false);
+  assert.equal(batch.every((item) => item.patchFingerprint?.length === 64), true);
+});
+
+test('buildGlobalMutationBatch filters broad parameter surface by family', () => {
+  const champion = {
+    config: {
+      slAtrMult: 0.5,
+      tpAtrMult: 7.6,
+      riskAtrLen: 14,
+      trailAtrMult: 1,
+      useTrailingStop: true,
+      timeStopBars: 8,
+    },
+  };
+
+  const batch = buildGlobalMutationBatch({
+    champion,
+    families: ['risk', 'exit', 'exit-state'],
+    maxConfigs: 30,
+    variantsPerFamily: 3,
+  });
+
+  const families = new Set(batch.map((item) => item.mutationFamily));
+  assert.deepEqual([...families].sort(), ['exit', 'exit-state', 'risk']);
+  assert.equal(batch.some((item) => Object.hasOwn(item.patch, 'tpAtrMult')), true);
+  assert.equal(batch.some((item) => Object.hasOwn(item.patch, 'trailAtrMult')), true);
+  assert.equal(batch.some((item) => Object.hasOwn(item.patch, 'timeStopBars')), true);
 });

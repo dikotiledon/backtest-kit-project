@@ -1,41 +1,26 @@
 import { createHash } from 'node:crypto';
 
-const GENERATOR_VERSION = 'global-search-v1';
-export const PATCH_FINGERPRINT_VERSION = 2;
-const DEFAULT_FAMILIES = ['entry', 'filters', 'risk', 'fusion-weight', 'asymmetry', 'exit-state'];
-const POSITIVE_KEYS = new Set([
-  'minPredSum',
-  'adxThreshold',
-  'slAtrMult',
-  'tpAtrMult',
-  'trailAtrMult',
-  'trailActivateR',
-  'fusionV4MinAbsPrediction',
-  'fusionV4MaxAbsPrediction',
-]);
-const BOOLEAN_KEYS = new Set([
-  'useAdxFilter',
-  'useSupertrendFilter',
-  'useSupertrendEntryConfirm',
-  'useTrailingStop',
-  'useFusionV4',
-]);
-const ARCHITECTURE_BOOLEAN_KEYS = new Set(['useFusionV4']);
-const KNOWN_KEYS = new Set([
-  ...POSITIVE_KEYS,
-  ...BOOLEAN_KEYS,
-  'fusionV4LongAtrWeight',
-  'fusionV4LongEngulfWeight',
-  'fusionV4LongEmaWeight',
-  'fusionV4ShortAtrWeight',
-  'fusionV4ShortEngulfWeight',
-  'fusionV4ShortEmaWeight',
-]);
+import { buildSurfaceMutationCandidates, parameterSurfaceCatalog } from './pine-parameter-surface.mjs';
 
-function numberOr(value, fallback) {
-  const parsed = Number(value);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
+const GENERATOR_VERSION = 'global-search-v2-parameter-surface';
+export const PATCH_FINGERPRINT_VERSION = 2;
+const PARAMETER_SURFACE_CATALOG = parameterSurfaceCatalog({ includeArchitecture: true });
+const NUMERIC_PARAMETER_BOUNDS = new Map(
+  PARAMETER_SURFACE_CATALOG
+    .filter((item) => item.type !== 'bool')
+    .map((item) => [item.key, { min: item.min, max: item.max, type: item.type }]),
+);
+const BOOLEAN_KEYS = new Set(
+  PARAMETER_SURFACE_CATALOG
+    .filter((item) => item.type === 'bool')
+    .map((item) => item.key),
+);
+const ARCHITECTURE_BOOLEAN_KEYS = new Set(
+  PARAMETER_SURFACE_CATALOG
+    .filter((item) => item.architecture === true)
+    .map((item) => item.key),
+);
+const KNOWN_KEYS = new Set(PARAMETER_SURFACE_CATALOG.map((item) => item.key));
 
 function normalizeMaxConfigs(maxConfigs) {
   if (maxConfigs === undefined || maxConfigs === null) return 8;
@@ -133,8 +118,14 @@ export function buildLegacyGlobalPatchFingerprint({ championId = null, lane, mut
     .digest('hex');
 }
 
+function compareCodePoint(left, right) {
+  if (left < right) return -1;
+  if (left > right) return 1;
+  return 0;
+}
+
 function toPatchEntries(patch) {
-  return Object.entries(patch).sort(([a], [b]) => a.localeCompare(b));
+  return Object.entries(patch).sort(([a], [b]) => compareCodePoint(a, b));
 }
 
 function hasFrozenKey(patch, frozenKeys) {
@@ -172,55 +163,19 @@ export function validateGlobalMutationPatch(patch, { frozenKeys, allowArchitectu
       return { ok: false, reason: 'numeric key must be finite number', key };
     }
 
-    if (POSITIVE_KEYS.has(key) && value <= 0) {
-      return { ok: false, reason: 'positive key must be > 0', key };
+    const bounds = NUMERIC_PARAMETER_BOUNDS.get(key);
+    if (bounds?.type === 'int' && !Number.isInteger(value)) {
+      return { ok: false, reason: 'integer key must be integer', key };
+    }
+    if (Number.isFinite(bounds?.min) && value < bounds.min) {
+      return { ok: false, reason: 'numeric key below minimum', key };
+    }
+    if (Number.isFinite(bounds?.max) && value > bounds.max) {
+      return { ok: false, reason: 'numeric key above maximum', key };
     }
   }
 
   return { ok: true };
-}
-
-function signedStep(level, baseStep) {
-  const magnitude = Math.ceil(level / 2) * baseStep;
-  return level % 2 === 1 ? magnitude : -magnitude;
-}
-
-function buildFamilyPatch({ family, config, level = 1 }) {
-  const c = config || {};
-
-  if (family === 'entry') {
-    const minPredSum = clamp(numberOr(c.minPredSum, 2) + signedStep(level, 0.2), 0.1, 10);
-    return { minPredSum };
-  }
-
-  if (family === 'filters') {
-    const adxThreshold = clamp(numberOr(c.adxThreshold, 20) + signedStep(level, 2), 1, 100);
-    return { adxThreshold };
-  }
-
-  if (family === 'risk') {
-    const slAtrMult = clamp(numberOr(c.slAtrMult, 1) + signedStep(level, 0.1), 0.1, 20);
-    return { slAtrMult };
-  }
-
-  if (family === 'fusion-weight') {
-    const fusionV4LongAtrWeight = clamp(numberOr(c.fusionV4LongAtrWeight, -0.25) + signedStep(level, 0.1), -5, 5);
-    return { fusionV4LongAtrWeight };
-  }
-
-  if (family === 'asymmetry') {
-    const delta = signedStep(level, 0.1);
-    const fusionV4LongEmaWeight = clamp(numberOr(c.fusionV4LongEmaWeight, 0) + delta, -5, 5);
-    const fusionV4ShortEmaWeight = clamp(numberOr(c.fusionV4ShortEmaWeight, 0) - delta, -5, 5);
-    return { fusionV4LongEmaWeight, fusionV4ShortEmaWeight };
-  }
-
-  if (family === 'exit-state') {
-    const trailAtrMult = clamp(numberOr(c.trailAtrMult, 1) + signedStep(level, 0.1), 0.1, 20);
-    return { trailAtrMult };
-  }
-
-  return null;
 }
 
 function sourceConfig(source) {
@@ -237,10 +192,11 @@ export function buildGlobalMutationBatch({
   families,
   variantsPerFamily = 1,
   testedPatchFingerprints,
+  policy,
 } = {}) {
   const source = incumbent ?? champion;
   const config = sourceConfig(source);
-  const selectedFamilies = Array.isArray(families) && families.length > 0 ? families : DEFAULT_FAMILIES;
+  const selectedFamilies = Array.isArray(families) && families.length > 0 ? families : null;
   const limit = normalizeMaxConfigs(maxConfigs);
   if (limit === 0) return [];
 
@@ -263,54 +219,62 @@ export function buildGlobalMutationBatch({
   const out = [];
   const lane = 'global-all-parameter';
 
-  for (const family of selectedFamilies) {
-    for (let level = 1; level <= safeVariantsPerFamily; level += 1) {
-      const patch = buildFamilyPatch({ family, config, level });
-      if (!patch || typeof patch !== 'object') continue;
-      if (hasFrozenKey(patch, frozenKeys)) continue;
+  const surfaceCandidates = buildSurfaceMutationCandidates({
+    champion: source,
+    maxConfigs: limit * Math.max(1, safeVariantsPerFamily) * 4,
+    families: selectedFamilies,
+    levels: safeVariantsPerFamily,
+    includeArchitecture: policy?.allowArchitectureKeys === true,
+  });
 
-      const normalizedPatch = Object.fromEntries(toPatchEntries(patch));
-      const validation = validateGlobalMutationPatch(normalizedPatch, { frozenKeys });
-      if (!validation.ok) continue;
+  for (const surfaceCandidate of surfaceCandidates) {
+    const family = surfaceCandidate.mutationFamily ?? surfaceCandidate.family;
+    if (typeof family !== 'string' || family.length === 0) continue;
 
-      const patchFingerprint = buildGlobalPatchFingerprint({
+    const normalizedPatch = Object.fromEntries(toPatchEntries(surfaceCandidate.patch || {}));
+    const validation = validateGlobalMutationPatch(normalizedPatch, {
+      frozenKeys,
+      allowArchitectureKeys: policy?.allowArchitectureKeys === true,
+    });
+    if (!validation.ok) continue;
+
+    const patchFingerprint = buildGlobalPatchFingerprint({
+      championConfigFingerprint,
+      lane,
+      mutationFamily: family,
+      patch: normalizedPatch,
+    });
+    if (testedFingerprints.has(patchFingerprint)) continue;
+    if (emittedFingerprints.has(patchFingerprint)) continue;
+    if (Object.entries(normalizedPatch).every(([key, value]) => Object.is(config?.[key], value))) continue;
+    emittedFingerprints.add(patchFingerprint);
+
+    const axis = surfaceCandidate.axis ?? Object.keys(normalizedPatch)[0] ?? family;
+    const variantId = `${lane}-${family}-${axis}-p${String(out.length + 1).padStart(3, '0')}`;
+    out.push({
+      ...surfaceCandidate,
+      candidateId: buildCandidateId({ lane, mutationFamily: family, patch: normalizedPatch }),
+      variantId,
+      lane,
+      family,
+      mutationFamily: family,
+      axis,
+      patch: normalizedPatch,
+      config: { ...config, ...normalizedPatch },
+      touchedKeys: Object.keys(normalizedPatch),
+      patchFingerprint,
+      metadata: {
+        ...(surfaceCandidate.metadata || {}),
+        originConfigId,
+        generatorVersion: GENERATOR_VERSION,
+        mutationFamily: family,
         championConfigFingerprint,
-        lane,
-        mutationFamily: family,
-        patch: normalizedPatch,
-      });
-      if (testedFingerprints.has(patchFingerprint)) continue;
-      if (emittedFingerprints.has(patchFingerprint)) continue;
-      if (Object.entries(normalizedPatch).every(([key, value]) => Object.is(config?.[key], value))) continue;
-      emittedFingerprints.add(patchFingerprint);
-
-      const variantId = safeVariantsPerFamily === 1
-        ? `${lane}-${family}`
-        : `${lane}-${family}-p${String(level).padStart(2, '0')}`;
-      out.push({
-        candidateId: buildCandidateId({ lane, mutationFamily: family, patch: normalizedPatch }),
-        variantId,
-        lane,
-        family,
-        mutationFamily: family,
-        axis: family,
-        patch: normalizedPatch,
-        config: { ...config, ...normalizedPatch },
-        touchedKeys: Object.keys(normalizedPatch),
         patchFingerprint,
-        metadata: {
-          originConfigId,
-          generatorVersion: GENERATOR_VERSION,
-          mutationFamily: family,
-          championConfigFingerprint,
-          patchFingerprint,
-          patchFingerprintVersion: PATCH_FINGERPRINT_VERSION,
-          ladderLevel: level,
-        },
-      });
+        patchFingerprintVersion: PATCH_FINGERPRINT_VERSION,
+      },
+    });
 
-      if (out.length >= limit) return out;
-    }
+    if (out.length >= limit) return out;
   }
 
   return out;

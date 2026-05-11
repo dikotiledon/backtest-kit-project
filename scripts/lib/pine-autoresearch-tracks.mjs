@@ -64,9 +64,10 @@ function normalizeTabuEntry(entry, { currentCycle = 0, index = 0 } = {}) {
   const fingerprint = normalizeKnownFingerprint(entry.fingerprint);
   if (!fingerprint) return null;
   const rawAddedAtCycle = Number(entry.addedAtCycle);
+  const normalizedCurrentCycle = normalizeNonNegativeInteger(currentCycle, 0);
   const addedAtCycle = Number.isFinite(rawAddedAtCycle)
-    ? Math.max(0, Math.floor(rawAddedAtCycle))
-    : currentCycle;
+    ? Math.min(normalizedCurrentCycle, Math.max(0, Math.floor(rawAddedAtCycle)))
+    : normalizedCurrentCycle;
   return {
     fingerprint,
     addedAtCycle,

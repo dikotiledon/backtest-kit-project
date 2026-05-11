@@ -67,7 +67,7 @@ function scalePatch(base, patch, temperature) {
   }));
 }
 
-function normalizeTabuCache(value) {
+export function normalizeTabuFingerprintSet(value) {
   if (Array.isArray(value)) {
     return new Set(value
       .map((entry) => {
@@ -186,7 +186,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
   const cycleCount = countCycles(historyEvents);
   const annealingState = computeAnnealingState({ schedulerState, policy });
   const temperature = annealingState.temperature;
-  const tabuSet = normalizeTabuCache(schedulerState.tabuRejectedFingerprints);
+  const tabuSet = normalizeTabuFingerprintSet(schedulerState.tabuRejectedFingerprints);
 
   const familyPatchMap = {
     signal: signalPatches(base),

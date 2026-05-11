@@ -65,6 +65,35 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+test('loadConfig preserves searchPolicy tabu policy from file config', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-config-tabu-'));
+  const configPath = path.join(dir, 'autoresearch.json');
+
+  try {
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'tabu-load-test',
+      scriptPath: 'strategy.pine',
+      grid: 'phase3-core',
+      primaryLab: { labId: 'Primary', symbol: 'XRPUSDT', timeframe: '15m', limit: 120 },
+      outputs: { researchRoot: 'research', digestRoot: 'digest' },
+      searchPolicy: {
+        mode: 'incumbent-local',
+        tabu: { maxAgeCycles: 7, maxEntries: 11, dropOnChampionChange: false },
+      },
+    }), 'utf8');
+
+    const config = await loadConfig(dir, configPath, {});
+
+    assert.deepEqual(config.searchPolicy.tabu, {
+      maxAgeCycles: 7,
+      maxEntries: 11,
+      dropOnChampionChange: false,
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 function psSingleQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }

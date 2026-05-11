@@ -1,5 +1,5 @@
 import { sharedKnobKeys as tunerSharedKnobKeys, trackOwnKnobKeys as tunerTrackOwnKnobKeys } from './pine-tuner.mjs';
-import { computeAnnealingState } from './pine-search-policy.mjs';
+import { computeAnnealingState, normalizeTabuFingerprintSet } from './pine-search-policy.mjs';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -51,12 +51,6 @@ function lowerBound(value, minValue) {
 
 function applyPatch(base, patch) {
   return { ...clone(base), ...clone(patch) };
-}
-
-function normalizeTabuCache(value) {
-  if (Array.isArray(value)) return new Set(value);
-  if (value && typeof value === 'object') return new Set(Object.keys(value));
-  return new Set();
 }
 
 function scalePatch(base, patch, temperature) {
@@ -337,7 +331,7 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
     ? getFallbackPatchPool(fallbackFamilies, base, { interleave: fallbackInterleave })
     : [];
   const trackLimit = Math.max(0, Math.min(limit, pool.length));
-  const tabuSet = normalizeTabuCache(schedulerState.tabuRejectedFingerprints);
+  const tabuSet = normalizeTabuFingerprintSet(schedulerState.tabuRejectedFingerprints);
   let tabuSkipped = 0;
 
   for (let probe = 0; probe < pool.length && batch.length < trackLimit; probe++) {

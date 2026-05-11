@@ -322,6 +322,21 @@ test('pruneTabuFingerprints ignores malformed legacy entries and keeps newest wh
   ]);
 });
 
+test('pruneTabuFingerprints clamps future addedAtCycle values to current cycle', () => {
+  const pruned = pruneTabuFingerprints({
+    currentCycle: 12,
+    currentChampionFingerprint: 'champ-current',
+    policy: { maxAgeCycles: 20, maxEntries: 5 },
+    entries: [
+      { fingerprint: 'future-cand', addedAtCycle: 999, championFingerprint: 'champ-current' },
+    ],
+  });
+
+  assert.deepEqual(pruned, [
+    { fingerprint: 'future-cand', addedAtCycle: 12, championFingerprint: 'champ-current' },
+  ]);
+});
+
 test('pruneTabuFingerprints can keep current-age old champion entries when configured', () => {
   const pruned = pruneTabuFingerprints({
     currentCycle: 12,

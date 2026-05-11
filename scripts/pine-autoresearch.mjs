@@ -1716,6 +1716,9 @@ export async function loadConfig(cwd, configPath, overrides = {}) {
       matrixCandidateLimit: raw.searchPolicy?.matrixCandidateLimit ?? 3,
       annealing: raw.searchPolicy?.annealing || {},
       selfLoopEscape: raw.searchPolicy?.selfLoopEscape || {},
+      ...(raw.searchPolicy?.tabu && typeof raw.searchPolicy.tabu === 'object' && !Array.isArray(raw.searchPolicy.tabu)
+        ? { tabu: { ...raw.searchPolicy.tabu } }
+        : {}),
     },
     seedChampionPath: resolveMaybeRelative(baseDir, raw.seedChampion?.path || raw.incumbent?.path),
     primaryLab: normalizeLab(primarySource, defaultThresholds, 0, 'primary'),

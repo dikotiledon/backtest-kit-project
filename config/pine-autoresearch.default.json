@@ -13,8 +13,8 @@
     "exploreFamilies": [
       "signal"
     ],
-    "paretoShortlistSize": 4,
-    "matrixCandidateLimit": 4,
+    "paretoShortlistSize": 12,
+    "matrixCandidateLimit": 12,
     "selfLoopEscape": {
       "enabled": true,
       "activateAfter": 1,
@@ -357,7 +357,7 @@
       "robustnessRatio": 0.15
     },
     "resourceBudget": {
-      "maxConcurrentLabWorkers": 4,
+      "maxConcurrentLabWorkers": 1,
       "maxRowsPerAnalysisChunk": 10000,
       "maxRetainedCandidatesPerLane": 25,
       "writeFullDebugArtifacts": false
@@ -365,7 +365,7 @@
     "promotion": {
       "allowAutomaticRegimeSwitching": false,
       "requireGlobalChampionAnchor": true,
-      "minRoiDeltaPct": 4,
+      "minRoiDeltaPct": 3,
       "minProfitFactorDelta": 0.1,
       "minTradeCount": 60,
       "requireBlindHoldoutVerdict": true

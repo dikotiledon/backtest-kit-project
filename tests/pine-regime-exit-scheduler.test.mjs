@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 
 import {
   allocateRegimeExitLaneBudget,
+  nextLaneBudgetDebt,
   resolveExhaustedResearchLanes,
   selectNextResearchLane,
   STAGNATION_LANE_METADATA,
@@ -88,6 +89,28 @@ test('allocateRegimeExitLaneBudget falls back to default ratios when all ratios 
 
   assert.deepEqual(budget, { exploit: 5, exitRegime: 7, globalAllParameter: 5, robustness: 3 });
   assert.equal(sumBudget(budget), 20);
+});
+
+test('nextLaneBudgetDebt accrues unselected lane debt and pays down selected lane', () => {
+  assert.deepEqual(
+    nextLaneBudgetDebt({
+      currentDebt: { exploit: 0, exitRegime: 0, globalAllParameter: 0, robustness: 0 },
+      allocation: { exploit: 2, exitRegime: 3, globalAllParameter: 2, robustness: 1 },
+      selectedLane: 'exitRegime',
+    }),
+    { exploit: 2, exitRegime: -5, globalAllParameter: 2, robustness: 1 },
+  );
+});
+
+test('nextLaneBudgetDebt normalizes malformed debt/allocation and ignores unknown selected lane', () => {
+  assert.deepEqual(
+    nextLaneBudgetDebt({
+      currentDebt: { exploit: Number.NaN, exitRegime: 4, globalAllParameter: Number.POSITIVE_INFINITY, robustness: -2 },
+      allocation: { exploit: 1.8, exitRegime: -3, globalAllParameter: '4', robustness: Number.NaN },
+      selectedLane: 'not-a-lane',
+    }),
+    { exploit: 1, exitRegime: 4, globalAllParameter: 4, robustness: -2 },
+  );
 });
 
 test('stagnation metadata strictPromotionGates only enabled at level 3', () => {
@@ -199,6 +222,16 @@ test('selectNextResearchLane pays highest budget debt before preferred stagnatio
   });
 
   assert.equal(lane, 'globalAllParameter');
+});
+
+test('selectNextResearchLane uses persisted budget debt before stagnation preference', () => {
+  const lane = selectNextResearchLane({
+    stagnationLevel: 0,
+    budgetDebt: { exploit: 9, exitRegime: 0, globalAllParameter: 0, robustness: 0 },
+    lanesEnabled: { exploit: true, exitRegime: true, globalAllParameter: true, robustness: true },
+  });
+
+  assert.equal(lane, 'exploit');
 });
 
 test('selectNextResearchLane ignores non-finite budget debt values', () => {

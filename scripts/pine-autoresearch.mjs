@@ -71,7 +71,12 @@ import {
 } from './lib/pine-autoresearch-tracks.mjs';
 import { buildCandidateFamilyKey, summarizePromotionLineage } from './lib/pine-autoresearch-lineage.mjs';
 import { normalizeRegimeExitResearchConfig } from './lib/pine-regime-exit-config.mjs';
-import { allocateRegimeExitLaneBudget, resolveExhaustedResearchLanes, selectNextResearchLane } from './lib/pine-regime-exit-scheduler.mjs';
+import {
+  allocateRegimeExitLaneBudget,
+  nextLaneBudgetDebt,
+  resolveExhaustedResearchLanes,
+  selectNextResearchLane,
+} from './lib/pine-regime-exit-scheduler.mjs';
 import { buildExitFamilyCandidates } from './lib/pine-exit-generators.mjs';
 import { buildLanePatchFingerprint, collectTestedLanePatchFingerprints } from './lib/pine-lane-novelty.mjs';
 import {
@@ -107,6 +112,27 @@ function resolveRegimeLaneEnabled(regimeConfig = {}) {
 function enabledLaneKeys(lanesEnabled = {}) {
   return ['exploit', 'exitRegime', 'globalAllParameter', 'robustness']
     .filter((lane) => lanesEnabled[lane] !== false);
+}
+
+function resolveLaneBudgetDebtAdvance({ config = {}, schedulerState = {}, selectedLane = null } = {}) {
+  if (config.regimeExitResearch?.enabled !== true) {
+    return { budgetDebt: null, advanced: false };
+  }
+  if (!selectedLane) {
+    return { budgetDebt: schedulerState?.budgetDebt ?? null, advanced: false };
+  }
+  const laneBudgetAllocation = allocateRegimeExitLaneBudget({
+    maxConfigs: config.maxConfigs,
+    lanes: config.regimeExitResearch?.lanes,
+  });
+  return {
+    budgetDebt: nextLaneBudgetDebt({
+      currentDebt: schedulerState?.budgetDebt || {},
+      allocation: laneBudgetAllocation,
+      selectedLane,
+    }),
+    advanced: true,
+  };
 }
 
 function isGeneratedNoveltyLane(lane) {
@@ -1352,6 +1378,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       holdoutGate,
       noNewCandidate,
       noNewCandidateStreak: trackState.noNewCandidateStreak ?? 0,
+      laneBudgetDebt: trackState.budgetDebt ?? null,
       stagnationLevel: trackState.stagnationLevel ?? 0,
       stagnationReason: trackState.stagnationReason ?? null,
       lastEscalatedAt: trackState.lastEscalatedAt ?? null,
@@ -1372,6 +1399,7 @@ export function applySchedulerStateToManifest(manifest = {}, schedulerState = {}
   return {
     ...manifest,
     noNewCandidateStreak: schedulerState?.noNewCandidateStreak ?? manifest?.noNewCandidateStreak ?? 0,
+    laneBudgetDebt: schedulerState?.budgetDebt ?? manifest?.laneBudgetDebt ?? null,
     stagnationLevel: schedulerState?.stagnationLevel ?? manifest?.stagnationLevel ?? 0,
     stagnationReason: schedulerState?.stagnationReason ?? manifest?.stagnationReason ?? null,
     lastEscalatedAt: schedulerState?.lastEscalatedAt ?? manifest?.lastEscalatedAt ?? null,
@@ -2713,16 +2741,23 @@ export async function runScout(config, dependencies = {}) {
         championState,
       }),
     });
+    const postExhaustionBudgetDebt = resolveLaneBudgetDebtAdvance({
+      config: trackedConfig,
+      schedulerState: postExhaustionTrackState,
+      selectedLane: exhaustedLane,
+    });
     const laneConfigFingerprint = buildChampionConfigFingerprint(championState.config);
     const updatedSchedulerState = recordResearchLaneExhaustion({
-      state: postExhaustionTrackState,
+      state: postExhaustionBudgetDebt.advanced
+        ? { ...postExhaustionTrackState, budgetDebt: postExhaustionBudgetDebt.budgetDebt }
+        : postExhaustionTrackState,
       lane: exhaustedLane,
       championConfigFingerprint: laneConfigFingerprint,
       exhaustedAt: exhaustedManifest.generatedAt,
       runId,
       reason: exhaustionReason,
       stagnationLevel: postExhaustionTrackState.stagnationLevel ?? schedulerState?.stagnationLevel ?? 0,
-      budgetDebt: postExhaustionTrackState.budgetDebt || schedulerState?.budgetDebt || {},
+      budgetDebt: postExhaustionBudgetDebt.budgetDebt || postExhaustionTrackState.budgetDebt || schedulerState?.budgetDebt || {},
       lanesEnabled: resolveRegimeLaneEnabled(trackedConfig.regimeExitResearch || {}),
     });
     await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
@@ -2796,6 +2831,11 @@ export async function runScout(config, dependencies = {}) {
       : 0;
 
   const regimeExitState = regimeExitStateBeforeSweep;
+  const laneBudgetDebtAdvance = resolveLaneBudgetDebtAdvance({
+    config: trackedConfig,
+    schedulerState,
+    selectedLane: selectedRegimeLane || activeTrack?.lane || null,
+  });
 
   const orchestration = buildScoutOrchestrationState({
     config: trackedConfig,
@@ -2816,6 +2856,7 @@ export async function runScout(config, dependencies = {}) {
       rejectedCandidateFingerprint,
       noNewCandidate,
       noNewCandidateStreak: schedulerState.noNewCandidateStreak ?? 0,
+      budgetDebt: laneBudgetDebtAdvance.budgetDebt,
       stagnationLevel: schedulerState.stagnationLevel ?? 0,
       stagnationReason: schedulerState.stagnationReason ?? null,
       lastEscalatedAt: schedulerState.lastEscalatedAt ?? null,
@@ -2831,31 +2872,34 @@ export async function runScout(config, dependencies = {}) {
   const manifestName = `${runId}.json`;
   let manifestPath = path.join(manifestsDir(trackedConfig), manifestName);
 
-  const updatedSchedulerState = nextTrackState({
-    state: schedulerState,
-    policy: { ...rotationPolicy, tabu: schedulerTabuPolicy },
-    manifest: {
-      activeTrackId: manifest.activeTrackId,
-      candidateFingerprint: manifest.candidateFingerprint,
-      rejectedCandidateFingerprint: manifest.rejectedCandidateFingerprint,
-      championFingerprint: manifest.championFingerprint,
-      noveltySignature: manifest.noveltySignature,
-      topCandidateSimilarity: manifest.topCandidateSimilarity,
-      rotationTrigger: manifest.rotationTrigger,
-      rotationReason: manifest.rotationReason,
-      sameTrackCycleStreak: manifest.sameTrackCycleStreak,
-      promotionEligible: manifest.promotionEligible,
-      promotionEligibleReason: manifest.promotionEligibleReason,
-      noNewCandidate: manifest.noNewCandidate,
-      stagnationLevel: manifest.stagnationLevel,
-      stagnationReason: manifest.stagnationReason,
-      lastEscalatedAt: manifest.lastEscalatedAt,
-      generatedAt: manifest.generatedAt,
-      windowSetId: manifest.windowSetId,
-      labSetId: manifest.labSetId,
-      gridName: manifest.gridName,
-    },
-  });
+  const updatedSchedulerState = {
+    ...nextTrackState({
+      state: schedulerState,
+      policy: { ...rotationPolicy, tabu: schedulerTabuPolicy },
+      manifest: {
+        activeTrackId: manifest.activeTrackId,
+        candidateFingerprint: manifest.candidateFingerprint,
+        rejectedCandidateFingerprint: manifest.rejectedCandidateFingerprint,
+        championFingerprint: manifest.championFingerprint,
+        noveltySignature: manifest.noveltySignature,
+        topCandidateSimilarity: manifest.topCandidateSimilarity,
+        rotationTrigger: manifest.rotationTrigger,
+        rotationReason: manifest.rotationReason,
+        sameTrackCycleStreak: manifest.sameTrackCycleStreak,
+        promotionEligible: manifest.promotionEligible,
+        promotionEligibleReason: manifest.promotionEligibleReason,
+        noNewCandidate: manifest.noNewCandidate,
+        stagnationLevel: manifest.stagnationLevel,
+        stagnationReason: manifest.stagnationReason,
+        lastEscalatedAt: manifest.lastEscalatedAt,
+        generatedAt: manifest.generatedAt,
+        windowSetId: manifest.windowSetId,
+        labSetId: manifest.labSetId,
+        gridName: manifest.gridName,
+      },
+    }),
+    ...(laneBudgetDebtAdvance.advanced ? { budgetDebt: laneBudgetDebtAdvance.budgetDebt } : {}),
+  };
   await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
 
   const finalManifest = applySchedulerStateToManifest(manifest, updatedSchedulerState);

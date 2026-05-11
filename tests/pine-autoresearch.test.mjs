@@ -2958,6 +2958,38 @@ test('buildScoutOrchestrationState includes entry invariance verdict from recent
   assert.deepEqual(result.manifest.entryInvariance.untouchedEntryKeys, ['adxThreshold', 'minPredSum', 'minBarsBetween', 'neighborsCount']);
 });
 
+test('buildScoutOrchestrationState exposes lane budget debt in manifest debug state', () => {
+  const championConfig = { minPredSum: 2, adxThreshold: 20 };
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch-lane-debt',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+      },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-lane-debt',
+    championState: { configId: 'champion', score: 70, config: championConfig },
+    historyEventsBefore: [],
+    searchBatch: [],
+    primarySweep: { topConfigs: [] },
+    matrixCandidates: [],
+    trackState: {
+      budgetDebt: { exploit: 2, exitRegime: -5, globalAllParameter: 2, robustness: 1 },
+    },
+  });
+
+  assert.deepEqual(result.manifest.laneBudgetDebt, { exploit: 2, exitRegime: -5, globalAllParameter: 2, robustness: 1 });
+});
+
 test('force-entry-mutation search policy produces entry-key mutations in generated variants', () => {
   const champion = {
     configId: 'champion',
@@ -5138,6 +5170,8 @@ test('runScout records next non-global lane after exhausted globalAllParameter h
     assert.equal(schedulerState.lastLaneExhaustion.championConfigFingerprint, championConfigFingerprint);
     assert.equal(schedulerState.lastLaneExhaustion.nextSelectedLane, 'exitRegime');
     assert.notEqual(schedulerState.lastLaneExhaustion.nextSelectedLane, 'globalAllParameter');
+    assert.deepEqual(schedulerState.budgetDebt, { exploit: 50, exitRegime: 70, globalAllParameter: -150, robustness: 30 });
+    assert.deepEqual(result.manifest.laneBudgetDebt, schedulerState.budgetDebt);
     assert.equal(schedulerState.laneExhaustions[championConfigFingerprint].globalAllParameter.nextSelectedLane, 'exitRegime');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

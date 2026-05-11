@@ -83,10 +83,30 @@ function normalizeBudgetDebt(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function normalizeLaneBudget(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : 0;
+}
+
 function normalizeLaneKey(lane) {
   if (lane === 'exit-regime') return 'exitRegime';
   if (lane === 'global-all-parameter') return 'globalAllParameter';
   return LANE_KEYS.includes(lane) ? lane : null;
+}
+
+export function nextLaneBudgetDebt({ currentDebt = {}, allocation = {}, selectedLane = null } = {}) {
+  const debtSource = currentDebt && typeof currentDebt === 'object' ? currentDebt : {};
+  const allocationSource = allocation && typeof allocation === 'object' ? allocation : {};
+  const nextDebt = Object.fromEntries(LANE_KEYS.map((lane) => [
+    lane,
+    normalizeBudgetDebt(debtSource[lane]) + normalizeLaneBudget(allocationSource[lane]),
+  ]));
+  const normalizedSelectedLane = normalizeLaneKey(selectedLane);
+  if (normalizedSelectedLane) {
+    const totalBudget = LANE_KEYS.reduce((sum, lane) => sum + normalizeLaneBudget(allocationSource[lane]), 0);
+    nextDebt[normalizedSelectedLane] -= totalBudget;
+  }
+  return nextDebt;
 }
 
 export function resolveExhaustedResearchLanes({ schedulerState = {}, championConfigFingerprint = null, exhaustedLanes = [] } = {}) {

@@ -60,6 +60,18 @@ function promoteCandidateInput(overrides = {}) {
   };
 }
 
+test('classifyHoldoutGate treats malformed top-level input as not required', () => {
+  const expected = {
+    required: false,
+    status: 'not_required',
+    passed: true,
+    reason: 'blind_holdout_not_required',
+  };
+
+  assert.deepEqual(classifyHoldoutGate(null), expected);
+  assert.deepEqual(classifyHoldoutGate('malformed'), expected);
+});
+
 test('classifyHoldoutGate marks required blind holdout as pending without a verdict', () => {
   assert.deepEqual(classifyHoldoutGate({ blindHoldoutLabs: [{ labId: 'holdout-a' }] }), {
     required: true,

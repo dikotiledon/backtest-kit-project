@@ -48,7 +48,10 @@ export function sameConfig(left, right) {
   return configFingerprint(left) === configFingerprint(right);
 }
 
-export function classifyHoldoutGate({ blindHoldoutLabs = [], holdoutVerdict = null } = {}) {
+export function classifyHoldoutGate(input = {}) {
+  const { blindHoldoutLabs = [], holdoutVerdict = null } = input && typeof input === 'object' && !Array.isArray(input)
+    ? input
+    : {};
   const holdoutRequired = Array.isArray(blindHoldoutLabs) && blindHoldoutLabs.length > 0;
   if (!holdoutRequired) {
     return {

@@ -1296,7 +1296,7 @@ test('decideAutoresearchOutcome applies default significance sample floor to leg
   assert.equal(outcome.significanceGate.minTradeCount, 150);
 });
 
-test('decideAutoresearchOutcome blocks promotion when blind holdout verdict required', () => {
+test('decideAutoresearchOutcome blocks promotion when blind holdout verdict is required synchronously', () => {
   const outcome = decideAutoresearchOutcome({
     incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 50, tradeCount: 100 }),
     challenger: makeResult({ configId: 'challenger', score: 120, roiPct: 70, tradeCount: 160 }),
@@ -1308,6 +1308,7 @@ test('decideAutoresearchOutcome blocks promotion when blind holdout verdict requ
     expectancy: { gate: { passed: true } },
     holdoutVerdict: null,
     blindHoldoutLabs: [{ labId: 'xrpusdt-15m-nov2025-blind-holdout' }],
+    holdoutMode: 'require',
   });
 
   assert.equal(outcome.recommendation, 'hold');
@@ -1493,6 +1494,17 @@ await fs.writeFile(path.join(dumpDir, outputBase + '.cleaned.jsonl'), rows.map((
     const payload = JSON.parse(await fs.readFile(holdoutPath, 'utf8'));
     assert.equal(payload.status, 'holdout_pass');
     assert.equal(payload.matrixDecision.recommendation, 'promote');
+    assert.equal(payload.champion.configId, 'champion-a');
+    assert.equal(payload.challenger.configId, 'challenger-b');
+    assert.equal(payload.championFingerprint, configFingerprint({ minPredSum: 1.8 }));
+    assert.equal(payload.candidateFingerprint, configFingerprint({ minPredSum: 1.6 }));
+    assert.deepEqual(payload.holdoutGate, {
+      required: true,
+      status: 'passed',
+      passed: true,
+      reason: 'blind_holdout_passed',
+    });
+    assert.equal(payload.promotionReady, true);
     assert.equal(payload.labResults[0].decision.recommendation, 'promote');
     assert.equal(payload.labResults[0].decision.failedGates.includes('holdoutVerdict'), false);
   } finally {

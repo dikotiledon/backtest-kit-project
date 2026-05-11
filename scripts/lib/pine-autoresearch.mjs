@@ -48,6 +48,45 @@ export function sameConfig(left, right) {
   return configFingerprint(left) === configFingerprint(right);
 }
 
+export function classifyHoldoutGate({ blindHoldoutLabs = [], holdoutVerdict = null } = {}) {
+  const holdoutRequired = Array.isArray(blindHoldoutLabs) && blindHoldoutLabs.length > 0;
+  if (!holdoutRequired) {
+    return {
+      required: false,
+      status: 'not_required',
+      passed: true,
+      reason: 'blind_holdout_not_required',
+    };
+  }
+
+  const verdict = holdoutVerdict && typeof holdoutVerdict === 'object' && !Array.isArray(holdoutVerdict)
+    ? holdoutVerdict
+    : null;
+  if (!verdict) {
+    return {
+      required: true,
+      status: 'pending',
+      passed: false,
+      reason: 'blind_holdout_pending',
+    };
+  }
+
+  if (verdict.passed === true) {
+    return {
+      required: true,
+      status: 'passed',
+      passed: true,
+      reason: verdict.reason || 'blind_holdout_passed',
+    };
+  }
+
+  return {
+    required: true,
+    status: 'failed',
+    passed: false,
+    reason: verdict.reason || 'blind_holdout_failed',
+  };
+}
 
 function isActivatedValue(previous, next) {
   return (previous === false || previous == null) && next === true;
@@ -381,8 +420,10 @@ export function decideAutoresearchOutcome({
   complexityPolicy = {},
   holdoutVerdict = null,
   blindHoldoutLabs = [],
+  holdoutMode = 'defer',
   promotionPolicy = null,
 } = {}) {
+  const holdoutGate = classifyHoldoutGate({ blindHoldoutLabs, holdoutVerdict });
   if (!incumbent) {
     throw new Error('Incumbent result is required');
   }
@@ -399,6 +440,7 @@ export function decideAutoresearchOutcome({
       expectancy: null,
       expectancyGate: null,
       significanceGate: null,
+      holdoutGate,
     };
   }
 
@@ -456,6 +498,7 @@ export function decideAutoresearchOutcome({
       expectancy: null,
       expectancyGate: null,
       significanceGate: null,
+      holdoutGate,
     };
   }
 
@@ -501,8 +544,30 @@ export function decideAutoresearchOutcome({
     failedGates.push('significance');
   }
 
-  const holdoutRequired = Array.isArray(blindHoldoutLabs) && blindHoldoutLabs.length > 0;
-  if (failedGates.length === 0 && holdoutRequired && !holdoutVerdict) {
+  if (failedGates.length === 0 && holdoutGate.status === 'failed') {
+    return {
+      recommendation: 'hold',
+      summary: `Blind holdout failed: ${holdoutGate.reason || 'blind_holdout_failed'}`,
+      comparisons,
+      gates: { ...gates, holdoutVerdict: false },
+      failedGates: ['holdoutVerdict'],
+      thresholds: {
+        minScoreDelta,
+        minRoiDeltaPct,
+        minProfitFactorDelta,
+        maxDrawdownDeltaPct,
+        minTradeCount,
+        minTradeRatioVsIncumbent,
+        adjusted: adjustedThresholds,
+      },
+      complexity,
+      expectancy: expectancyGate,
+      expectancyGate,
+      significanceGate,
+      holdoutGate,
+    };
+  }
+  if (failedGates.length === 0 && holdoutGate.status === 'pending' && holdoutMode === 'require') {
     return {
       recommendation: 'hold',
       summary: 'Blind holdout verdict required before promotion.',
@@ -522,28 +587,7 @@ export function decideAutoresearchOutcome({
       expectancy: expectancyGate,
       expectancyGate,
       significanceGate,
-    };
-  }
-  if (failedGates.length === 0 && holdoutVerdict && holdoutVerdict.passed !== true) {
-    return {
-      recommendation: 'hold',
-      summary: `Blind holdout failed: ${holdoutVerdict.reason || 'unspecified'}`,
-      comparisons,
-      gates: { ...gates, holdoutVerdict: false },
-      failedGates: ['holdoutVerdict'],
-      thresholds: {
-        minScoreDelta,
-        minRoiDeltaPct,
-        minProfitFactorDelta,
-        maxDrawdownDeltaPct,
-        minTradeCount,
-        minTradeRatioVsIncumbent,
-        adjusted: adjustedThresholds,
-      },
-      complexity,
-      expectancy: expectancyGate,
-      expectancyGate,
-      significanceGate,
+      holdoutGate,
     };
   }
 
@@ -571,6 +615,7 @@ export function decideAutoresearchOutcome({
         expectancyGate,
         significanceGate,
         profitabilityFloor,
+        holdoutGate,
       };
     }
   }
@@ -602,6 +647,7 @@ export function decideAutoresearchOutcome({
     expectancyGate,
     significanceGate,
     profitabilityFloor,
+    holdoutGate,
   };
 }
 
@@ -678,6 +724,14 @@ export function decideAutoPromotionAction({ latestManifest, historyEvents = [], 
   const candidate = latestManifest?.challenger || null;
   const candidateChanged = !sameConfig(championState?.config, candidate?.config);
   const matrixReady = requireMatrixPromotion ? decision?.recommendation === 'promote' : Boolean(candidate);
+  const holdoutGate = latestManifest?.holdoutGate
+    ?? decision?.holdoutGate
+    ?? classifyHoldoutGate({
+      blindHoldoutLabs: latestManifest?.blindHoldoutLabs ?? [],
+      holdoutVerdict: latestManifest?.holdoutVerdict ?? null,
+    });
+  const holdoutReady = holdoutGate?.passed === true;
+  const promotionReady = latestManifest?.promotionReady !== false;
   const lineage = summarizePromotionLineage({
     historyEvents: safeHistoryEvents,
     limit: safePolicy.lineagePolicy?.lookbackPromotions ?? 6,
@@ -707,6 +761,8 @@ export function decideAutoPromotionAction({ latestManifest, historyEvents = [], 
   const gates = {
     enabled,
     matrixReady,
+    holdoutReady,
+    promotionReady,
     lineage: lineageGate.passed,
     candidateChanged,
     cooldown: cooldownPassed,

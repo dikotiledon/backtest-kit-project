@@ -18,6 +18,7 @@ import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
 import {
   appendJsonl,
   buildParetoShortlist,
+  classifyHoldoutGate,
   computeSweepOffset,
   configFingerprint,
   decideAutoPromotionAction,
@@ -1091,6 +1092,13 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       .filter((candidate) => !sameConfig(candidate?.config, championState?.config)),
   });
   const promotionEligible = trackState.promotionEligible ?? Boolean(selectedCandidate?.matrixDecision?.recommendation === 'promote');
+  const holdoutGate = selectedCandidate?.holdoutGate
+    ?? matrixDecision?.holdoutGate
+    ?? classifyHoldoutGate({
+      blindHoldoutLabs: config?.blindHoldoutLabs ?? [],
+      holdoutVerdict: regimeExitState?.holdoutVerdict ?? config?.holdoutVerdict ?? selectedCandidate?.holdoutVerdict ?? null,
+    });
+  const promotionReady = promotionEligible && holdoutGate?.passed === true;
   const promotionEligibleReason = trackState.promotionEligibleReason ?? (
     promotionEligible
       ? selectedCandidate?.matrixDecision?.summary || 'Promotion eligible'
@@ -1225,7 +1233,9 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       sameTrackCycleStreak,
       topCandidateSimilarity: topCandidateSimilaritySummary.topCandidateSimilarity,
       promotionEligible,
+      promotionReady,
       promotionEligibleReason,
+      holdoutGate,
       noNewCandidate,
       noNewCandidateStreak: trackState.noNewCandidateStreak ?? 0,
       stagnationLevel: trackState.stagnationLevel ?? 0,
@@ -1502,11 +1512,28 @@ function promotionQueueFilePath(config) {
   return promotionQueuePath({ researchRoot: config.researchRoot });
 }
 
+function resolveManifestHoldoutGate(manifest = {}) {
+  return manifest?.holdoutGate
+    ?? manifest?.matrixDecision?.holdoutGate
+    ?? classifyHoldoutGate({
+      blindHoldoutLabs: manifest?.blindHoldoutLabs ?? [],
+      holdoutVerdict: manifest?.holdoutVerdict ?? null,
+    });
+}
+
 export function shouldQueuePromotionManifest(manifest) {
-  return manifest?.matrixDecision?.recommendation === 'promote'
-    && Boolean(manifest?.challenger?.config)
-    && Boolean(manifest?.candidateFingerprint)
+  const matrixPassed = manifest?.matrixDecision?.recommendation === 'promote';
+  const candidateChanged = Boolean(manifest?.candidateFingerprint)
     && manifest.candidateFingerprint !== manifest.championFingerprint;
+  const holdoutGate = resolveManifestHoldoutGate(manifest);
+  const holdoutReady = holdoutGate?.passed === true;
+  const promotionReadyAllowed = manifest?.promotionReady !== false;
+
+  return matrixPassed
+    && Boolean(manifest?.challenger?.config)
+    && candidateChanged
+    && holdoutReady
+    && promotionReadyAllowed;
 }
 
 export function decideCycleStartAction({ pendingPromotion = null, forceCycle = false } = {}) {
@@ -2890,13 +2917,31 @@ async function runBlindHoldout(config) {
     champion: championState,
     challenger: latest.challenger,
   });
+  const championSummary = summarizeResult(championState);
+  const challengerSummary = summarizeResult(latest.challenger);
+  const championFingerprint = configFingerprint(championState.config || {});
+  const candidateFingerprint = configFingerprint(latest.challenger.config || {});
+  const holdoutPassed = matrixDecision.recommendation === 'promote';
+  const holdoutGate = classifyHoldoutGate({
+    blindHoldoutLabs: labs,
+    holdoutVerdict: {
+      passed: holdoutPassed,
+      reason: holdoutPassed ? 'blind_holdout_passed' : (matrixDecision.summary || 'blind_holdout_failed'),
+    },
+  });
   const payload = {
     generatedAt: isoNow(),
     matrixId: config.matrixId,
     runId,
     sourceManifestPath: latest.manifestPath || latestManifestPath(config),
-    status: matrixDecision.recommendation === 'promote' ? 'holdout_pass' : 'premise_burn',
+    status: holdoutPassed ? 'holdout_pass' : 'premise_burn',
     blindHoldoutOnly: true,
+    champion: championSummary,
+    challenger: challengerSummary,
+    championFingerprint,
+    candidateFingerprint,
+    holdoutGate,
+    promotionReady: holdoutPassed,
     labResults,
     matrixDecision,
   };

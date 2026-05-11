@@ -41,10 +41,27 @@ const incumbent = {
   x: 25,
 };
 
-const firstSignalFingerprint = fingerprint({
+const signalPatches = [
+  { neighborsCount: 24 },
+  { neighborsCount: 40 },
+  { adxThreshold: 15 },
+  { adxThreshold: 25 },
+  { minPredSum: 1.5 },
+  { minPredSum: 2.5 },
+  { minBarsBetween: 1 },
+  { minBarsBetween: 4 },
+  { h: 6 },
+  { h: 10 },
+  { r: 4 },
+  { x: 20 },
+];
+
+const signalFingerprints = signalPatches.map((patch) => fingerprint({
   ...frozenIncumbent(incumbent),
-  neighborsCount: 24,
-});
+  ...patch,
+}));
+
+const firstSignalFingerprint = signalFingerprints[0];
 
 function firstExploitVariantWith(tabuRejectedFingerprints) {
   return buildIncumbentSearchBatch({
@@ -70,4 +87,34 @@ test('buildIncumbentSearchBatch reads object tabu entries by fingerprint', () =>
 
   assert.equal(variant.tabuSkipped, 1);
   assert.equal(variant.patch.neighborsCount, 40);
+});
+
+test('buildIncumbentSearchBatch fails closed when all signal candidates are legacy tabu entries', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['signal'] },
+    schedulerState: { tabuRejectedFingerprints: signalFingerprints },
+  });
+
+  assert.deepEqual(batch, []);
+});
+
+test('buildIncumbentSearchBatch fails closed when all signal candidates are object tabu entries', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['signal'] },
+    schedulerState: {
+      tabuRejectedFingerprints: signalFingerprints.map((tabuFingerprint, index) => ({
+        fingerprint: tabuFingerprint,
+        addedAtCycle: index + 1,
+        championFingerprint: `champ-${index + 1}`,
+      })),
+    },
+  });
+
+  assert.deepEqual(batch, []);
 });

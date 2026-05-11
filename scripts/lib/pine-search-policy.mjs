@@ -90,18 +90,27 @@ function normalizeStringList(value) {
 }
 
 function pickNonTabuVariant({ base, pool, startIndex, lane, family, batchIndex, tabuSet, temperature }) {
+  if (!Array.isArray(pool) || !pool.length) {
+    return { variant: null, nextIndex: startIndex, tabuSkipped: 0, exhausted: true };
+  }
+
   let tabuSkipped = 0;
   for (let probe = 0; probe < pool.length; probe++) {
     const rawPatch = pool[(startIndex + probe) % pool.length];
     const patch = scalePatch(base, rawPatch, temperature);
     const candidate = { ...clone(base), ...patch };
     if (!tabuSet.has(configFingerprint(candidate))) {
-      return { variant: withPatch(base, patch, { lane, family, index: batchIndex, temperature, tabuSkipped }), nextIndex: startIndex + probe + 1 };
+      return {
+        variant: withPatch(base, patch, { lane, family, index: batchIndex, temperature, tabuSkipped }),
+        nextIndex: startIndex + probe + 1,
+        tabuSkipped,
+        exhausted: false,
+      };
     }
     tabuSkipped += 1;
   }
-  const patch = scalePatch(base, pool[startIndex % pool.length], temperature);
-  return { variant: withPatch(base, patch, { lane, family, index: batchIndex, temperature, tabuSkipped }), nextIndex: startIndex + 1 };
+
+  return { variant: null, nextIndex: startIndex + pool.length, tabuSkipped, exhausted: true };
 }
 
 function signalPatches(base) {
@@ -197,8 +206,8 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
   const batch = [];
 
   let index = 0;
-  while (batch.length < exploit) {
-    const family = orderedExploitFamilies[batch.length % orderedExploitFamilies.length];
+  for (let exploitSlot = 0; exploitSlot < exploit; exploitSlot++) {
+    const family = orderedExploitFamilies[exploitSlot % orderedExploitFamilies.length];
     const pool = familyPatchMap[family];
     const picked = pickNonTabuVariant({
       base,
@@ -206,10 +215,12 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       startIndex: index,
       lane: 'exploit',
       family,
-      batchIndex: batch.length + 1,
+      batchIndex: exploitSlot + 1,
       tabuSet,
       temperature,
     });
+    index = picked.nextIndex;
+    if (!picked.variant) continue;
     batch.push(enforceRequiredTouchedKeys({
       base,
       variant: picked.variant,
@@ -217,7 +228,6 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       batchIndex: batch.length,
       temperature,
     }));
-    index = picked.nextIndex;
   }
 
   for (let exploreIndex = 0; exploreIndex < explore; exploreIndex++) {
@@ -233,6 +243,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       tabuSet,
       temperature,
     });
+    if (!picked.variant) continue;
     batch.push(enforceRequiredTouchedKeys({
       base,
       variant: picked.variant,

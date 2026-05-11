@@ -114,17 +114,40 @@ function enabledLaneKeys(lanesEnabled = {}) {
     .filter((lane) => lanesEnabled[lane] !== false);
 }
 
-function resolveLaneBudgetDebtAdvance({ config = {}, schedulerState = {}, selectedLane = null } = {}) {
+const REGIME_BUDGET_LANES = ['exploit', 'exitRegime', 'globalAllParameter', 'robustness'];
+
+function applyEnabledLanesToBudgetAllocation(allocation = {}, lanesEnabled = {}) {
+  return Object.fromEntries(REGIME_BUDGET_LANES.map((lane) => [
+    lane,
+    lanesEnabled[lane] === false ? 0 : allocation?.[lane],
+  ]));
+}
+
+export function resolveConsumedBudgetLane({ searchBatch = [], selectedLane = null } = {}) {
+  if (!Array.isArray(searchBatch) || searchBatch.length === 0) return null;
+  const consumedBudgetLanes = new Set(searchBatch
+    .map((variant) => variant?.lane)
+    .filter((lane) => REGIME_BUDGET_LANES.includes(lane)));
+  if (selectedLane && consumedBudgetLanes.has(selectedLane)) return selectedLane;
+  if (consumedBudgetLanes.size === 1) return [...consumedBudgetLanes][0];
+  return null;
+}
+
+export function resolveLaneBudgetDebtAdvance({ config = {}, schedulerState = {}, selectedLane = null } = {}) {
   if (config.regimeExitResearch?.enabled !== true) {
     return { budgetDebt: null, advanced: false };
   }
   if (!selectedLane) {
     return { budgetDebt: schedulerState?.budgetDebt ?? null, advanced: false };
   }
-  const laneBudgetAllocation = allocateRegimeExitLaneBudget({
+  const rawLaneBudgetAllocation = allocateRegimeExitLaneBudget({
     maxConfigs: config.maxConfigs,
     lanes: config.regimeExitResearch?.lanes,
   });
+  const laneBudgetAllocation = applyEnabledLanesToBudgetAllocation(
+    rawLaneBudgetAllocation,
+    resolveRegimeLaneEnabled(config.regimeExitResearch || {}),
+  );
   return {
     budgetDebt: nextLaneBudgetDebt({
       currentDebt: schedulerState?.budgetDebt || {},
@@ -2831,10 +2854,14 @@ export async function runScout(config, dependencies = {}) {
       : 0;
 
   const regimeExitState = regimeExitStateBeforeSweep;
+  const consumedBudgetLane = resolveConsumedBudgetLane({
+    searchBatch: searchVariants,
+    selectedLane: selectedRegimeLane,
+  });
   const laneBudgetDebtAdvance = resolveLaneBudgetDebtAdvance({
     config: trackedConfig,
     schedulerState,
-    selectedLane: selectedRegimeLane || activeTrack?.lane || null,
+    selectedLane: consumedBudgetLane,
   });
 
   const orchestration = buildScoutOrchestrationState({

@@ -62,6 +62,8 @@ import {
   shouldSkipGeneratedLaneSweep,
   shouldSkipGlobalAllParameterSweep,
   buildGlobalAllParameterExhaustedManifest,
+  resolveConsumedBudgetLane,
+  resolveLaneBudgetDebtAdvance,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -2990,6 +2992,55 @@ test('buildScoutOrchestrationState exposes lane budget debt in manifest debug st
   assert.deepEqual(result.manifest.laneBudgetDebt, { exploit: 2, exitRegime: -5, globalAllParameter: 2, robustness: 1 });
 });
 
+test('resolveConsumedBudgetLane pays down only a lane present in final variants', () => {
+  assert.equal(resolveConsumedBudgetLane({
+    selectedLane: 'robustness',
+    searchBatch: [
+      { lane: 'track' },
+      { lane: 'fallback' },
+    ],
+  }), null);
+
+  assert.equal(resolveConsumedBudgetLane({
+    selectedLane: 'robustness',
+    searchBatch: [
+      { lane: 'exploit' },
+      { lane: 'explore' },
+    ],
+  }), 'exploit');
+
+  assert.equal(resolveConsumedBudgetLane({
+    selectedLane: 'exitRegime',
+    searchBatch: [
+      { lane: 'exitRegime' },
+      { lane: 'exitRegime' },
+    ],
+  }), 'exitRegime');
+});
+
+test('resolveLaneBudgetDebtAdvance does not accrue disabled lane debt', () => {
+  const result = resolveLaneBudgetDebtAdvance({
+    config: {
+      maxConfigs: 20,
+      regimeExitResearch: {
+        enabled: true,
+        exitRegimeEnabled: false,
+        lanes: {
+          exploitRatio: 0.25,
+          exitRegimeRatio: 0.35,
+          globalAllParameterRatio: 0.25,
+          robustnessRatio: 0.15,
+        },
+      },
+    },
+    schedulerState: { budgetDebt: { exploit: 0, exitRegime: 0, globalAllParameter: 0, robustness: 0 } },
+    selectedLane: 'exploit',
+  });
+
+  assert.equal(result.advanced, true);
+  assert.deepEqual(result.budgetDebt, { exploit: -8, exitRegime: 0, globalAllParameter: 5, robustness: 3 });
+});
+
 test('force-entry-mutation search policy produces entry-key mutations in generated variants', () => {
   const champion = {
     configId: 'champion',
@@ -5084,6 +5135,84 @@ test('buildGlobalAllParameterExhaustedManifest records exhausted globalAllParame
   assert.equal(manifest.shadowRegimeScoreboard.selectedLane, 'globalAllParameter');
   assert.equal(manifest.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
   assert.ok(manifest.shadowRegimeScoreboard.generatorSummary.testedPatchFingerprintCount > 6);
+});
+
+test('runScout does not pay down selected robustness debt when active track variants consume the cycle', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-unconsumed-robustness-debt-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'unconsumed-robustness-debt-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 4,
+      minTrades: 1,
+      researchTracks: [
+        { trackId: 'squeeze-context', gridName: 'phase3-core', windowSet: 'primary', enabled: true },
+      ],
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 0,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: {
+        enabled: true,
+        exploitEnabled: true,
+        exitRegimeEnabled: true,
+        globalAllParameterEnabled: true,
+        robustnessLadderEnabled: true,
+        offline: { mode: 'local-first' },
+      },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = globalAllParameterChampion('champ-runscout-unconsumed-robustness');
+    const initialBudgetDebt = { exploit: 0, exitRegime: 0, globalAllParameter: 0, robustness: 1000 };
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-unconsumed-robustness-fp',
+    }), 'utf8');
+    await fs.writeFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), JSON.stringify({
+      stagnationLevel: 0,
+      budgetDebt: initialBudgetDebt,
+    }), 'utf8');
+
+    const sweepVariants = [];
+    const result = await autoresearchCli.runScout(config, {
+      runPrimarySweep: async (_config, _runId, options) => {
+        sweepVariants.push(...JSON.parse(await fs.readFile(options.variantFilePath, 'utf8')));
+        return { topConfigs: [] };
+      },
+    });
+
+    const schedulerState = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'state', 'scheduler', `${config.matrixId}.json`), 'utf8'));
+    assert.equal(result.manifest.shadowRegimeScoreboard.selectedLane, 'robustness');
+    assert.ok(sweepVariants.length > 0);
+    assert.equal(sweepVariants.every((variant) => variant.lane === 'track'), true);
+    assert.deepEqual(schedulerState.budgetDebt, initialBudgetDebt);
+    assert.deepEqual(result.manifest.laneBudgetDebt, initialBudgetDebt);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('runScout records next non-global lane after exhausted globalAllParameter hold when alternatives are enabled', async () => {

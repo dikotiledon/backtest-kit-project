@@ -8,6 +8,7 @@ import {
   buildNoveltySignature,
   computeConfigSimilarity,
   defaultSchedulerState,
+  nextStagnationState,
   nextTrackState,
   normalizeResearchTracks,
   pruneTabuFingerprints,
@@ -123,6 +124,78 @@ test('readSchedulerState and writeSchedulerState round-trip the explicit schedul
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('nextStagnationState escalates after repeated no-new-candidate cycles', () => {
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 0,
+    noNewCandidateStreak: 3,
+    promotionEligible: false,
+    policy: { noNewCandidateEscalateAfter: 3, maxStagnationLevel: 3 },
+  }), {
+    stagnationLevel: 1,
+    stagnationReason: 'noNewCandidateStreak',
+    lastEscalatedAt: null,
+  });
+});
+
+test('nextStagnationState resets when promotion becomes eligible', () => {
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 2,
+    noNewCandidateStreak: 0,
+    promotionEligible: true,
+    policy: { noNewCandidateEscalateAfter: 3, maxStagnationLevel: 3 },
+  }), {
+    stagnationLevel: 0,
+    stagnationReason: null,
+    lastEscalatedAt: null,
+  });
+});
+
+test('nextStagnationState caps escalation and preserves metadata below threshold', () => {
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 3,
+    noNewCandidateStreak: 9,
+    policy: { noNewCandidateEscalateAfter: 3, maxStagnationLevel: 3 },
+    now: '2026-05-03T04:00:00.000Z',
+  }), {
+    stagnationLevel: 3,
+    stagnationReason: 'noNewCandidateStreak',
+    lastEscalatedAt: '2026-05-03T04:00:00.000Z',
+  });
+
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 2,
+    noNewCandidateStreak: 2,
+    policy: {
+      noNewCandidateEscalateAfter: 3,
+      maxStagnationLevel: 3,
+      currentReason: 'noNewCandidateStreak',
+      lastEscalatedAt: '2026-05-03T03:00:00.000Z',
+    },
+  }), {
+    stagnationLevel: 2,
+    stagnationReason: 'noNewCandidateStreak',
+    lastEscalatedAt: '2026-05-03T03:00:00.000Z',
+  });
+});
+
+test('nextStagnationState is safe for malformed input and policy', () => {
+  assert.deepEqual(nextStagnationState(null), {
+    stagnationLevel: 0,
+    stagnationReason: null,
+    lastEscalatedAt: null,
+  });
+
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 'bad',
+    noNewCandidateStreak: 1,
+    policy: null,
+  }), {
+    stagnationLevel: 0,
+    stagnationReason: null,
+    lastEscalatedAt: null,
+  });
 });
 
 test('nextTrackState increments no-new-candidate streak when candidate equals champion', () => {
@@ -487,19 +560,50 @@ test('nextTrackState escalates stagnation level after repeated no-new-candidate 
   assert.equal(next.lastEscalatedAt, '2026-05-03T00:00:00.000Z');
 });
 
-test('nextTrackState escalates after repeated high-similarity holds', () => {
+test('nextTrackState consumes nested rotation stagnation policy', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noNewCandidateStreak: 1,
+      stagnationLevel: 0,
+    },
+    policy: {
+      rotationPolicy: {
+        stagnation: {
+          noNewCandidateEscalateAfter: 2,
+          maxStagnationLevel: 3,
+        },
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T00:10:00.000Z',
+    },
+  });
+
+  assert.equal(next.noNewCandidateStreak, 2);
+  assert.equal(next.stagnationLevel, 1);
+  assert.equal(next.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(next.lastEscalatedAt, '2026-05-03T00:10:00.000Z');
+});
+
+test('nextTrackState preserves stagnation state when no explicit transition applies', () => {
   const next = nextTrackState({
     state: {
       ...defaultSchedulerState(),
       noChangeStreak: 3,
       lastCandidateFingerprint: 'fp-b',
       stagnationLevel: 1,
+      stagnationReason: 'noNewCandidateStreak',
+      lastEscalatedAt: '2026-05-03T00:00:00.000Z',
     },
     policy: {
       stagnation: {
         enabled: true,
-        holdEscalateAfter: 4,
-        highSimilarityThreshold: 0.9,
+        noNewCandidateEscalateAfter: 3,
         maxStagnationLevel: 3,
       },
     },
@@ -513,8 +617,9 @@ test('nextTrackState escalates after repeated high-similarity holds', () => {
     },
   });
 
-  assert.equal(next.stagnationLevel, 2);
-  assert.equal(next.stagnationReason, 'highSimilarityHold');
+  assert.equal(next.stagnationLevel, 1);
+  assert.equal(next.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(next.lastEscalatedAt, '2026-05-03T00:00:00.000Z');
 });
 
 test('nextTrackState treats first observed candidate as changed and resets no-change streak', () => {
@@ -536,8 +641,8 @@ test('nextTrackState treats first observed candidate as changed and resets no-ch
   assert.equal(next.lastRotationTrigger, 'candidate-changed');
 });
 
-test('nextTrackState does not over-increment stagnation every cycle beyond threshold', () => {
-  const notYetBucketEdge = nextTrackState({
+test('nextTrackState advances explicit stagnation state while no-new-candidate streak remains above threshold', () => {
+  const firstCycle = nextTrackState({
     state: {
       ...defaultSchedulerState(),
       noNewCandidateStreak: 3,
@@ -561,12 +666,12 @@ test('nextTrackState does not over-increment stagnation every cycle beyond thres
     },
   });
 
-  assert.equal(notYetBucketEdge.noNewCandidateStreak, 4);
-  assert.equal(notYetBucketEdge.stagnationLevel, 1);
-  assert.equal(notYetBucketEdge.lastEscalatedAt, '2026-05-03T00:00:00.000Z');
+  assert.equal(firstCycle.noNewCandidateStreak, 4);
+  assert.equal(firstCycle.stagnationLevel, 2);
+  assert.equal(firstCycle.lastEscalatedAt, '2026-05-03T00:30:00.000Z');
 
-  const nextBucketEdge = nextTrackState({
-    state: notYetBucketEdge,
+  const secondCycle = nextTrackState({
+    state: firstCycle,
     policy: {
       stagnation: {
         enabled: true,
@@ -583,11 +688,12 @@ test('nextTrackState does not over-increment stagnation every cycle beyond thres
     },
   });
 
-  assert.equal(nextBucketEdge.noNewCandidateStreak, 5);
-  assert.equal(nextBucketEdge.stagnationLevel, 1);
+  assert.equal(secondCycle.noNewCandidateStreak, 5);
+  assert.equal(secondCycle.stagnationLevel, 3);
+  assert.equal(secondCycle.lastEscalatedAt, '2026-05-03T01:00:00.000Z');
 
   const thirdCycle = nextTrackState({
-    state: nextBucketEdge,
+    state: secondCycle,
     policy: {
       stagnation: {
         enabled: true,
@@ -605,7 +711,7 @@ test('nextTrackState does not over-increment stagnation every cycle beyond thres
   });
 
   assert.equal(thirdCycle.noNewCandidateStreak, 6);
-  assert.equal(thirdCycle.stagnationLevel, 2);
+  assert.equal(thirdCycle.stagnationLevel, 4);
   assert.equal(thirdCycle.lastEscalatedAt, '2026-05-03T01:30:00.000Z');
 });
 

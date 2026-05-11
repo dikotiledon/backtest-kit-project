@@ -325,6 +325,53 @@ function resolveRotationTrigger({ state = defaultSchedulerState(), policy = {}, 
   return null;
 }
 
+export function nextStagnationState(input = {}) {
+  const {
+    previousLevel = 0,
+    noNewCandidateStreak = 0,
+    promotionEligible = false,
+    policy = {},
+    now = null,
+  } = isPlainObject(input) ? input : {};
+  const sourcePolicy = isPlainObject(policy) ? policy : {};
+  const maxStagnationLevel = Math.max(0, Math.floor(Number.isFinite(Number(sourcePolicy.maxStagnationLevel))
+    ? Number(sourcePolicy.maxStagnationLevel)
+    : 3));
+  const noNewCandidateEscalateAfter = Math.max(1, Math.floor(Number.isFinite(Number(sourcePolicy.noNewCandidateEscalateAfter))
+    ? Number(sourcePolicy.noNewCandidateEscalateAfter)
+    : 3));
+  const normalizedPreviousLevel = Math.min(
+    maxStagnationLevel,
+    Math.max(0, Math.floor(Number.isFinite(Number(previousLevel)) ? Number(previousLevel) : 0)),
+  );
+  const normalizedNoNewCandidateStreak = Math.max(
+    0,
+    Math.floor(Number.isFinite(Number(noNewCandidateStreak)) ? Number(noNewCandidateStreak) : 0),
+  );
+
+  if (promotionEligible === true) {
+    return {
+      stagnationLevel: 0,
+      stagnationReason: null,
+      lastEscalatedAt: null,
+    };
+  }
+
+  if (normalizedNoNewCandidateStreak >= noNewCandidateEscalateAfter) {
+    return {
+      stagnationLevel: Math.min(maxStagnationLevel, normalizedPreviousLevel + 1),
+      stagnationReason: 'noNewCandidateStreak',
+      lastEscalatedAt: now ?? null,
+    };
+  }
+
+  return {
+    stagnationLevel: normalizedPreviousLevel,
+    stagnationReason: sourcePolicy.currentReason ?? null,
+    lastEscalatedAt: sourcePolicy.lastEscalatedAt ?? null,
+  };
+}
+
 export function nextTrackState({ state = defaultSchedulerState(), policy = {}, manifest = {} } = {}) {
   const previous = normalizeSchedulerState(state);
   const resolvedRotationTrigger = resolveRotationTrigger({ state: previous, policy, manifest });
@@ -360,48 +407,28 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     ? previous.noNewCandidateStreak + 1
     : 0;
 
-  const stagnationPolicy = isPlainObject(policy.stagnation) ? policy.stagnation : {};
-  const stagnationEnabled = stagnationPolicy.enabled === true;
-  const maxStagnationLevel = Math.max(1, Number(stagnationPolicy.maxStagnationLevel ?? 3) || 3);
-  const noNewCandidateEscalateAfter = Math.max(1, Number(stagnationPolicy.noNewCandidateEscalateAfter ?? 3) || 3);
-  const holdEscalateAfter = Math.max(1, Number(stagnationPolicy.holdEscalateAfter ?? 5) || 5);
-  const highSimilarityThreshold = Number.isFinite(Number(stagnationPolicy.highSimilarityThreshold))
-    ? Number(stagnationPolicy.highSimilarityThreshold)
-    : 0.9;
-
-  let stagnationLevel = previous.stagnationLevel ?? 0;
-  let stagnationReason = previous.stagnationReason ?? null;
-  let lastEscalatedAt = previous.lastEscalatedAt ?? null;
-
-  if (stagnationEnabled && manifest.promotionEligible === true) {
-    stagnationLevel = 0;
-    stagnationReason = null;
-  } else if (stagnationEnabled) {
-    const noNewEscalates = noNewCandidateStreak >= noNewCandidateEscalateAfter;
-    const highSimilarityHold = manifest.promotionEligible === false
-      && noChangeStreak >= holdEscalateAfter
-      && Number.isFinite(manifest.topCandidateSimilarity)
-      && manifest.topCandidateSimilarity >= highSimilarityThreshold;
-    const nextReason = noNewEscalates ? 'noNewCandidateStreak' : highSimilarityHold ? 'highSimilarityHold' : null;
-    if (nextReason) {
-      const cadenceAnchor = nextReason === 'noNewCandidateStreak'
-        ? noNewCandidateStreak
-        : noChangeStreak;
-      const cadenceThreshold = nextReason === 'noNewCandidateStreak'
-        ? noNewCandidateEscalateAfter
-        : holdEscalateAfter;
-      const thresholdCrossed = cadenceAnchor === cadenceThreshold;
-      const cadenceBucketAdvanced = cadenceAnchor > cadenceThreshold
-        && cadenceAnchor % cadenceThreshold === 0;
-      const reasonTransitioned = previous.stagnationReason !== nextReason;
-
-      if (thresholdCrossed || cadenceBucketAdvanced || reasonTransitioned) {
-        stagnationLevel = Math.min(maxStagnationLevel, stagnationLevel + 1);
-        stagnationReason = nextReason;
-        lastEscalatedAt = manifest.generatedAt ?? previous.lastEscalatedAt ?? null;
+  const configuredStagnationPolicy = isPlainObject(policy.stagnation)
+    ? policy.stagnation
+    : isPlainObject(policy.rotationPolicy?.stagnation)
+      ? policy.rotationPolicy.stagnation
+      : {};
+  const stagnationState = configuredStagnationPolicy.enabled === false
+    ? {
+        stagnationLevel: previous.stagnationLevel ?? 0,
+        stagnationReason: previous.stagnationReason ?? null,
+        lastEscalatedAt: previous.lastEscalatedAt ?? null,
       }
-    }
-  }
+    : nextStagnationState({
+        previousLevel: previous.stagnationLevel,
+        noNewCandidateStreak,
+        promotionEligible: manifest.promotionEligible === true,
+        policy: {
+          ...configuredStagnationPolicy,
+          currentReason: previous.stagnationReason,
+          lastEscalatedAt: previous.lastEscalatedAt,
+        },
+        now: manifest.generatedAt ?? null,
+      });
 
   const nextCycleIndex = Number.isFinite(manifest.cycleIndex) ? manifest.cycleIndex : previous.cycleIndex + 1;
   const currentChampionFingerprint = championFingerprint ?? previous.lastChampionFingerprint ?? null;
@@ -457,9 +484,9 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     lastPromotionEligibleAt: manifest.promotionEligible === true
       ? (manifest.promotionEligibleAt ?? manifest.generatedAt ?? previous.lastPromotionEligibleAt)
       : previous.lastPromotionEligibleAt,
-    stagnationLevel,
-    stagnationReason,
-    lastEscalatedAt,
+    stagnationLevel: stagnationState.stagnationLevel,
+    stagnationReason: stagnationState.stagnationReason,
+    lastEscalatedAt: stagnationState.lastEscalatedAt,
     blockedPromotionFingerprints: Array.isArray(previous.blockedPromotionFingerprints)
       ? [...previous.blockedPromotionFingerprints]
       : [],

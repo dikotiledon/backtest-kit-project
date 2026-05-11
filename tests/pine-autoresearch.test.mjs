@@ -97,6 +97,24 @@ test('loadConfig preserves searchPolicy tabu policy from file config', async () 
   }
 });
 
+test('canonical config fingerprint ignores identity-only keys everywhere', () => {
+  const semantic = { tpAtrMult: 7.6, slAtrMult: 0.5, useFusionV4: true };
+  const withIdentity = {
+    ...semantic,
+    configId: 'candidate-identity',
+    label: 'candidate label',
+    promotedAt: '2026-05-12T00:00:00.000Z',
+    sourceRunId: 'run-identity',
+    configFingerprint: 'identity-only-fingerprint',
+  };
+
+  assert.equal(buildChampionConfigFingerprint(semantic), buildChampionConfigFingerprint(withIdentity));
+  assert.equal(
+    autoresearchCli.buildCanonicalConfigFingerprint(semantic),
+    autoresearchCli.buildCanonicalConfigFingerprint(withIdentity),
+  );
+});
+
 function psSingleQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }
@@ -1832,6 +1850,38 @@ test('decideQueuedPromotionAction marks stale when champion changed since queued
   assert.equal(result.reason, 'Current champion changed since queued decision');
 });
 
+test('decideQueuedPromotionAction does not go stale when only champion identity metadata changed', () => {
+  const semanticChampion = { tpAtrMult: 7.6, slAtrMult: 0.5, useFusionV4: true };
+  const championWithIdentity = {
+    ...semanticChampion,
+    configId: 'champion-relabelled',
+    label: 'Champion relabelled',
+    promotedAt: '2026-05-12T00:00:00.000Z',
+    sourceRunId: 'run-relabelled',
+    configFingerprint: 'identity-only-fingerprint',
+  };
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+    championFingerprintAtDecision: autoresearchCli.buildCanonicalConfigFingerprint(semanticChampion),
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { ...semanticChampion, tpAtrMult: 8.1 } },
+  };
+  const championState = {
+    config: championWithIdentity,
+    configFingerprint: configFingerprint(championWithIdentity),
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.status, 'promoted');
+});
+
 test('decideQueuedPromotionAction fails when queued family identity differs from manifest', () => {
   const result = decideQueuedPromotionAction({
     queuedItem: {
@@ -3361,6 +3411,34 @@ test('early hold manifests preserve entry invariance verdict', () => {
   });
 
   assert.deepEqual(manifest.entryInvariance, entryInvariance);
+});
+
+test('early hold manifests and scheduler inputs use canonical config fingerprints', () => {
+  const semanticChampion = { tpAtrMult: 7.6, slAtrMult: 0.5, useFusionV4: true };
+  const championConfig = {
+    ...semanticChampion,
+    configId: 'champion-identity',
+    label: 'Champion Identity',
+    promotedAt: '2026-05-12T00:00:00.000Z',
+    sourceRunId: 'run-identity',
+    configFingerprint: 'identity-only-fingerprint',
+  };
+  const expectedFingerprint = buildChampionConfigFingerprint(semanticChampion);
+  const offlineManifest = autoresearchCli.buildOfflineDataMissingManifest({
+    config: { matrixId: 'pine-autoresearch', searchPolicy: { mode: 'incumbent-local' } },
+    runId: 'offline-canonical-fingerprint',
+    championState: { configId: 'champion', config: championConfig },
+    offlineDataSummary: { ok: false, mode: 'offline-strict' },
+  });
+  const schedulerInput = autoresearchCli.buildGlobalAllParameterExhaustedSchedulerManifestInput({
+    manifest: { generatedAt: '2026-05-12T00:00:00.000Z' },
+    championState: { configId: 'champion', config: championConfig },
+  });
+
+  assert.equal(offlineManifest.candidateFingerprint, expectedFingerprint);
+  assert.equal(offlineManifest.championFingerprint, expectedFingerprint);
+  assert.equal(schedulerInput.candidateFingerprint, expectedFingerprint);
+  assert.equal(schedulerInput.championFingerprint, expectedFingerprint);
 });
 
 test('entry invariance manifest cycle unions selected challenger delta and generated variant patch keys', () => {

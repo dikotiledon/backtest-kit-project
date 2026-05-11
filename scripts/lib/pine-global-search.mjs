@@ -83,8 +83,12 @@ function stripConfigIdentity(value) {
   return value;
 }
 
-export function buildChampionConfigFingerprint(config = {}) {
+export function buildCanonicalConfigFingerprint(config = {}) {
   return JSON.stringify(stableValue(stripConfigIdentity(config || {})));
+}
+
+export function buildChampionConfigFingerprint(config = {}) {
+  return buildCanonicalConfigFingerprint(config);
 }
 
 function canonicalGlobalLane(lane) {

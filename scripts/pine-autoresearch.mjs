@@ -80,10 +80,13 @@ import {
 import { buildExitFamilyCandidates } from './lib/pine-exit-generators.mjs';
 import { buildLanePatchFingerprint, collectTestedLanePatchFingerprints } from './lib/pine-lane-novelty.mjs';
 import {
+  buildCanonicalConfigFingerprint,
   buildChampionConfigFingerprint,
   buildGlobalMutationBatch,
   buildGlobalPatchFingerprint,
 } from './lib/pine-global-search.mjs';
+
+export { buildCanonicalConfigFingerprint };
 
 const DEFAULT_REGIME_EXIT_STATE = {
   enabled: false,
@@ -623,9 +626,9 @@ export function buildOfflineDataMissingManifest({
     topCandidateSimilarity: null,
     promotionEligible: false,
     promotionEligibleReason: 'offlineDataMissing',
-    candidateFingerprint: championState?.config ? configFingerprint(championState.config) : null,
+    candidateFingerprint: championState?.config ? buildCanonicalConfigFingerprint(championState.config) : null,
     rejectedCandidateFingerprint: null,
-    championFingerprint: championState?.config ? configFingerprint(championState.config) : null,
+    championFingerprint: championState?.config ? buildCanonicalConfigFingerprint(championState.config) : null,
     labSetId: null,
     gridName: config.grid ?? null,
     researchBudgetMode: config.regimeExitResearch?.enabled ? 'regime-exit' : null,
@@ -722,7 +725,7 @@ export function buildGlobalAllParameterExhaustedSchedulerManifestInput({
   trackState = {},
 } = {}) {
   const championFingerprint = trackState.championFingerprint
-    ?? (championState?.config ? configFingerprint(championState.config) : manifest.championFingerprint ?? null);
+    ?? (championState?.config ? buildCanonicalConfigFingerprint(championState.config) : manifest.championFingerprint ?? null);
   const candidateFingerprint = trackState.candidateFingerprint ?? championFingerprint;
   return {
     activeTrackId: manifest.activeTrackId ?? trackState.activeTrackId ?? null,
@@ -946,7 +949,7 @@ function searchVariantConfigFingerprint({ variant = {}, championConfig = {}, pat
   const config = patch
     ? { ...(championConfig || {}), ...patch }
     : (variant?.config || { ...(championConfig || {}), ...(variant?.patch || {}) });
-  return configFingerprint(config);
+  return buildCanonicalConfigFingerprint(config);
 }
 
 function variantIsSchedulerTabu({ variant = {}, championConfig = {}, tabuSet = new Set(), patch = null } = {}) {
@@ -1036,9 +1039,15 @@ export function decideQueuedPromotionAction({ queuedItem, manifest, championStat
   if (manifest.matrixDecision?.recommendation !== 'promote') return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: `Queued manifest recommendation is ${manifest.matrixDecision?.recommendation || 'unknown'}` };
   if (!manifest.challenger?.config) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'Queued manifest has no challenger config' };
   if (sameConfig(championState?.config, manifest.challenger.config)) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: `Champion already matches ${manifest.challenger.configId}` };
-  const currentChampionFingerprint = championState?.configFingerprint || configFingerprint(championState?.config || {});
+  const currentChampionFingerprints = new Set();
+  if (championState?.config) {
+    currentChampionFingerprints.add(buildCanonicalConfigFingerprint(championState.config));
+    currentChampionFingerprints.add(configFingerprint(championState.config));
+  }
+  if (championState?.configFingerprint) currentChampionFingerprints.add(championState.configFingerprint);
+  if (!currentChampionFingerprints.size) currentChampionFingerprints.add(configFingerprint({}));
   if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Queued champion fingerprint missing at decision' };
-  if (currentChampionFingerprint !== queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Current champion changed since queued decision' };
+  if (!currentChampionFingerprints.has(queuedItem.championFingerprintAtDecision)) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Current champion changed since queued decision' };
   if (queuedItem.candidateFamilyKey && manifest.candidateFamilyKey && queuedItem.candidateFamilyKey !== manifest.candidateFamilyKey) {
     return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'Queued candidate family does not match manifest family' };
   }
@@ -2277,7 +2286,7 @@ async function seedChampionState(config) {
   const source = bootstrap.source;
   const championState = {
     ...summarizeResult(source),
-    configFingerprint: configFingerprint(source.config),
+    configFingerprint: buildCanonicalConfigFingerprint(source.config),
     promotedAt: isoNow(),
     sourcePath: bootstrap.kind === 'seed-file' ? config.seedChampionPath : (latest?.manifestPath || latestManifestPath(config)),
     sourceRunId: latest?.runId || source.sourceRunId || null,
@@ -2548,7 +2557,7 @@ export async function runScout(config, dependencies = {}) {
   }
   const schedulerStatePath = resolveSchedulerStatePath({ researchRoot: config.researchRoot, matrixId: config.matrixId });
   const loadedSchedulerState = await readSchedulerState(schedulerStatePath);
-  const schedulerChampionFingerprint = configFingerprint(championState.config);
+  const schedulerChampionFingerprint = buildCanonicalConfigFingerprint(championState.config);
   const schedulerTabuPolicy = config.searchPolicy?.tabu
     ?? config.rotationPolicy?.tabu
     ?? {
@@ -2685,7 +2694,7 @@ export async function runScout(config, dependencies = {}) {
   });
 
   if (shouldSkipNoRegimeResearchLane({ regimeExitState: regimeExitStateBeforeSweep })) {
-    const championFingerprint = configFingerprint(championState.config);
+    const championFingerprint = buildCanonicalConfigFingerprint(championState.config);
     const noLaneManifest = buildNoRegimeResearchLaneManifest({
       config: trackedConfig,
       runId,
@@ -2735,7 +2744,7 @@ export async function runScout(config, dependencies = {}) {
   }
 
   if (shouldSkipGeneratedLaneSweep({ regimeExitState: regimeExitStateBeforeSweep, searchBatch: searchVariants })) {
-    const championFingerprint = configFingerprint(championState.config);
+    const championFingerprint = buildCanonicalConfigFingerprint(championState.config);
     const exhaustedLane = regimeExitStateBeforeSweep.shadowRegimeScoreboard?.selectedLane || 'globalAllParameter';
     const exhaustionReason = generatedLaneExhaustionReason(exhaustedLane);
     const exhaustedManifest = buildGlobalAllParameterExhaustedManifest({
@@ -2828,8 +2837,8 @@ export async function runScout(config, dependencies = {}) {
   const selectedCandidate = selectChangedMatrixCandidate({ candidates: matrixCandidates, championState });
   const challengerSummary = selectedCandidate?.challenger || summarizeResult(championState);
   const noNewCandidate = sameConfig(championState.config, challengerSummary.config);
-  const candidateFingerprint = configFingerprint(challengerSummary.config);
-  const championFingerprint = configFingerprint(championState.config);
+  const candidateFingerprint = buildCanonicalConfigFingerprint(challengerSummary.config);
+  const championFingerprint = buildCanonicalConfigFingerprint(championState.config);
   const rejectedCandidateFingerprint = selectedCandidate?.matrixDecision?.recommendation === 'hold'
     && candidateFingerprint !== championFingerprint
     ? candidateFingerprint
@@ -3099,8 +3108,8 @@ async function runBlindHoldout(config) {
   });
   const championSummary = summarizeResult(championState);
   const challengerSummary = summarizeResult(latest.challenger);
-  const championFingerprint = configFingerprint(championState.config || {});
-  const candidateFingerprint = configFingerprint(latest.challenger.config || {});
+  const championFingerprint = buildCanonicalConfigFingerprint(championState.config || {});
+  const candidateFingerprint = buildCanonicalConfigFingerprint(latest.challenger.config || {});
   const holdoutPassed = matrixDecision.recommendation === 'promote';
   const holdoutGate = classifyHoldoutGate({
     blindHoldoutLabs: labs,
@@ -3182,7 +3191,7 @@ export async function runPromote(config, args, mode = 'manual', manifestOverride
   const promotedAt = isoNow();
   const nextChampion = {
     ...latest.challenger,
-    configFingerprint: configFingerprint(latest.challenger.config),
+    configFingerprint: buildCanonicalConfigFingerprint(latest.challenger.config),
     promotedAt,
     sourceManifestPath: latest.manifestPath || latestManifestPath(config),
     sourceRunId: latest.runId,
@@ -3191,8 +3200,11 @@ export async function runPromote(config, args, mode = 'manual', manifestOverride
   await writeJson(championPath(config), nextChampion);
 
   const notePath = await writePromotionNote(config, latest, mode);
-  const fromFingerprint = latest.championFingerprint ?? championState.configFingerprint ?? configFingerprint(championState.config || {});
-  const toFingerprint = latest.candidateFingerprint ?? latest.challenger?.candidateFingerprint ?? configFingerprint(latest.challenger?.config || {});
+  const fromFingerprint = latest.championFingerprint
+    ?? (championState.config ? buildCanonicalConfigFingerprint(championState.config) : championState.configFingerprint ?? configFingerprint({}));
+  const toFingerprint = latest.candidateFingerprint
+    ?? latest.challenger?.candidateFingerprint
+    ?? buildCanonicalConfigFingerprint(latest.challenger?.config || {});
   const fromFamilyKey = latest.championFamilyKey ?? buildCandidateFamilyKey({ config: championState.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys });
   const toFamilyKey = latest.candidateFamilyKey ?? buildCandidateFamilyKey({ config: latest.challenger?.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys });
   await appendJsonl(historyPath(config), {

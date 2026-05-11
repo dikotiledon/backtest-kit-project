@@ -2816,6 +2816,101 @@ test('force-entry-mutation search policy produces entry-key mutations in generat
   assert.equal(batch.every((variant) => requiredTouchedKeys.some((key) => variant.config[key] !== champion.config[key])), true);
 });
 
+test('entry invariance enforcement injects entry mutation after generated globalAllParameter lane selection', () => {
+  const championConfig = {
+    useSignalFusion: true,
+    useFusionV4: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 7.6,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+  const requiredTouchedKeys = ['adxThreshold', 'minPredSum', 'minBarsBetween', 'neighborsCount'];
+  const generatedBatch = [{
+    variantId: 'global-all-risk-only',
+    lane: 'globalAllParameter',
+    family: 'risk',
+    mutationFamily: 'risk',
+    patch: { tpAtrMult: 8.1 },
+    touchedKeys: ['tpAtrMult'],
+    config: { ...championConfig, tpAtrMult: 8.1 },
+    metadata: { patchFingerprint: 'stale-fingerprint' },
+  }];
+
+  const enforced = autoresearchCli.enforceEntryInvarianceOnSearchBatch({
+    searchBatch: generatedBatch,
+    championConfig,
+    historyEvents: [{ type: 'cycle' }],
+    policy: {
+      mode: 'force-entry-mutation',
+      requiredTouchedKeys,
+      exploitRatio: 1,
+      exploitFamilies: ['risk'],
+      exploreFamilies: ['risk'],
+    },
+    entryInvariance: {
+      flagged: true,
+      reason: 'exit_only_drift',
+      untouchedEntryKeys: requiredTouchedKeys,
+    },
+  });
+
+  assert.equal(enforced.length, 1);
+  assert.equal(enforced[0].lane, 'globalAllParameter');
+  assert.equal(enforced[0].patch.tpAtrMult, 8.1);
+  assert.equal(Object.keys(enforced[0].patch).some((key) => requiredTouchedKeys.includes(key)), true);
+  assert.equal(requiredTouchedKeys.some((key) => enforced[0].config[key] !== championConfig[key]), true);
+  assert.equal(enforced[0].metadata.forcedEntryMutation, true);
+  assert.equal(enforced[0].metadata.forcedEntryMutationSource, 'entry-invariance-post-selection');
+  assert.notEqual(enforced[0].metadata.patchFingerprint, 'stale-fingerprint');
+});
+
+test('early hold manifests preserve entry invariance verdict', () => {
+  const entryInvariance = {
+    flagged: true,
+    reason: 'exit_only_drift',
+    untouchedEntryKeys: ['adxThreshold'],
+  };
+
+  const manifest = autoresearchCli.buildOfflineDataMissingManifest({
+    config: { matrixId: 'pine-autoresearch', searchPolicy: { mode: 'incumbent-local' } },
+    runId: 'offline-missing-entry-invariance',
+    championState: { configId: 'champion', config: { adxThreshold: 20 } },
+    offlineDataSummary: { ok: false, mode: 'offline-strict' },
+    entryInvariance,
+  });
+
+  assert.deepEqual(manifest.entryInvariance, entryInvariance);
+});
+
+test('entry invariance manifest cycle unions selected challenger delta and generated variant patch keys', () => {
+  const cycle = autoresearchCli.entryInvarianceCycleFromManifest({
+    champion: {
+      config: { adxThreshold: 20, minPredSum: 2, tpAtrMult: 7.6 },
+    },
+    challenger: {
+      config: { adxThreshold: 20, minPredSum: 2, tpAtrMult: 8.1 },
+      tradeCount: 261,
+      winRatePct: 42.53,
+    },
+    searchPlan: {
+      variants: [
+        { patch: { adxThreshold: 25 }, touchedKeys: ['adxThreshold'] },
+      ],
+    },
+  });
+
+  assert.deepEqual(new Set(cycle.touchedKeys), new Set(['tpAtrMult', 'adxThreshold']));
+});
+
 test('buildScoutOrchestrationState marks no-new-candidate when selected candidate equals champion', () => {
   const championConfig = { minPredSum: 2, tpAtrMult: 5.5 };
   const championState = { configId: 'champion', score: 70, config: championConfig };

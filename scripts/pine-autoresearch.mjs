@@ -69,7 +69,7 @@ import { buildCandidateFamilyKey, summarizePromotionLineage } from './lib/pine-a
 import { normalizeRegimeExitResearchConfig } from './lib/pine-regime-exit-config.mjs';
 import { allocateRegimeExitLaneBudget, resolveExhaustedResearchLanes, selectNextResearchLane } from './lib/pine-regime-exit-scheduler.mjs';
 import { buildExitFamilyCandidates } from './lib/pine-exit-generators.mjs';
-import { collectTestedLanePatchFingerprints } from './lib/pine-lane-novelty.mjs';
+import { buildLanePatchFingerprint, collectTestedLanePatchFingerprints } from './lib/pine-lane-novelty.mjs';
 import {
   buildChampionConfigFingerprint,
   buildGlobalMutationBatch,
@@ -445,6 +445,7 @@ export function buildGlobalAllParameterExhaustedManifest({
   regimeExitState = {},
   schedulerState = {},
   trackState = {},
+  entryInvariance = null,
 } = {}) {
   const championSummary = summarizeResult(championState);
   const normalizedRegimeExitState = { ...DEFAULT_REGIME_EXIT_STATE, ...(regimeExitState || {}) };
@@ -478,6 +479,7 @@ export function buildGlobalAllParameterExhaustedManifest({
       reason: exhaustionReason,
       summary: generatedLaneExhaustionSummary(exhaustedLane),
     },
+    entryInvariance,
     researchState: {
       steadyState: true,
       noChangeStreak: Number(schedulerState?.noChangeStreak ?? 0) + 1,
@@ -518,6 +520,7 @@ export function buildOfflineDataMissingManifest({
   runId,
   championState,
   offlineDataSummary = null,
+  entryInvariance = null,
 } = {}) {
   const championSummary = summarizeResult(championState);
   const generatedAt = isoNow();
@@ -548,6 +551,7 @@ export function buildOfflineDataMissingManifest({
       reason: 'offlineDataMissing',
       summary: 'Hold: required offline data is missing for offline-strict autoresearch.',
     },
+    entryInvariance,
     researchState: {
       steadyState: true,
       noChangeStreak: 0,
@@ -590,6 +594,7 @@ export function buildNoRegimeResearchLaneManifest({
   regimeExitState = {},
   schedulerState = {},
   trackState = {},
+  entryInvariance = null,
 } = {}) {
   const championSummary = summarizeResult(championState);
   const normalizedRegimeExitState = { ...DEFAULT_REGIME_EXIT_STATE, ...(regimeExitState || {}) };
@@ -622,6 +627,7 @@ export function buildNoRegimeResearchLaneManifest({
       reason: 'no-regime-research-lane',
       summary: `Hold: no enabled non-exhausted regime research lane is available (${noLaneReason}).`,
     },
+    entryInvariance,
     researchState: {
       steadyState: true,
       noChangeStreak: Number(schedulerState?.noChangeStreak ?? 0) + 1,
@@ -772,14 +778,14 @@ function summarizeChallengerSignalMetrics(challenger = {}) {
   };
 }
 
-function entryInvarianceCycleFromManifest(manifest = {}) {
+export function entryInvarianceCycleFromManifest(manifest = {}) {
   const configDeltaKeys = changedConfigKeys(manifest?.champion?.config ?? manifest?.incumbent?.config, manifest?.challenger?.config);
   const variantPatchKeys = (Array.isArray(manifest?.searchPlan?.variants) ? manifest.searchPlan.variants : [])
     .flatMap((variant) => [
       ...normalizeTouchedKeyList(variant?.touchedKeys),
       ...Object.keys(variant?.patch || {}),
     ]);
-  const touchedKeys = [...new Set(configDeltaKeys.length ? configDeltaKeys : variantPatchKeys)];
+  const touchedKeys = [...new Set([...configDeltaKeys, ...variantPatchKeys])];
   return {
     touchedKeys,
     challenger: summarizeChallengerSignalMetrics(manifest?.challenger || {}),
@@ -825,6 +831,92 @@ function buildForcedEntryMutationPolicy(searchPolicy = {}, entryInvariance = {})
     ladderScale: 1.5,
     requiredTouchedKeys: entryInvariance.untouchedEntryKeys || [],
   };
+}
+
+function variantTouchesAnyKey(variant = {}, keys = []) {
+  const required = new Set(normalizeTouchedKeyList(keys));
+  if (!required.size) return false;
+  const touched = [
+    ...normalizeTouchedKeyList(variant?.touchedKeys),
+    ...Object.keys(variant?.patch || {}),
+  ];
+  return touched.some((key) => required.has(key));
+}
+
+function forcedEntryPatchForBatch({ championConfig, policy = {}, historyEvents = [], schedulerState = {}, requiredTouchedKeys = [] } = {}) {
+  const forcedBatch = buildIncumbentSearchBatch({
+    incumbent: championConfig,
+    maxConfigs: 1,
+    historyEvents,
+    policy: {
+      ...policy,
+      mode: 'force-entry-mutation',
+      reason: 'exit_only_drift',
+      allowArchitectureKeys: false,
+      requiredTouchedKeys,
+      exploitRatio: 1,
+    },
+    schedulerState,
+  });
+  const forcedVariant = forcedBatch.find((variant) => variantTouchesAnyKey(variant, requiredTouchedKeys));
+  return forcedVariant?.patch || null;
+}
+
+function buildUpdatedGeneratedPatchFingerprint({ variant = {}, championConfig = {}, patch = {} } = {}) {
+  const lane = variant?.lane ?? null;
+  const mutationFamily = variant?.mutationFamily ?? variant?.family ?? null;
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig || {});
+  if (lane === 'globalAllParameter' || lane === 'global-all-parameter') {
+    return buildGlobalPatchFingerprint({ championConfigFingerprint, lane, mutationFamily, patch });
+  }
+  if (lane === 'exitRegime' || lane === 'exit-regime') {
+    return buildLanePatchFingerprint({ championConfigFingerprint, lane, mutationFamily, patch });
+  }
+  return variant?.patchFingerprint ?? variant?.metadata?.patchFingerprint ?? null;
+}
+
+export function enforceEntryInvarianceOnSearchBatch({
+  searchBatch = [],
+  championConfig = {},
+  historyEvents = [],
+  policy = {},
+  schedulerState = {},
+  entryInvariance = null,
+} = {}) {
+  const batch = Array.isArray(searchBatch) ? searchBatch : [];
+  if (entryInvariance?.flagged !== true || batch.length === 0) return batch;
+
+  const requiredTouchedKeys = normalizeTouchedKeyList(entryInvariance.untouchedEntryKeys || policy.requiredTouchedKeys || []);
+  if (!requiredTouchedKeys.length || batch.some((variant) => variantTouchesAnyKey(variant, requiredTouchedKeys))) return batch;
+
+  const entryPatch = forcedEntryPatchForBatch({
+    championConfig,
+    policy,
+    historyEvents,
+    schedulerState,
+    requiredTouchedKeys,
+  });
+  if (!entryPatch || !Object.keys(entryPatch).some((key) => requiredTouchedKeys.includes(key))) return batch;
+
+  return batch.map((variant, index) => {
+    if (index !== 0) return variant;
+    const patch = { ...(variant?.patch || {}), ...entryPatch };
+    const patchFingerprint = buildUpdatedGeneratedPatchFingerprint({ variant, championConfig, patch });
+    return {
+      ...variant,
+      patch,
+      touchedKeys: [...new Set([...normalizeTouchedKeyList(variant?.touchedKeys), ...Object.keys(patch)])],
+      config: { ...(championConfig || {}), ...patch },
+      patchFingerprint,
+      metadata: {
+        ...(variant?.metadata || {}),
+        forcedEntryMutation: true,
+        forcedEntryMutationSource: 'entry-invariance-post-selection',
+        requiredTouchedKeys,
+        patchFingerprint,
+      },
+    };
+  });
 }
 
 export function decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction } = {}) {
@@ -2228,6 +2320,17 @@ export async function runScout(config, dependencies = {}) {
       profile: trackedConfig.selectedProfile,
     });
 
+    const historyEventsBefore = await loadHistoryEvents(config);
+    const recentManifestsForNovelty = await loadRecentCompletedManifestsForNovelty({
+      config: trackedConfig,
+      limit: null,
+    });
+    const entryInvariance = buildEntryInvarianceVerdict({
+      historyEvents: historyEventsBefore,
+      manifests: recentManifestsForNovelty,
+      policy: trackedConfig.searchPolicy?.entryInvariance || trackedConfig.entryInvariancePolicy || {},
+    });
+
     let offlineDataSummary = null;
   if (config.regimeExitResearch?.enabled) {
     offlineDataSummary = await buildOfflineDataPreflight(config);
@@ -2237,6 +2340,7 @@ export async function runScout(config, dependencies = {}) {
         runId,
         championState,
         offlineDataSummary,
+        entryInvariance,
       });
       const finalizedArtifact = await finalizeAutoresearchManifest({
         root: trackedConfig.researchRoot,
@@ -2257,7 +2361,6 @@ export async function runScout(config, dependencies = {}) {
       };
     }
   }
-  const historyEventsBefore = await loadHistoryEvents(config);
   const schedulerStatePath = resolveSchedulerStatePath({ researchRoot: config.researchRoot, matrixId: config.matrixId });
   const loadedSchedulerState = await readSchedulerState(schedulerStatePath);
   const schedulerState = mergeSchedulerTabuFingerprints({
@@ -2295,15 +2398,6 @@ export async function runScout(config, dependencies = {}) {
   const labSetId = [config.primaryLab?.labId, ...(config.shadowLabs || []).map((lab) => lab.labId)].filter(Boolean).join(',');
   trackedConfig = { ...trackedConfig, grid: gridName };
 
-  const recentManifestsForNovelty = await loadRecentCompletedManifestsForNovelty({
-    config: trackedConfig,
-    limit: null,
-  });
-  const entryInvariance = buildEntryInvarianceVerdict({
-    historyEvents: historyEventsBefore,
-    manifests: recentManifestsForNovelty,
-    policy: trackedConfig.searchPolicy?.entryInvariance || trackedConfig.entryInvariancePolicy || {},
-  });
   trackedConfig = {
     ...trackedConfig,
     searchPolicy: buildForcedEntryMutationPolicy(trackedConfig.searchPolicy, entryInvariance),
@@ -2365,11 +2459,19 @@ export async function runScout(config, dependencies = {}) {
     && isGeneratedNoveltyLane(selectedRegimeLane);
   const generatedRegimeLane = selectedGeneratedRegimeLane;
 
-  const searchVariants = generatedRegimeLane
+  const selectedSearchBatch = generatedRegimeLane
     ? regimeAwareSearchBatch
     : fallbackSearchBatch.length > 0
       ? fallbackSearchBatch
       : regimeAwareSearchBatch;
+  const searchVariants = enforceEntryInvarianceOnSearchBatch({
+    searchBatch: selectedSearchBatch,
+    championConfig: championState.config,
+    historyEvents: historyEventsBefore,
+    policy: trackedConfig.searchPolicy,
+    schedulerState,
+    entryInvariance,
+  });
   const totalCombos = searchVariants.length;
   const sweepOffset = computeSweepOffset({
     historyEvents: historyEventsBefore,
@@ -2395,6 +2497,7 @@ export async function runScout(config, dependencies = {}) {
       championState,
       regimeExitState: regimeExitStateBeforeSweep,
       schedulerState,
+      entryInvariance,
       trackState: {
         activeTrackId,
         windowSetId,
@@ -2446,6 +2549,7 @@ export async function runScout(config, dependencies = {}) {
       championState,
       regimeExitState: regimeExitStateBeforeSweep,
       schedulerState,
+      entryInvariance,
       trackState: {
         activeTrackId,
         windowSetId,

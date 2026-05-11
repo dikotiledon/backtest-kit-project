@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { computeExpectancy, evaluateExpectancyGuard } from './pine-expectancy.mjs';
 import { decideLineagePromotionGate, summarizePromotionLineage } from './pine-autoresearch-lineage.mjs';
+import { decideSignificanceGate } from './pine-significance-gate.mjs';
 
 function round(value, digits = 2) {
   if (!Number.isFinite(value)) return 0;
@@ -397,6 +398,7 @@ export function decideAutoresearchOutcome({
       failedGates: ['challengerPresent'],
       expectancy: null,
       expectancyGate: null,
+      significanceGate: null,
     };
   }
 
@@ -453,6 +455,7 @@ export function decideAutoresearchOutcome({
       },
       expectancy: null,
       expectancyGate: null,
+      significanceGate: null,
     };
   }
 
@@ -488,6 +491,16 @@ export function decideAutoresearchOutcome({
     .filter(([, passed]) => !passed)
     .map(([name]) => name);
 
+  const significanceGate = decideSignificanceGate({
+    incumbent,
+    challenger,
+    policy: thresholds?.significance || {},
+  });
+  gates.significance = significanceGate.passed;
+  if (failedGates.length === 0 && significanceGate.passed === false) {
+    failedGates.push('significance');
+  }
+
   const holdoutRequired = Array.isArray(blindHoldoutLabs) && blindHoldoutLabs.length > 0;
   if (failedGates.length === 0 && holdoutRequired && !holdoutVerdict) {
     return {
@@ -508,6 +521,7 @@ export function decideAutoresearchOutcome({
       complexity,
       expectancy: expectancyGate,
       expectancyGate,
+      significanceGate,
     };
   }
   if (failedGates.length === 0 && holdoutVerdict && holdoutVerdict.passed !== true) {
@@ -529,6 +543,7 @@ export function decideAutoresearchOutcome({
       complexity,
       expectancy: expectancyGate,
       expectancyGate,
+      significanceGate,
     };
   }
 
@@ -554,6 +569,7 @@ export function decideAutoresearchOutcome({
         complexity,
         expectancy: expectancyGate,
         expectancyGate,
+        significanceGate,
         profitabilityFloor,
       };
     }
@@ -584,6 +600,7 @@ export function decideAutoresearchOutcome({
     complexity,
     expectancy: expectancyGate,
     expectancyGate,
+    significanceGate,
     profitabilityFloor,
   };
 }

@@ -1182,7 +1182,7 @@ test('decideAutoresearchOutcome recommends promote when all gates pass', () => {
 
   const challenger = makeResult({
     configId: 'challenger',
-    score: 60.75,
+    score: 62,
     tradeCount: 230,
     roiPct: 39.1,
     profitFactor: 1.58,
@@ -1204,12 +1204,78 @@ test('decideAutoresearchOutcome recommends promote when all gates pass', () => {
 
   assert.equal(result.recommendation, 'promote');
   assert.deepEqual(result.failedGates, []);
+  assert.equal(result.gates.significance, true);
+  assert.equal(result.significanceGate.reason, 'significant');
+});
+
+test('decideAutoresearchOutcome rejects small noise deltas with significance gate', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 220, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 101.5, roiPct: 41, profitFactor: 1.5, tradeCount: 220, maxDrawdownPct: 5 }),
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      significance: { minRelativeScoreDelta: 0.02, minTradeCount: 150 },
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.deepEqual(outcome.failedGates, ['significance']);
+  assert.equal(outcome.gates.significance, false);
+  assert.equal(outcome.significanceGate.reason, 'score_delta_below_floor');
+});
+
+test('decideAutoresearchOutcome promotes sufficiently large relative score deltas', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 220, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 103, roiPct: 41, profitFactor: 1.5, tradeCount: 220, maxDrawdownPct: 5 }),
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      significance: { minRelativeScoreDelta: 0.02, minTradeCount: 150 },
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'promote');
+  assert.deepEqual(outcome.failedGates, []);
+  assert.equal(outcome.gates.significance, true);
+  assert.equal(outcome.significanceGate.reason, 'significant');
+});
+
+test('decideAutoresearchOutcome preserves earlier failure reasons when significance also fails', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 220, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 100.1, roiPct: 41, profitFactor: 1.5, tradeCount: 220, maxDrawdownPct: 5 }),
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      significance: { minRelativeScoreDelta: 0.02, minTradeCount: 150 },
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.deepEqual(outcome.failedGates, ['score']);
+  assert.equal(outcome.gates.score, false);
+  assert.equal(outcome.gates.significance, false);
+  assert.equal(outcome.significanceGate.reason, 'score_delta_below_floor');
 });
 
 test('decideAutoresearchOutcome blocks promotion when blind holdout verdict required', () => {
   const outcome = decideAutoresearchOutcome({
     incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 50, tradeCount: 100 }),
-    challenger: makeResult({ configId: 'challenger', score: 120, roiPct: 70, tradeCount: 120 }),
+    challenger: makeResult({ configId: 'challenger', score: 120, roiPct: 70, tradeCount: 160 }),
     matrixDecision: {
       recommendation: 'promote',
       gates: { candidateChanged: true, primaryPromote: true, shadowPassCount: true, shadowPassRatio: true },
@@ -1227,7 +1293,7 @@ test('decideAutoresearchOutcome blocks promotion when blind holdout verdict requ
 test('decideAutoresearchOutcome rejects near-zero ROI improvement despite other passing gates', () => {
   const outcome = decideAutoresearchOutcome({
     incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 100 }),
-    challenger: makeResult({ configId: 'challenger', score: 101, roiPct: 40.1, profitFactor: 1.41, tradeCount: 110 }),
+    challenger: makeResult({ configId: 'challenger', score: 103, roiPct: 40.1, profitFactor: 1.41, tradeCount: 160 }),
     matrixDecision: {
       recommendation: 'promote',
       gates: { candidateChanged: true, primaryPromote: true, shadowPassCount: true, shadowPassRatio: true },
@@ -1249,7 +1315,7 @@ test('decideAutoresearchOutcome rejects near-zero ROI improvement despite other 
 test('decideAutoresearchOutcome holds when profitability floor sees non-finite challenger metrics', () => {
   const outcome = decideAutoresearchOutcome({
     incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 5 }),
-    challenger: makeResult({ configId: 'challenger', score: 101, roiPct: Infinity, profitFactor: Infinity, tradeCount: 110, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 103, roiPct: Infinity, profitFactor: Infinity, tradeCount: 110, maxDrawdownPct: 5 }),
     thresholds: {
       minScoreDelta: 0.25,
       minRoiDeltaPct: 0,
@@ -1257,6 +1323,7 @@ test('decideAutoresearchOutcome holds when profitability floor sees non-finite c
       maxDrawdownDeltaPct: 0.75,
       minTradeCount: 60,
       minTradeRatioVsIncumbent: 0.75,
+      significance: { minRelativeScoreDelta: 0.02, minTradeCount: 60 },
     },
     holdoutVerdict: { passed: true },
     promotionPolicy: {
@@ -1284,6 +1351,7 @@ test('decideAutoresearchOutcome profitability floor trade-count-only failure sum
       maxDrawdownDeltaPct: 0.75,
       minTradeCount: 60,
       minTradeRatioVsIncumbent: 0.75,
+      significance: { minRelativeScoreDelta: 0, minTradeCount: 60 },
     },
     holdoutVerdict: { passed: true },
     promotionPolicy: {
@@ -1356,6 +1424,7 @@ await fs.writeFile(path.join(dumpDir, outputBase + '.cleaned.jsonl'), rows.map((
         maxDrawdownDeltaPct: 0.75,
         minTradeCount: 10,
         minTradeRatioVsIncumbent: 0.75,
+        significance: { minRelativeScoreDelta: 0, minTradeCount: 10 },
       },
       expectancyPolicy: { enabled: false },
       primaryLab: { labId: 'Primary Lab', symbol: 'XRPUSDT', timeframe: '15m', limit: 240 },
@@ -2034,7 +2103,7 @@ test('decideAutoresearchOutcome can promote when expectancy improves even if win
 
   const challenger = makeResult({
     configId: 'challenger',
-    score: 71.4,
+    score: 72.3,
     tradeCount: 244,
     roiPct: 48.9,
     profitFactor: 1.86,
@@ -3830,6 +3899,11 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     rejectWrGainAvgWinLoss: true,
     requireExpectancyNonRegression: true,
   });
+  assert.deepEqual(config.primaryLab.thresholds.significance, {
+    minRelativeScoreDelta: 0.02,
+    minTradeCount: 150,
+  });
+  assert.deepEqual(loaded.primaryLab.thresholds.significance, config.primaryLab.thresholds.significance);
 });
 
 test('default autoresearch config rotates across multiple pinned windows', async () => {

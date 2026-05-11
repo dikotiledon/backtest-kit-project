@@ -1546,7 +1546,7 @@ function evaluationsRoot(config) {
 }
 
 function getThresholds(raw = {}) {
-  return {
+  const thresholds = {
     minScoreDelta: raw.minScoreDelta ?? 0.25,
     minRoiDeltaPct: raw.minRoiDeltaPct ?? 0,
     minProfitFactorDelta: raw.minProfitFactorDelta ?? 0,
@@ -1554,6 +1554,10 @@ function getThresholds(raw = {}) {
     minTradeCount: raw.minTradeCount ?? 100,
     minTradeRatioVsIncumbent: raw.minTradeRatioVsIncumbent ?? 0.75,
   };
+  if (raw.significance != null) {
+    thresholds.significance = raw.significance;
+  }
+  return thresholds;
 }
 
 function normalizeLab(rawLab, defaults, index, role) {

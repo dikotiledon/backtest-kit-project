@@ -170,7 +170,11 @@
       "minProfitFactorDelta": 0,
       "maxDrawdownDeltaPct": 0.75,
       "minTradeCount": 150,
-      "minTradeRatioVsIncumbent": 0.75
+      "minTradeRatioVsIncumbent": 0.75,
+      "significance": {
+        "minRelativeScoreDelta": 0.02,
+        "minTradeCount": 150
+      }
     }
   },
   "shadowLabs": [

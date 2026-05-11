@@ -139,6 +139,99 @@ test('nextStagnationState escalates after repeated no-new-candidate cycles', () 
   });
 });
 
+test('nextStagnationState advances no-new-candidate escalation only on cadence boundaries', () => {
+  const policy = {
+    noNewCandidateEscalateAfter: 3,
+    maxStagnationLevel: 5,
+    currentReason: 'noNewCandidateStreak',
+    lastEscalatedAt: '2026-05-03T00:00:00.000Z',
+  };
+
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 0,
+    noNewCandidateStreak: 3,
+    policy,
+    now: '2026-05-03T00:30:00.000Z',
+  }), {
+    stagnationLevel: 1,
+    stagnationReason: 'noNewCandidateStreak',
+    lastEscalatedAt: '2026-05-03T00:30:00.000Z',
+  });
+
+  for (const noNewCandidateStreak of [4, 5]) {
+    assert.deepEqual(nextStagnationState({
+      previousLevel: 1,
+      noNewCandidateStreak,
+      policy,
+      now: '2026-05-03T01:00:00.000Z',
+    }), {
+      stagnationLevel: 1,
+      stagnationReason: 'noNewCandidateStreak',
+      lastEscalatedAt: '2026-05-03T00:00:00.000Z',
+    });
+  }
+
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 1,
+    noNewCandidateStreak: 6,
+    policy,
+    now: '2026-05-03T01:30:00.000Z',
+  }), {
+    stagnationLevel: 2,
+    stagnationReason: 'noNewCandidateStreak',
+    lastEscalatedAt: '2026-05-03T01:30:00.000Z',
+  });
+});
+
+test('nextStagnationState escalates high-similarity holds on cadence boundaries', () => {
+  const policy = {
+    holdEscalateAfter: 5,
+    highSimilarityThreshold: 0.9,
+    maxStagnationLevel: 3,
+    currentReason: 'highSimilarityHold',
+    lastEscalatedAt: '2026-05-03T00:00:00.000Z',
+  };
+
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 0,
+    noChangeStreak: 5,
+    promotionEligible: false,
+    topCandidateSimilarity: 0.9,
+    policy,
+    now: '2026-05-03T00:30:00.000Z',
+  }), {
+    stagnationLevel: 1,
+    stagnationReason: 'highSimilarityHold',
+    lastEscalatedAt: '2026-05-03T00:30:00.000Z',
+  });
+
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 1,
+    noChangeStreak: 6,
+    promotionEligible: false,
+    topCandidateSimilarity: 0.95,
+    policy,
+    now: '2026-05-03T01:00:00.000Z',
+  }), {
+    stagnationLevel: 1,
+    stagnationReason: 'highSimilarityHold',
+    lastEscalatedAt: '2026-05-03T00:00:00.000Z',
+  });
+
+  assert.deepEqual(nextStagnationState({
+    previousLevel: 1,
+    noChangeStreak: 10,
+    promotionEligible: false,
+    topCandidateSimilarity: 0.95,
+    policy,
+    now: '2026-05-03T01:30:00.000Z',
+  }), {
+    stagnationLevel: 2,
+    stagnationReason: 'highSimilarityHold',
+    lastEscalatedAt: '2026-05-03T01:30:00.000Z',
+  });
+});
+
 test('nextStagnationState resets when promotion becomes eligible', () => {
   assert.deepEqual(nextStagnationState({
     previousLevel: 2,
@@ -687,6 +780,78 @@ test('nextTrackState preserves stagnation state when no explicit transition appl
   assert.equal(next.lastEscalatedAt, '2026-05-03T00:00:00.000Z');
 });
 
+test('nextTrackState escalates high-similarity holds with cadence', () => {
+  const policy = {
+    stagnation: {
+      enabled: true,
+      holdEscalateAfter: 5,
+      highSimilarityThreshold: 0.9,
+      maxStagnationLevel: 3,
+    },
+  };
+  const firstCycle = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noChangeStreak: 4,
+      lastCandidateFingerprint: 'fp-b',
+      stagnationLevel: 0,
+    },
+    policy,
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-b',
+      championFingerprint: 'fp-a',
+      promotionEligible: false,
+      topCandidateSimilarity: 0.91,
+      generatedAt: '2026-05-03T00:30:00.000Z',
+    },
+  });
+
+  assert.equal(firstCycle.noChangeStreak, 5);
+  assert.equal(firstCycle.stagnationLevel, 1);
+  assert.equal(firstCycle.stagnationReason, 'highSimilarityHold');
+  assert.equal(firstCycle.lastEscalatedAt, '2026-05-03T00:30:00.000Z');
+
+  const secondCycle = nextTrackState({
+    state: firstCycle,
+    policy,
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-b',
+      championFingerprint: 'fp-a',
+      promotionEligible: false,
+      topCandidateSimilarity: 0.95,
+      generatedAt: '2026-05-03T01:00:00.000Z',
+    },
+  });
+
+  assert.equal(secondCycle.noChangeStreak, 6);
+  assert.equal(secondCycle.stagnationLevel, 1);
+  assert.equal(secondCycle.stagnationReason, 'highSimilarityHold');
+  assert.equal(secondCycle.lastEscalatedAt, '2026-05-03T00:30:00.000Z');
+
+  const thirdCycle = nextTrackState({
+    state: {
+      ...secondCycle,
+      noChangeStreak: 9,
+    },
+    policy,
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-b',
+      championFingerprint: 'fp-a',
+      promotionEligible: false,
+      topCandidateSimilarity: 0.95,
+      generatedAt: '2026-05-03T01:30:00.000Z',
+    },
+  });
+
+  assert.equal(thirdCycle.noChangeStreak, 10);
+  assert.equal(thirdCycle.stagnationLevel, 2);
+  assert.equal(thirdCycle.stagnationReason, 'highSimilarityHold');
+  assert.equal(thirdCycle.lastEscalatedAt, '2026-05-03T01:30:00.000Z');
+});
+
 test('nextTrackState treats first observed candidate as changed and resets no-change streak', () => {
   const next = nextTrackState({
     state: {
@@ -706,22 +871,21 @@ test('nextTrackState treats first observed candidate as changed and resets no-ch
   assert.equal(next.lastRotationTrigger, 'candidate-changed');
 });
 
-test('nextTrackState advances explicit stagnation state while no-new-candidate streak remains above threshold', () => {
+test('nextTrackState advances explicit stagnation state only on no-new-candidate cadence boundaries', () => {
+  const policy = {
+    stagnation: {
+      enabled: true,
+      noNewCandidateEscalateAfter: 3,
+      maxStagnationLevel: 5,
+    },
+  };
   const firstCycle = nextTrackState({
     state: {
       ...defaultSchedulerState(),
-      noNewCandidateStreak: 3,
-      stagnationLevel: 1,
-      stagnationReason: 'noNewCandidateStreak',
-      lastEscalatedAt: '2026-05-03T00:00:00.000Z',
+      noNewCandidateStreak: 2,
+      stagnationLevel: 0,
     },
-    policy: {
-      stagnation: {
-        enabled: true,
-        noNewCandidateEscalateAfter: 3,
-        maxStagnationLevel: 5,
-      },
-    },
+    policy,
     manifest: {
       activeTrackId: 'track-a',
       candidateFingerprint: 'fp-a',
@@ -731,19 +895,14 @@ test('nextTrackState advances explicit stagnation state while no-new-candidate s
     },
   });
 
-  assert.equal(firstCycle.noNewCandidateStreak, 4);
-  assert.equal(firstCycle.stagnationLevel, 2);
+  assert.equal(firstCycle.noNewCandidateStreak, 3);
+  assert.equal(firstCycle.stagnationLevel, 1);
+  assert.equal(firstCycle.stagnationReason, 'noNewCandidateStreak');
   assert.equal(firstCycle.lastEscalatedAt, '2026-05-03T00:30:00.000Z');
 
   const secondCycle = nextTrackState({
     state: firstCycle,
-    policy: {
-      stagnation: {
-        enabled: true,
-        noNewCandidateEscalateAfter: 3,
-        maxStagnationLevel: 5,
-      },
-    },
+    policy,
     manifest: {
       activeTrackId: 'track-a',
       candidateFingerprint: 'fp-a',
@@ -753,19 +912,14 @@ test('nextTrackState advances explicit stagnation state while no-new-candidate s
     },
   });
 
-  assert.equal(secondCycle.noNewCandidateStreak, 5);
-  assert.equal(secondCycle.stagnationLevel, 3);
-  assert.equal(secondCycle.lastEscalatedAt, '2026-05-03T01:00:00.000Z');
+  assert.equal(secondCycle.noNewCandidateStreak, 4);
+  assert.equal(secondCycle.stagnationLevel, 1);
+  assert.equal(secondCycle.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(secondCycle.lastEscalatedAt, '2026-05-03T00:30:00.000Z');
 
   const thirdCycle = nextTrackState({
     state: secondCycle,
-    policy: {
-      stagnation: {
-        enabled: true,
-        noNewCandidateEscalateAfter: 3,
-        maxStagnationLevel: 5,
-      },
-    },
+    policy,
     manifest: {
       activeTrackId: 'track-a',
       candidateFingerprint: 'fp-a',
@@ -775,9 +929,27 @@ test('nextTrackState advances explicit stagnation state while no-new-candidate s
     },
   });
 
-  assert.equal(thirdCycle.noNewCandidateStreak, 6);
-  assert.equal(thirdCycle.stagnationLevel, 4);
-  assert.equal(thirdCycle.lastEscalatedAt, '2026-05-03T01:30:00.000Z');
+  assert.equal(thirdCycle.noNewCandidateStreak, 5);
+  assert.equal(thirdCycle.stagnationLevel, 1);
+  assert.equal(thirdCycle.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(thirdCycle.lastEscalatedAt, '2026-05-03T00:30:00.000Z');
+
+  const fourthCycle = nextTrackState({
+    state: thirdCycle,
+    policy,
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T02:00:00.000Z',
+    },
+  });
+
+  assert.equal(fourthCycle.noNewCandidateStreak, 6);
+  assert.equal(fourthCycle.stagnationLevel, 2);
+  assert.equal(fourthCycle.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(fourthCycle.lastEscalatedAt, '2026-05-03T02:00:00.000Z');
 });
 
 test('nextTrackState caps stagnation level at maxStagnationLevel', () => {
@@ -878,6 +1050,78 @@ test('nextTrackState lets explicit top-level stagnation policy override nested r
   assert.equal(next.stagnationLevel, 1);
   assert.equal(next.stagnationReason, 'noNewCandidateStreak');
   assert.equal(next.lastEscalatedAt, '2026-05-03T04:30:00.000Z');
+});
+
+test('nextTrackState merges partial top-level stagnation policy over nested defaults', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noNewCandidateStreak: 1,
+      stagnationLevel: 4,
+      stagnationReason: 'noNewCandidateStreak',
+      lastEscalatedAt: '2026-05-03T04:00:00.000Z',
+    },
+    policy: {
+      stagnation: {
+        maxStagnationLevel: 5,
+      },
+      rotationPolicy: {
+        stagnation: {
+          enabled: true,
+          noNewCandidateEscalateAfter: 2,
+          maxStagnationLevel: 4,
+        },
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T04:45:00.000Z',
+    },
+  });
+
+  assert.equal(next.noNewCandidateStreak, 2);
+  assert.equal(next.stagnationLevel, 5);
+  assert.equal(next.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(next.lastEscalatedAt, '2026-05-03T04:45:00.000Z');
+});
+
+test('nextTrackState ignores malformed top-level stagnation values when nested defaults are valid', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      noNewCandidateStreak: 1,
+      stagnationLevel: 0,
+    },
+    policy: {
+      stagnation: {
+        enabled: null,
+        noNewCandidateEscalateAfter: '',
+        maxStagnationLevel: false,
+      },
+      rotationPolicy: {
+        stagnation: {
+          enabled: true,
+          noNewCandidateEscalateAfter: 2,
+          maxStagnationLevel: 4,
+        },
+      },
+    },
+    manifest: {
+      activeTrackId: 'track-a',
+      candidateFingerprint: 'fp-a',
+      championFingerprint: 'fp-a',
+      noNewCandidate: true,
+      generatedAt: '2026-05-03T05:00:00.000Z',
+    },
+  });
+
+  assert.equal(next.noNewCandidateStreak, 2);
+  assert.equal(next.stagnationLevel, 1);
+  assert.equal(next.stagnationReason, 'noNewCandidateStreak');
+  assert.equal(next.lastEscalatedAt, '2026-05-03T05:00:00.000Z');
 });
 
 test('nextTrackState does not escalate when stagnation policy disabled', () => {

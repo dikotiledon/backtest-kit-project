@@ -63,6 +63,30 @@ function hasStagnationPolicyKeys(value) {
   return isPlainObject(value) && Object.keys(value).some((key) => STAGNATION_POLICY_KEYS.has(key));
 }
 
+function isMeaningfulStagnationPolicyValue(key, value) {
+  if (key === 'enabled') return typeof value === 'boolean';
+  if (!STAGNATION_POLICY_KEYS.has(key)) return false;
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+function resolveStagnationPolicy(policy = {}) {
+  const nested = isPlainObject(policy?.rotationPolicy?.stagnation)
+    ? policy.rotationPolicy.stagnation
+    : {};
+  const topLevel = isPlainObject(policy?.stagnation) ? policy.stagnation : {};
+  const resolved = { ...nested };
+
+  if (!hasStagnationPolicyKeys(topLevel)) return resolved;
+
+  for (const [key, value] of Object.entries(topLevel)) {
+    if (isMeaningfulStagnationPolicyValue(key, value)) {
+      resolved[key] = value;
+    }
+  }
+
+  return resolved;
+}
+
 function normalizeKnownFingerprint(value) {
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
@@ -346,13 +370,19 @@ export function nextStagnationState(input = {}) {
   const {
     previousLevel = 0,
     noNewCandidateStreak = 0,
+    noChangeStreak = 0,
     promotionEligible = false,
+    topCandidateSimilarity = null,
     policy = {},
     now = null,
   } = isPlainObject(input) ? input : {};
   const sourcePolicy = isPlainObject(policy) ? policy : {};
   const maxStagnationLevel = normalizeNumericPolicyInteger(sourcePolicy.maxStagnationLevel, { fallback: 3, min: 0 });
   const noNewCandidateEscalateAfter = normalizeNumericPolicyInteger(sourcePolicy.noNewCandidateEscalateAfter, { fallback: 3, min: 1 });
+  const holdEscalateAfter = normalizeNumericPolicyInteger(sourcePolicy.holdEscalateAfter, { fallback: 5, min: 1 });
+  const highSimilarityThreshold = typeof sourcePolicy.highSimilarityThreshold === 'number' && Number.isFinite(sourcePolicy.highSimilarityThreshold)
+    ? sourcePolicy.highSimilarityThreshold
+    : 0.9;
   const normalizedPreviousLevel = Math.min(
     maxStagnationLevel,
     Math.max(0, Math.floor(Number.isFinite(Number(previousLevel)) ? Number(previousLevel) : 0)),
@@ -361,6 +391,13 @@ export function nextStagnationState(input = {}) {
     0,
     Math.floor(Number.isFinite(Number(noNewCandidateStreak)) ? Number(noNewCandidateStreak) : 0),
   );
+  const normalizedNoChangeStreak = Math.max(
+    0,
+    Math.floor(Number.isFinite(Number(noChangeStreak)) ? Number(noChangeStreak) : 0),
+  );
+  const normalizedTopCandidateSimilarity = typeof topCandidateSimilarity === 'number' && Number.isFinite(topCandidateSimilarity)
+    ? topCandidateSimilarity
+    : null;
 
   if (promotionEligible === true) {
     return {
@@ -370,11 +407,34 @@ export function nextStagnationState(input = {}) {
     };
   }
 
-  if (normalizedNoNewCandidateStreak >= noNewCandidateEscalateAfter) {
+  const candidates = [
+    {
+      reason: 'noNewCandidateStreak',
+      anchor: normalizedNoNewCandidateStreak,
+      threshold: noNewCandidateEscalateAfter,
+      active: normalizedNoNewCandidateStreak >= noNewCandidateEscalateAfter,
+    },
+    {
+      reason: 'highSimilarityHold',
+      anchor: normalizedNoChangeStreak,
+      threshold: holdEscalateAfter,
+      active: promotionEligible === false
+        && normalizedNoChangeStreak >= holdEscalateAfter
+        && normalizedTopCandidateSimilarity !== null
+        && normalizedTopCandidateSimilarity >= highSimilarityThreshold,
+    },
+  ];
+  const transition = candidates.find((candidate) => candidate.active);
+  const onCadenceBoundary = transition
+    ? transition.anchor === transition.threshold
+      || (transition.anchor > transition.threshold && transition.anchor % transition.threshold === 0)
+    : false;
+
+  if (transition && onCadenceBoundary) {
     const nextLevel = Math.min(maxStagnationLevel, normalizedPreviousLevel + 1);
     return {
       stagnationLevel: nextLevel,
-      stagnationReason: 'noNewCandidateStreak',
+      stagnationReason: transition.reason,
       lastEscalatedAt: nextLevel > normalizedPreviousLevel
         ? (now ?? null)
         : (sourcePolicy.lastEscalatedAt ?? null),
@@ -423,11 +483,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     ? previous.noNewCandidateStreak + 1
     : 0;
 
-  const configuredStagnationPolicy = hasStagnationPolicyKeys(policy.stagnation)
-    ? policy.stagnation
-    : isPlainObject(policy.rotationPolicy?.stagnation)
-      ? policy.rotationPolicy.stagnation
-      : {};
+  const configuredStagnationPolicy = resolveStagnationPolicy(policy);
   const stagnationState = configuredStagnationPolicy.enabled === false
     ? {
         stagnationLevel: previous.stagnationLevel ?? 0,
@@ -437,7 +493,9 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     : nextStagnationState({
         previousLevel: previous.stagnationLevel,
         noNewCandidateStreak,
+        noChangeStreak,
         promotionEligible: manifest.promotionEligible === true,
+        topCandidateSimilarity: manifest.topCandidateSimilarity,
         policy: {
           ...configuredStagnationPolicy,
           currentReason: previous.stagnationReason,

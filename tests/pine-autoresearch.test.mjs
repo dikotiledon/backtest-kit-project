@@ -1803,10 +1803,12 @@ test('shouldQueuePromotionManifest returns false when challenger config or candi
   assert.equal(shouldQueuePromotionManifest(missingCandidateFingerprint), false);
 });
 test('decideQueuedPromotionAction promotes valid queued manifest', () => {
+  const championConfig = { useTrailingStop: false };
+  const championFingerprint = configFingerprint(championConfig);
   const queuedItem = {
     itemId: 'run-a:candidate-fp',
     runId: 'run-a',
-    championFingerprintAtDecision: 'champion-fp',
+    championFingerprintAtDecision: championFingerprint,
   };
   const manifest = {
     runId: 'run-a',
@@ -1814,8 +1816,8 @@ test('decideQueuedPromotionAction promotes valid queued manifest', () => {
     challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
   };
   const championState = {
-    config: { useTrailingStop: false },
-    configFingerprint: 'champion-fp',
+    config: championConfig,
+    configFingerprint: championFingerprint,
   };
   const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
 
@@ -1824,6 +1826,55 @@ test('decideQueuedPromotionAction promotes valid queued manifest', () => {
   assert.equal(result.recommendation, 'promote');
   assert.equal(result.status, 'promoted');
   assert.match(result.reason, /queued promotion guards passed/i);
+});
+
+test('decideQueuedPromotionAction rejects stale stored champion fingerprint when current config exists', () => {
+  const championAtDecision = { useTrailingStop: false, minPredSum: 1.8 };
+  const staleStoredFingerprint = configFingerprint(championAtDecision);
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+    championFingerprintAtDecision: staleStoredFingerprint,
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true, minPredSum: 1.6 } },
+  };
+  const championState = {
+    config: { useTrailingStop: false, minPredSum: 2.2 },
+    configFingerprint: staleStoredFingerprint,
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.status, 'stale');
+  assert.equal(result.reason, 'Current champion changed since queued decision');
+});
+
+test('decideQueuedPromotionAction accepts stored legacy champion fingerprint only when current config is absent', () => {
+  const legacyChampionFingerprint = configFingerprint({ useTrailingStop: false, configId: 'legacy-champion' });
+  const queuedItem = {
+    itemId: 'run-a:candidate-fp',
+    runId: 'run-a',
+    championFingerprintAtDecision: legacyChampionFingerprint,
+  };
+  const manifest = {
+    runId: 'run-a',
+    matrixDecision: { recommendation: 'promote' },
+    challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
+  };
+  const championState = {
+    configFingerprint: legacyChampionFingerprint,
+  };
+  const autoAction = { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' };
+
+  const result = decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.status, 'promoted');
 });
 
 test('decideQueuedPromotionAction marks stale when champion changed since queued decision', () => {
@@ -1883,12 +1934,13 @@ test('decideQueuedPromotionAction does not go stale when only champion identity 
 });
 
 test('decideQueuedPromotionAction fails when queued family identity differs from manifest', () => {
+  const championConfig = { minPredSum: 1.8 };
   const result = decideQueuedPromotionAction({
     queuedItem: {
       itemId: 'run-a:fp-b',
       runId: 'run-a',
       candidateFingerprint: 'fp-b',
-      championFingerprintAtDecision: 'fp-a',
+      championFingerprintAtDecision: configFingerprint(championConfig),
       candidateFamilyKey: 'family-b-original',
       championFamilyKeyAtDecision: 'family-a',
     },
@@ -1901,7 +1953,7 @@ test('decideQueuedPromotionAction fails when queued family identity differs from
       challenger: { config: { minPredSum: 1.6 } },
       matrixDecision: { recommendation: 'promote' },
     },
-    championState: { config: { minPredSum: 1.8 }, configFingerprint: 'fp-a' },
+    championState: { config: championConfig, configFingerprint: 'fp-a' },
     autoAction: { recommendation: 'promote' },
   });
 
@@ -1911,12 +1963,13 @@ test('decideQueuedPromotionAction fails when queued family identity differs from
 });
 
 test('decideQueuedPromotionAction fails on champion family mismatch between queued and manifest', () => {
+  const championConfig = { minPredSum: 1.8 };
   const result = decideQueuedPromotionAction({
     queuedItem: {
       itemId: 'run-a:fp-b',
       runId: 'run-a',
       candidateFingerprint: 'fp-b',
-      championFingerprintAtDecision: 'fp-a',
+      championFingerprintAtDecision: configFingerprint(championConfig),
       candidateFamilyKey: 'family-b',
       championFamilyKeyAtDecision: 'family-a-original',
     },
@@ -1929,7 +1982,7 @@ test('decideQueuedPromotionAction fails on champion family mismatch between queu
       challenger: { config: { minPredSum: 1.6 } },
       matrixDecision: { recommendation: 'promote' },
     },
-    championState: { config: { minPredSum: 1.8 }, configFingerprint: 'fp-a' },
+    championState: { config: championConfig, configFingerprint: 'fp-a' },
     autoAction: { recommendation: 'promote' },
   });
 
@@ -1939,11 +1992,12 @@ test('decideQueuedPromotionAction fails on champion family mismatch between queu
 });
 
 test('decideQueuedPromotionAction promotes when queued lineage fields missing for backward compatibility', () => {
+  const championConfig = { useTrailingStop: false };
   const result = decideQueuedPromotionAction({
     queuedItem: {
       itemId: 'run-a:candidate-fp',
       runId: 'run-a',
-      championFingerprintAtDecision: 'champion-fp',
+      championFingerprintAtDecision: configFingerprint(championConfig),
     },
     manifest: {
       runId: 'run-a',
@@ -1955,7 +2009,7 @@ test('decideQueuedPromotionAction promotes when queued lineage fields missing fo
       challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
     },
     championState: {
-      config: { useTrailingStop: false },
+      config: championConfig,
       configFingerprint: 'champion-fp',
     },
     autoAction: { recommendation: 'promote', summary: 'Auto-promote challenger candidate-a: guards passed.' },
@@ -1994,10 +2048,11 @@ test('decideQueuedPromotionAction holds stale when queued champion fingerprint i
 });
 
 test('decideQueuedPromotionAction marks safety failure when autopromote gates fail', () => {
+  const championConfig = { useTrailingStop: false };
   const queuedItem = {
     itemId: 'run-a:candidate-fp',
     runId: 'run-a',
-    championFingerprintAtDecision: 'champion-fp',
+    championFingerprintAtDecision: configFingerprint(championConfig),
   };
   const manifest = {
     runId: 'run-a',
@@ -2005,7 +2060,7 @@ test('decideQueuedPromotionAction marks safety failure when autopromote gates fa
     challenger: { configId: 'candidate-a', config: { useTrailingStop: true } },
   };
   const championState = {
-    config: { useTrailingStop: false },
+    config: championConfig,
     configFingerprint: 'champion-fp',
   };
   const autoAction = { recommendation: 'hold', summary: 'Auto-promote hold: failed cooldown gate(s).' };
@@ -2155,7 +2210,6 @@ test('legacy promote manifests without regime-exit fields remain queueable and p
     queuedItem,
     manifest,
     championState: {
-      config: { useTrailingStop: false },
       configFingerprint: manifest.championFingerprint,
     },
     autoAction: { recommendation: 'promote', summary: 'All legacy gates passed.' },
@@ -2195,7 +2249,6 @@ test('regime-exit manifest shadow signals stay advisory and cannot bypass failin
     queuedItem,
     manifest,
     championState: {
-      config: { useTrailingStop: false },
       configFingerprint: manifest.championFingerprint,
     },
     autoAction: {

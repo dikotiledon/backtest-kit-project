@@ -1043,8 +1043,9 @@ export function decideQueuedPromotionAction({ queuedItem, manifest, championStat
   if (championState?.config) {
     currentChampionFingerprints.add(buildCanonicalConfigFingerprint(championState.config));
     currentChampionFingerprints.add(configFingerprint(championState.config));
+  } else if (championState?.configFingerprint) {
+    currentChampionFingerprints.add(championState.configFingerprint);
   }
-  if (championState?.configFingerprint) currentChampionFingerprints.add(championState.configFingerprint);
   if (!currentChampionFingerprints.size) currentChampionFingerprints.add(configFingerprint({}));
   if (!queuedItem.championFingerprintAtDecision) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Queued champion fingerprint missing at decision' };
   if (!currentChampionFingerprints.has(queuedItem.championFingerprintAtDecision)) return { recommendation: 'hold', status: PROMOTION_STATUS.STALE, reason: 'Current champion changed since queued decision' };

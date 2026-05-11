@@ -26,6 +26,7 @@ import {
   buildChampionConfigFingerprint,
   buildGlobalPatchFingerprint,
 } from '../scripts/lib/pine-global-search.mjs';
+import { buildLanePatchFingerprint } from '../scripts/lib/pine-lane-novelty.mjs';
 import { selectNextResearchLane } from '../scripts/lib/pine-regime-exit-scheduler.mjs';
 import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs';
 import * as autoresearchCli from '../scripts/pine-autoresearch.mjs';
@@ -2801,8 +2802,6 @@ test('force-entry-mutation search policy produces entry-key mutations in generat
       mode: 'force-entry-mutation',
       reason: 'exit_only_drift',
       allowArchitectureKeys: false,
-      multiKeyMutationCount: 2,
-      ladderScale: 1.5,
       requiredTouchedKeys,
       exploitRatio: 0.5,
       exploitFamilies: ['risk'],
@@ -2866,11 +2865,84 @@ test('entry invariance enforcement injects entry mutation after generated global
   assert.equal(enforced.length, 1);
   assert.equal(enforced[0].lane, 'globalAllParameter');
   assert.equal(enforced[0].patch.tpAtrMult, 8.1);
+  assert.equal('slAtrMult' in enforced[0].patch, false);
+  assert.equal(enforced[0].config.slAtrMult, championConfig.slAtrMult);
   assert.equal(Object.keys(enforced[0].patch).some((key) => requiredTouchedKeys.includes(key)), true);
   assert.equal(requiredTouchedKeys.some((key) => enforced[0].config[key] !== championConfig[key]), true);
   assert.equal(enforced[0].metadata.forcedEntryMutation, true);
   assert.equal(enforced[0].metadata.forcedEntryMutationSource, 'entry-invariance-post-selection');
   assert.notEqual(enforced[0].metadata.patchFingerprint, 'stale-fingerprint');
+});
+
+test('entry invariance enforcement injects entry mutation after generated exitRegime lane selection', () => {
+  const championConfig = {
+    useSignalFusion: true,
+    useFusionV4: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 7.6,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+  const championConfigFingerprint = buildChampionConfigFingerprint(championConfig);
+  const requiredTouchedKeys = ['neighborsCount'];
+  const generatedBatch = [{
+    variantId: 'exit-regime-risk-only',
+    lane: 'exitRegime',
+    family: 'risk',
+    mutationFamily: 'risk',
+    patch: { tpAtrMult: 8.1 },
+    touchedKeys: ['tpAtrMult'],
+    config: { ...championConfig, tpAtrMult: 8.1 },
+    patchFingerprint: 'stale-exit-fingerprint',
+    metadata: {
+      championConfigFingerprint,
+      patchFingerprint: 'stale-exit-fingerprint',
+      patchFingerprintVersion: 2,
+    },
+  }];
+
+  const enforced = autoresearchCli.enforceEntryInvarianceOnSearchBatch({
+    searchBatch: generatedBatch,
+    championConfig,
+    historyEvents: [{ type: 'cycle' }],
+    policy: {
+      mode: 'force-entry-mutation',
+      requiredTouchedKeys,
+      exploitRatio: 1,
+      exploitFamilies: ['risk'],
+      exploreFamilies: ['risk'],
+    },
+    entryInvariance: {
+      flagged: true,
+      reason: 'exit_only_drift',
+      untouchedEntryKeys: requiredTouchedKeys,
+    },
+  });
+
+  const expectedFingerprint = buildLanePatchFingerprint({
+    championConfigFingerprint,
+    lane: 'exitRegime',
+    mutationFamily: 'risk',
+    patch: enforced[0].patch,
+  });
+
+  assert.equal(enforced.length, 1);
+  assert.equal(enforced[0].lane, 'exitRegime');
+  assert.equal(enforced[0].patch.tpAtrMult, 8.1);
+  assert.deepEqual(Object.keys(enforced[0].patch).sort(), ['neighborsCount', 'tpAtrMult'].sort());
+  assert.equal(enforced[0].config.neighborsCount !== championConfig.neighborsCount, true);
+  assert.equal(enforced[0].patchFingerprint, expectedFingerprint);
+  assert.equal(enforced[0].metadata.patchFingerprint, expectedFingerprint);
+  assert.equal(enforced[0].metadata.championConfigFingerprint, championConfigFingerprint);
+  assert.equal(enforced[0].metadata.patchFingerprintVersion, 2);
 });
 
 test('early hold manifests preserve entry invariance verdict', () => {

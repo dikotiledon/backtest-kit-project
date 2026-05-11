@@ -827,8 +827,6 @@ function buildForcedEntryMutationPolicy(searchPolicy = {}, entryInvariance = {})
     mode: 'force-entry-mutation',
     reason: 'exit_only_drift',
     allowArchitectureKeys: false,
-    multiKeyMutationCount: 2,
-    ladderScale: 1.5,
     requiredTouchedKeys: entryInvariance.untouchedEntryKeys || [],
   };
 }
@@ -841,6 +839,12 @@ function variantTouchesAnyKey(variant = {}, keys = []) {
     ...Object.keys(variant?.patch || {}),
   ];
   return touched.some((key) => required.has(key));
+}
+
+function filterPatchToKeys(patch = {}, keys = []) {
+  const allowed = new Set(normalizeTouchedKeyList(keys));
+  if (!allowed.size || !patch || typeof patch !== 'object' || Array.isArray(patch)) return {};
+  return Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.has(key)));
 }
 
 function forcedEntryPatchForBatch({ championConfig, policy = {}, historyEvents = [], schedulerState = {}, requiredTouchedKeys = [] } = {}) {
@@ -859,7 +863,7 @@ function forcedEntryPatchForBatch({ championConfig, policy = {}, historyEvents =
     schedulerState,
   });
   const forcedVariant = forcedBatch.find((variant) => variantTouchesAnyKey(variant, requiredTouchedKeys));
-  return forcedVariant?.patch || null;
+  return filterPatchToKeys(forcedVariant?.patch, requiredTouchedKeys);
 }
 
 function buildUpdatedGeneratedPatchFingerprint({ variant = {}, championConfig = {}, patch = {} } = {}) {

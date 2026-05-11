@@ -497,7 +497,7 @@ export function decideAutoresearchOutcome({
     policy: thresholds?.significance || {},
   });
   gates.significance = significanceGate.passed;
-  if (failedGates.length === 0 && significanceGate.passed === false) {
+  if (significanceGate.passed === false && !failedGates.includes('significance')) {
     failedGates.push('significance');
   }
 

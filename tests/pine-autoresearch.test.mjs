@@ -1266,10 +1266,34 @@ test('decideAutoresearchOutcome preserves earlier failure reasons when significa
   });
 
   assert.equal(outcome.recommendation, 'hold');
-  assert.deepEqual(outcome.failedGates, ['score']);
+  assert.deepEqual(outcome.failedGates, ['score', 'significance']);
   assert.equal(outcome.gates.score, false);
   assert.equal(outcome.gates.significance, false);
   assert.equal(outcome.significanceGate.reason, 'score_delta_below_floor');
+  assert.match(outcome.summary, /failed score, significance gate\(s\)\./);
+});
+
+test('decideAutoresearchOutcome applies default significance sample floor to legacy thresholds', () => {
+  const outcome = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 140, maxDrawdownPct: 5 }),
+    challenger: makeResult({ configId: 'challenger', score: 103, roiPct: 41, profitFactor: 1.5, tradeCount: 120, maxDrawdownPct: 5 }),
+    thresholds: {
+      minScoreDelta: 0.25,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 100,
+      minTradeRatioVsIncumbent: 0.75,
+    },
+  });
+
+  assert.equal(outcome.recommendation, 'hold');
+  assert.equal(outcome.gates.tradeFloor, true);
+  assert.equal(outcome.gates.significance, false);
+  assert.deepEqual(outcome.failedGates, ['significance']);
+  assert.equal(outcome.significanceGate.reason, 'insufficient_sample');
+  assert.equal(outcome.significanceGate.challengerTradeCount, 120);
+  assert.equal(outcome.significanceGate.minTradeCount, 150);
 });
 
 test('decideAutoresearchOutcome blocks promotion when blind holdout verdict required', () => {
@@ -1509,7 +1533,8 @@ test('decideAutoresearchOutcome recommends hold when trade ratio collapses', () 
   });
 
   assert.equal(result.recommendation, 'hold');
-  assert.deepEqual(result.failedGates, ['tradeFloor', 'tradeRatio']);
+  assert.deepEqual(result.failedGates, ['tradeFloor', 'tradeRatio', 'significance']);
+  assert.equal(result.gates.significance, false);
 });
 
 test('decideAutoresearchOutcome marks unchanged challenger as steady-state hold', () => {

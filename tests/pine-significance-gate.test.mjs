@@ -61,6 +61,82 @@ test('decideSignificanceGate rejects missing score inputs', () => {
   });
 });
 
+test('decideSignificanceGate handles null input as missing scores', () => {
+  assert.doesNotThrow(() => decideSignificanceGate(null));
+  assert.deepEqual(decideSignificanceGate(null), {
+    passed: false,
+    reason: 'missing_score',
+    relativeScoreDelta: null,
+  });
+});
+
+test('decideSignificanceGate treats null score as missing', () => {
+  for (const challenger of [
+    { score: null, metrics: { tradeCount: 220 } },
+    { score: null, metrics: { score: 110, tradeCount: 220 } },
+    { metrics: { score: null, tradeCount: 220 } },
+  ]) {
+    assert.deepEqual(
+      decideSignificanceGate({
+        incumbent: { score: 100, metrics: { tradeCount: 220 } },
+        challenger,
+      }),
+      {
+        passed: false,
+        reason: 'missing_score',
+        relativeScoreDelta: null,
+      },
+    );
+  }
+});
+
+test('decideSignificanceGate defaults null relative score delta policy', () => {
+  const result = decideSignificanceGate({
+    incumbent: { score: 100, metrics: { tradeCount: 220 } },
+    challenger: { score: 101, metrics: { tradeCount: 220 } },
+    policy: { minRelativeScoreDelta: null, minTradeCount: 150 },
+  });
+
+  assert.deepEqual(result, {
+    passed: false,
+    reason: 'score_delta_below_floor',
+    relativeScoreDelta: 0.01,
+    minRelativeScoreDelta: 0.02,
+  });
+});
+
+test('decideSignificanceGate defaults null minimum trade count policy', () => {
+  const result = decideSignificanceGate({
+    incumbent: { score: 100, metrics: { tradeCount: 220 } },
+    challenger: { score: 110, metrics: { tradeCount: 149 } },
+    policy: { minTradeCount: null },
+  });
+
+  assert.deepEqual(result, {
+    passed: false,
+    reason: 'insufficient_sample',
+    relativeScoreDelta: null,
+    challengerTradeCount: 149,
+    minTradeCount: 150,
+  });
+});
+
+test('decideSignificanceGate treats non-numeric score values as missing', () => {
+  for (const score of ['', [], {}, true]) {
+    assert.deepEqual(
+      decideSignificanceGate({
+        incumbent: { score: 100, metrics: { tradeCount: 220 } },
+        challenger: { score, metrics: { tradeCount: 220 } },
+      }),
+      {
+        passed: false,
+        reason: 'missing_score',
+        relativeScoreDelta: null,
+      },
+    );
+  }
+});
+
 test('decideSignificanceGate requires larger delta when challenger trade count drifts below parity', () => {
   const result = decideSignificanceGate({
     incumbent: { score: 100, metrics: { tradeCount: 220 } },

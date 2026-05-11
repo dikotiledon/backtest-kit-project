@@ -3,6 +3,13 @@ const DEFAULT_MIN_TRADE_COUNT = 150;
 const SCORE_DENOMINATOR_FLOOR = 1e-6;
 
 function finiteNumberOrNull(value) {
+  if (typeof value !== 'number' && typeof value !== 'string') {
+    return null;
+  }
+  if (typeof value === 'string' && value.trim() === '') {
+    return null;
+  }
+
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -23,15 +30,25 @@ function minTradeCountFromPolicy(policy) {
   return Math.max(1, floored);
 }
 
+function hasOwnProperty(value, key) {
+  return value != null && typeof value === 'object' && Object.hasOwn(value, key);
+}
+
 function scoreFromResult(result) {
-  return finiteNumberOrNull(result?.score ?? result?.metrics?.score);
+  if (hasOwnProperty(result, 'score')) {
+    return finiteNumberOrNull(result.score);
+  }
+  return finiteNumberOrNull(result?.metrics?.score);
 }
 
 function tradeCountFromResult(result) {
   return finiteNumberOrNull(result?.metrics?.tradeCount ?? result?.tradeCount);
 }
 
-export function decideSignificanceGate({ incumbent = {}, challenger = {}, policy = {} } = {}) {
+export function decideSignificanceGate(input = {}) {
+  const normalizedInput = input != null && typeof input === 'object' && !Array.isArray(input) ? input : {};
+  const { incumbent = {}, challenger = {}, policy = {} } = normalizedInput;
+
   const incumbentScore = scoreFromResult(incumbent);
   const challengerScore = scoreFromResult(challenger);
 

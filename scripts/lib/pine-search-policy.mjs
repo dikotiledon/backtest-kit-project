@@ -42,12 +42,16 @@ function countCycles(historyEvents = []) {
 }
 
 function withPatch(base, patch, meta) {
+  const touchedKeys = Object.keys(patch || {});
   return {
     variantId: `${meta.lane}-${meta.family}-${meta.index}`,
     lane: meta.lane,
     family: meta.family,
+    patch: clone(patch || {}),
+    touchedKeys,
     temperature: meta.temperature ?? 1,
     tabuSkipped: meta.tabuSkipped ?? 0,
+    metadata: meta.metadata,
     config: { ...clone(base), ...patch },
   };
 }
@@ -67,6 +71,12 @@ function normalizeTabuCache(value) {
   if (Array.isArray(value)) return new Set(value);
   if (value && typeof value === 'object') return new Set(Object.keys(value));
   return new Set();
+}
+
+function normalizeStringList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+  if (typeof value === 'string') return value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean);
+  return [];
 }
 
 function pickNonTabuVariant({ base, pool, startIndex, lane, family, batchIndex, tabuSet, temperature }) {
@@ -116,6 +126,35 @@ function riskPatches(base) {
   ];
 }
 
+function forcedEntryPatches(base, requiredKeys = []) {
+  const required = new Set(requiredKeys);
+  return signalPatches(base).filter((patch) => Object.keys(patch).some((key) => required.has(key)));
+}
+
+function enforceRequiredTouchedKeys({ base, variant, requiredTouchedKeys = [], batchIndex = 0, temperature = 1 }) {
+  const required = normalizeStringList(requiredTouchedKeys);
+  if (!required.length) return variant;
+  const patchKeys = Object.keys(variant?.patch || {});
+  if (patchKeys.some((key) => required.includes(key))) return variant;
+
+  const pool = forcedEntryPatches(base, required);
+  if (!pool.length) return variant;
+  const entryPatch = scalePatch(base, pool[batchIndex % pool.length], temperature);
+  const mergedPatch = { ...(variant.patch || {}), ...entryPatch };
+  return {
+    ...variant,
+    family: variant.family || 'entry',
+    patch: mergedPatch,
+    touchedKeys: Object.keys(mergedPatch),
+    metadata: {
+      ...(variant.metadata || {}),
+      forcedEntryMutation: true,
+      requiredTouchedKeys: required,
+    },
+    config: { ...clone(base), ...mergedPatch },
+  };
+}
+
 function freezeArchitecture(config) {
   return {
     ...config,
@@ -161,7 +200,13 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       tabuSet,
       temperature,
     });
-    batch.push(picked.variant);
+    batch.push(enforceRequiredTouchedKeys({
+      base,
+      variant: picked.variant,
+      requiredTouchedKeys: policy.requiredTouchedKeys,
+      batchIndex: batch.length,
+      temperature,
+    }));
     index = picked.nextIndex;
   }
 
@@ -178,7 +223,13 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       tabuSet,
       temperature,
     });
-    batch.push(picked.variant);
+    batch.push(enforceRequiredTouchedKeys({
+      base,
+      variant: picked.variant,
+      requiredTouchedKeys: policy.requiredTouchedKeys,
+      batchIndex: batch.length,
+      temperature,
+    }));
   }
 
   return batch;

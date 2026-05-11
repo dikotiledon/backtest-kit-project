@@ -2729,6 +2729,93 @@ test('selectChangedMatrixCandidate returns null when only malformed candidates a
   assert.equal(selected, null);
 });
 
+test('buildScoutOrchestrationState includes entry invariance verdict from recent cycles', () => {
+  const championConfig = { minPredSum: 2, adxThreshold: 20, minBarsBetween: 2, neighborsCount: 32, tpAtrMult: 7.6 };
+  const championState = { configId: 'champion', score: 70, config: championConfig };
+  const historyEventsBefore = Array.from({ length: 5 }, (_, index) => ({
+    type: 'cycle',
+    touchedKeys: ['tpAtrMult'],
+    challenger: { tradeCount: 261, winRatePct: 42.53 + (index % 2 ? 0.001 : 0) },
+  }));
+
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+        entryInvariance: { minCycles: 5, entryKeys: ['adxThreshold', 'minPredSum', 'minBarsBetween', 'neighborsCount'] },
+      },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-entry-invariance',
+    championState,
+    historyEventsBefore,
+    searchBatch: [{ variantId: 'v1', lane: 'exploit', family: 'risk', patch: { tpAtrMult: 8.1 }, config: { ...championConfig, tpAtrMult: 8.1 } }],
+    primarySweep: {
+      topConfigs: [{ configId: 'champion', score: 70, roiPct: 40, profitFactor: 1.5, maxDrawdownPct: 5, tradeCount: 261, winRatePct: 42.53, config: { ...championConfig } }],
+    },
+    matrixCandidates: [],
+  });
+
+  assert.equal(result.manifest.entryInvariance.flagged, true);
+  assert.equal(result.manifest.entryInvariance.reason, 'exit_only_drift');
+  assert.deepEqual(result.manifest.entryInvariance.untouchedEntryKeys, ['adxThreshold', 'minPredSum', 'minBarsBetween', 'neighborsCount']);
+});
+
+test('force-entry-mutation search policy produces entry-key mutations in generated variants', () => {
+  const champion = {
+    configId: 'champion',
+    config: {
+      useSignalFusion: true,
+      useFusionV4: true,
+      neighborsCount: 32,
+      adxThreshold: 20,
+      minPredSum: 2,
+      minBarsBetween: 2,
+      h: 8,
+      r: 8,
+      x: 25,
+      riskAtrLen: 14,
+      slAtrMult: 1,
+      tpAtrMult: 7.6,
+      trailAtrMult: 1,
+      trailActivateR: 0.5,
+    },
+  };
+  const requiredTouchedKeys = ['adxThreshold', 'minPredSum', 'minBarsBetween', 'neighborsCount'];
+
+  const batch = buildRegimeAwareSearchBatch({
+    selectedLane: null,
+    champion,
+    maxConfigs: 4,
+    historyEvents: [{ type: 'cycle' }],
+    policy: {
+      mode: 'force-entry-mutation',
+      reason: 'exit_only_drift',
+      allowArchitectureKeys: false,
+      multiKeyMutationCount: 2,
+      ladderScale: 1.5,
+      requiredTouchedKeys,
+      exploitRatio: 0.5,
+      exploitFamilies: ['risk'],
+      exploreFamilies: ['risk'],
+    },
+  });
+
+  assert.equal(batch.length, 4);
+  assert.equal(batch.some((variant) => variant.family === 'risk'), true);
+  assert.equal(batch.every((variant) => Object.keys(variant.patch || {}).some((key) => requiredTouchedKeys.includes(key))), true);
+  assert.equal(batch.every((variant) => requiredTouchedKeys.some((key) => variant.config[key] !== champion.config[key])), true);
+});
+
 test('buildScoutOrchestrationState marks no-new-candidate when selected candidate equals champion', () => {
   const championConfig = { minPredSum: 2, tpAtrMult: 5.5 };
   const championState = { configId: 'champion', score: 70, config: championConfig };
@@ -3545,8 +3632,8 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     freezeArchitecture: false,
     exploitFamilies: ['signal', 'risk'],
     exploreFamilies: ['signal'],
-    paretoShortlistSize: 4,
-    matrixCandidateLimit: 4,
+    paretoShortlistSize: 12,
+    matrixCandidateLimit: 12,
     selfLoopEscape: {
       enabled: true,
       activateAfter: 1,

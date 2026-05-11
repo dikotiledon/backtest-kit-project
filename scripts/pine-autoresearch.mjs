@@ -13,6 +13,7 @@ import {
 import { classifyPromotionHoldReason, isForceablePromotionStatus, PROMOTION_STATUS } from './lib/pine-promotion-status.mjs';
 import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
 import { buildIncumbentSearchBatch } from './lib/pine-search-policy.mjs';
+import { detectEntryParameterInvariance } from './lib/pine-entry-invariance.mjs';
 import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
 import {
   appendJsonl,
@@ -750,6 +751,82 @@ function round(value, digits = 2) {
   return Math.round(value * factor) / factor;
 }
 
+function changedConfigKeys(before = {}, after = {}) {
+  if (!before || typeof before !== 'object' || !after || typeof after !== 'object') return [];
+  const keys = new Set([...Object.keys(before), ...Object.keys(after)]);
+  return [...keys].filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+}
+
+function normalizeTouchedKeyList(value) {
+  if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+  if (typeof value === 'string') return value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean);
+  return [];
+}
+
+function summarizeChallengerSignalMetrics(challenger = {}) {
+  return {
+    configId: challenger?.configId ?? null,
+    tradeCount: Number.isFinite(Number(challenger?.tradeCount)) ? Number(challenger.tradeCount) : null,
+    winRatePct: Number.isFinite(Number(challenger?.winRatePct)) ? Number(challenger.winRatePct) : null,
+    maxDrawdownPct: Number.isFinite(Number(challenger?.maxDrawdownPct)) ? Number(challenger.maxDrawdownPct) : null,
+  };
+}
+
+function entryInvarianceCycleFromManifest(manifest = {}) {
+  const configDeltaKeys = changedConfigKeys(manifest?.champion?.config ?? manifest?.incumbent?.config, manifest?.challenger?.config);
+  const variantPatchKeys = (Array.isArray(manifest?.searchPlan?.variants) ? manifest.searchPlan.variants : [])
+    .flatMap((variant) => [
+      ...normalizeTouchedKeyList(variant?.touchedKeys),
+      ...Object.keys(variant?.patch || {}),
+    ]);
+  const touchedKeys = [...new Set(configDeltaKeys.length ? configDeltaKeys : variantPatchKeys)];
+  return {
+    touchedKeys,
+    challenger: summarizeChallengerSignalMetrics(manifest?.challenger || {}),
+  };
+}
+
+function entryInvarianceCycleFromHistoryEvent(event = {}) {
+  return {
+    touchedKeys: normalizeTouchedKeyList(event?.touchedKeys),
+    challenger: event?.challenger || {
+      tradeCount: event?.challengerTradeCount,
+      winRatePct: event?.challengerWinRatePct,
+      maxDrawdownPct: event?.challengerMaxDrawdownPct,
+    },
+  };
+}
+
+function buildEntryInvarianceRecentCycles({ historyEvents = [], manifests = [] } = {}) {
+  const manifestCycles = (Array.isArray(manifests) ? manifests : [])
+    .filter((manifest) => manifest && typeof manifest === 'object')
+    .map((manifest) => entryInvarianceCycleFromManifest(manifest));
+  if (manifestCycles.length) return manifestCycles;
+  return (Array.isArray(historyEvents) ? historyEvents : [])
+    .filter((event) => event?.type === 'cycle')
+    .map((event) => entryInvarianceCycleFromHistoryEvent(event));
+}
+
+function buildEntryInvarianceVerdict({ historyEvents = [], manifests = [], policy = {} } = {}) {
+  return detectEntryParameterInvariance({
+    recentCycles: buildEntryInvarianceRecentCycles({ historyEvents, manifests }),
+    policy,
+  });
+}
+
+function buildForcedEntryMutationPolicy(searchPolicy = {}, entryInvariance = {}) {
+  if (entryInvariance?.flagged !== true) return searchPolicy;
+  return {
+    ...searchPolicy,
+    mode: 'force-entry-mutation',
+    reason: 'exit_only_drift',
+    allowArchitectureKeys: false,
+    multiKeyMutationCount: 2,
+    ladderScale: 1.5,
+    requiredTouchedKeys: entryInvariance.untouchedEntryKeys || [],
+  };
+}
+
 export function decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction } = {}) {
   if (!queuedItem) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: 'No pending promotion item' };
   if (!manifest) return { recommendation: 'hold', status: PROMOTION_STATUS.INVALID, reason: `Queued manifest missing for ${queuedItem.itemId}` };
@@ -887,9 +964,13 @@ export function selectChangedMatrixCandidate({ candidates = [], championState = 
   return selectRobustMatrixCandidate({ candidates: changed });
 }
 
-export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {}, regimeExitState = DEFAULT_REGIME_EXIT_STATE }) {
+export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {}, regimeExitState = DEFAULT_REGIME_EXIT_STATE, entryInvariance = null }) {
 
   const championSummary = summarizeResult(championState);
+  const entryInvarianceVerdict = entryInvariance ?? buildEntryInvarianceVerdict({
+    historyEvents: historyEventsBefore,
+    policy: config?.searchPolicy?.entryInvariance || config?.entryInvariancePolicy || {},
+  });
   const paretoShortlist = buildParetoShortlist({
     champion: championSummary,
     rankedResults: primarySweep.topConfigs,
@@ -1035,6 +1116,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       matrixDecision,
       expectancyPolicy,
       expectancy,
+      entryInvariance: entryInvarianceVerdict,
       researchState: {
         steadyState,
         noChangeStreak,
@@ -1841,12 +1923,16 @@ async function writeCurrentDigest(config, latestManifest, championState, previou
 }
 
 function buildCycleHistoryEvent(manifest = {}) {
+  const entryInvarianceCycle = entryInvarianceCycleFromManifest(manifest);
   return {
     timestamp: manifest.generatedAt,
     type: 'cycle',
     runId: manifest.runId,
     championConfigId: manifest.champion?.configId,
     challengerConfigId: manifest.challenger?.configId,
+    touchedKeys: entryInvarianceCycle.touchedKeys,
+    challenger: entryInvarianceCycle.challenger,
+    entryInvariance: manifest.entryInvariance ?? null,
     recommendation: manifest.matrixDecision?.recommendation,
     summary: manifest.matrixDecision?.summary,
     steadyState: manifest.researchState?.steadyState ?? false,
@@ -2209,27 +2295,44 @@ export async function runScout(config, dependencies = {}) {
   const labSetId = [config.primaryLab?.labId, ...(config.shadowLabs || []).map((lab) => lab.labId)].filter(Boolean).join(',');
   trackedConfig = { ...trackedConfig, grid: gridName };
 
-  const fallbackSearchBatch = activeTrack
-    ? buildTrackCandidateBatch({
-        track: activeTrack,
-        incumbent: championState.config,
-        maxConfigs: trackedConfig.maxConfigs,
-        historyEvents: historyEventsBefore,
-        budgetPolicy: trackedConfig.searchPolicy,
-        schedulerState,
-      })
-    : buildIncumbentSearchBatch({
+  const recentManifestsForNovelty = await loadRecentCompletedManifestsForNovelty({
+    config: trackedConfig,
+    limit: null,
+  });
+  const entryInvariance = buildEntryInvarianceVerdict({
+    historyEvents: historyEventsBefore,
+    manifests: recentManifestsForNovelty,
+    policy: trackedConfig.searchPolicy?.entryInvariance || trackedConfig.entryInvariancePolicy || {},
+  });
+  trackedConfig = {
+    ...trackedConfig,
+    searchPolicy: buildForcedEntryMutationPolicy(trackedConfig.searchPolicy, entryInvariance),
+  };
+
+  const fallbackSearchBatch = entryInvariance.flagged
+    ? buildIncumbentSearchBatch({
         incumbent: championState.config,
         maxConfigs: trackedConfig.maxConfigs,
         historyEvents: historyEventsBefore,
         policy: trackedConfig.searchPolicy,
         schedulerState,
-      });
-
-  const recentManifestsForNovelty = await loadRecentCompletedManifestsForNovelty({
-    config: trackedConfig,
-    limit: null,
-  });
+      })
+    : activeTrack
+      ? buildTrackCandidateBatch({
+          track: activeTrack,
+          incumbent: championState.config,
+          maxConfigs: trackedConfig.maxConfigs,
+          historyEvents: historyEventsBefore,
+          budgetPolicy: trackedConfig.searchPolicy,
+          schedulerState,
+        })
+      : buildIncumbentSearchBatch({
+          incumbent: championState.config,
+          maxConfigs: trackedConfig.maxConfigs,
+          historyEvents: historyEventsBefore,
+          policy: trackedConfig.searchPolicy,
+          schedulerState,
+        });
   const championSource = { configId: championState.configId, config: championState.config };
   const regimeNoveltyContext = {
     recentManifestsForNovelty,
@@ -2473,6 +2576,7 @@ export async function runScout(config, dependencies = {}) {
       gridName,
     },
     regimeExitState,
+    entryInvariance,
   });
   const { manifest } = orchestration;
 

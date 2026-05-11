@@ -40,6 +40,87 @@ function normalizeLaneExhaustions(value = {}) {
   return normalized;
 }
 
+function normalizePositiveInteger(value, fallback) {
+  const numeric = typeof value === 'number' ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(1, Math.floor(numeric));
+}
+
+function normalizeKnownFingerprint(value) {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+function normalizeTabuPrunePolicy(policy = {}) {
+  const source = isPlainObject(policy) ? policy : {};
+  return {
+    maxAgeCycles: normalizePositiveInteger(source.maxAgeCycles, 20),
+    maxEntries: normalizePositiveInteger(source.maxEntries, 32),
+    dropOnChampionChange: source.dropOnChampionChange === false ? false : true,
+  };
+}
+
+function normalizeTabuEntry(entry, { currentCycle = 0, index = 0 } = {}) {
+  if (!isPlainObject(entry)) return null;
+  const fingerprint = normalizeKnownFingerprint(entry.fingerprint);
+  if (!fingerprint) return null;
+  const rawAddedAtCycle = Number(entry.addedAtCycle);
+  const addedAtCycle = Number.isFinite(rawAddedAtCycle)
+    ? Math.max(0, Math.floor(rawAddedAtCycle))
+    : currentCycle;
+  return {
+    fingerprint,
+    addedAtCycle,
+    championFingerprint: normalizeKnownFingerprint(entry.championFingerprint),
+    index,
+  };
+}
+
+export function pruneTabuFingerprints(input = {}) {
+  if (!isPlainObject(input)) return [];
+  const entries = Array.isArray(input.entries) ? input.entries : [];
+  const currentCycle = Number.isFinite(Number(input.currentCycle))
+    ? Math.max(0, Math.floor(Number(input.currentCycle)))
+    : 0;
+  const currentChampionFingerprint = normalizeKnownFingerprint(input.currentChampionFingerprint);
+  const policy = normalizeTabuPrunePolicy(input.policy);
+  const deduped = new Map();
+
+  entries.forEach((entry, index) => {
+    const normalized = normalizeTabuEntry(entry, { currentCycle, index });
+    if (!normalized) return;
+    if (
+      policy.dropOnChampionChange
+      && currentChampionFingerprint
+      && normalized.championFingerprint
+      && normalized.championFingerprint !== currentChampionFingerprint
+    ) {
+      return;
+    }
+    if (currentCycle - normalized.addedAtCycle > policy.maxAgeCycles) return;
+
+    const existing = deduped.get(normalized.fingerprint);
+    if (!existing
+      || normalized.addedAtCycle > existing.addedAtCycle
+      || (normalized.addedAtCycle === existing.addedAtCycle && normalized.index > existing.index)) {
+      deduped.set(normalized.fingerprint, normalized);
+    }
+  });
+
+  return [...deduped.values()]
+    .sort((left, right) => (right.addedAtCycle - left.addedAtCycle) || (right.index - left.index))
+    .slice(0, policy.maxEntries)
+    .sort((left, right) => (left.addedAtCycle - right.addedAtCycle) || (left.index - right.index))
+    .map(({ fingerprint, addedAtCycle, championFingerprint }) => ({ fingerprint, addedAtCycle, championFingerprint }));
+}
+
+function resolveTabuPolicy(policy = {}) {
+  if (isPlainObject(policy?.tabu)) return policy.tabu;
+  if (Number.isFinite(policy?.tabuLimit)) {
+    return { maxAgeCycles: 20, maxEntries: policy.tabuLimit, dropOnChampionChange: true };
+  }
+  return {};
+}
+
 function stableValue(value) {
   if (Array.isArray(value)) {
     return value.map((item) => stableValue(item));
@@ -321,12 +402,29 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     }
   }
 
-  const tabuLimit = Number.isFinite(policy.tabuLimit) ? policy.tabuLimit : 128;
-  const priorTabu = Array.isArray(previous.tabuRejectedFingerprints) ? previous.tabuRejectedFingerprints : [];
+  const nextCycleIndex = Number.isFinite(manifest.cycleIndex) ? manifest.cycleIndex : previous.cycleIndex + 1;
+  const currentChampionFingerprint = championFingerprint ?? previous.lastChampionFingerprint ?? null;
+  const priorTabu = Array.isArray(previous.tabuRejectedFingerprints)
+    ? previous.tabuRejectedFingerprints.map((entry) => (typeof entry === 'string'
+        ? { fingerprint: entry, addedAtCycle: previous.cycleIndex, championFingerprint: currentChampionFingerprint }
+        : entry))
+    : [];
   const nextRejected = manifest.rejectedCandidateFingerprint && manifest.rejectedCandidateFingerprint !== championFingerprint
-    ? [...priorTabu, manifest.rejectedCandidateFingerprint]
+    ? [
+        ...priorTabu,
+        {
+          fingerprint: manifest.rejectedCandidateFingerprint,
+          addedAtCycle: nextCycleIndex,
+          championFingerprint: currentChampionFingerprint,
+        },
+      ]
     : priorTabu;
-  const tabuRejectedFingerprints = [...new Set(nextRejected)].slice(-tabuLimit);
+  const tabuRejectedFingerprints = pruneTabuFingerprints({
+    entries: nextRejected,
+    currentCycle: nextCycleIndex,
+    currentChampionFingerprint,
+    policy: resolveTabuPolicy(policy),
+  });
 
   const sameTrackCycleStreak = rotationHappened
     ? (resolvedRotationTrigger && ['noChangeStreak', 'noveltySimilarity', 'maxCyclesPerTrack'].includes(resolvedRotationTrigger)
@@ -343,7 +441,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
   return {
     ...previous,
     activeTrackId: nextActiveTrackId,
-    cycleIndex: Number.isFinite(manifest.cycleIndex) ? manifest.cycleIndex : previous.cycleIndex + 1,
+    cycleIndex: nextCycleIndex,
     noChangeStreak,
     noNewCandidateStreak,
     sameTrackCycleStreak,

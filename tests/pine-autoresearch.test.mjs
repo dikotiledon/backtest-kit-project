@@ -44,6 +44,7 @@ import {
   resolveAutopromoteQueueStatus,
   resolveEffectiveRuntimeExchange,
   mergeSchedulerTabuFingerprints,
+  normalizeTabuEntries,
   resolvePromotionManifestPath,
   resolveTrackSelectionState,
   selectChangedMatrixCandidate,
@@ -3507,15 +3508,52 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
   assert.equal(result.manifest.topCandidateSimilarity, 0.5);
 });
 
+test('normalizeTabuEntries migrates legacy string tabu entries to champion-scoped objects', () => {
+  assert.deepEqual(normalizeTabuEntries(['old-1', '', null, 'old-2'], {
+    currentCycle: 7,
+    championFingerprint: 'champ-1',
+  }), [
+    { fingerprint: 'old-1', addedAtCycle: 7, championFingerprint: 'champ-1' },
+    { fingerprint: 'old-2', addedAtCycle: 7, championFingerprint: 'champ-1' },
+  ]);
+});
+
 test('mergeSchedulerTabuFingerprints bootstraps recent manifest rejects without losing existing tabu state', () => {
   const merged = mergeSchedulerTabuFingerprints({
     schedulerState: { activeTrackId: 'track-a', tabuRejectedFingerprints: ['old-1', 'old-2'] },
     recentRejectedFingerprints: ['old-2', 'new-1', 'new-2'],
-    tabuLimit: 3,
+    currentCycle: 7,
+    championFingerprint: 'champ-1',
+    policy: { maxAgeCycles: 20, maxEntries: 3, dropOnChampionChange: true },
   });
 
   assert.equal(merged.activeTrackId, 'track-a');
-  assert.deepEqual(merged.tabuRejectedFingerprints, ['old-2', 'new-1', 'new-2']);
+  assert.deepEqual(merged.tabuRejectedFingerprints, [
+    { fingerprint: 'old-2', addedAtCycle: 7, championFingerprint: 'champ-1' },
+    { fingerprint: 'new-1', addedAtCycle: 7, championFingerprint: 'champ-1' },
+    { fingerprint: 'new-2', addedAtCycle: 7, championFingerprint: 'champ-1' },
+  ]);
+});
+
+test('mergeSchedulerTabuFingerprints prunes stale old-champion object entries', () => {
+  const merged = mergeSchedulerTabuFingerprints({
+    schedulerState: {
+      activeTrackId: 'track-a',
+      tabuRejectedFingerprints: [
+        { fingerprint: 'stale-age', addedAtCycle: 1, championFingerprint: 'champ-1' },
+        { fingerprint: 'old-champ', addedAtCycle: 6, championFingerprint: 'champ-old' },
+        { fingerprint: 'current-champ', addedAtCycle: 6, championFingerprint: 'champ-1' },
+      ],
+    },
+    recentRejectedFingerprints: [],
+    currentCycle: 7,
+    championFingerprint: 'champ-1',
+    policy: { maxAgeCycles: 5, maxEntries: 10, dropOnChampionChange: true },
+  });
+
+  assert.deepEqual(merged.tabuRejectedFingerprints, [
+    { fingerprint: 'current-champ', addedAtCycle: 6, championFingerprint: 'champ-1' },
+  ]);
 });
 
 test('resolveTrackSelectionState advances cycle index when no-change rotation clears the active track', () => {

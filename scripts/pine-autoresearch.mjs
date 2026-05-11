@@ -62,6 +62,7 @@ import {
   buildNoveltySignature,
   nextTrackState,
   normalizeResearchTracks,
+  pruneTabuFingerprints,
   readSchedulerState,
   resolveSchedulerStatePath,
   selectActiveTrack,
@@ -1005,15 +1006,73 @@ export function formatAutoresearchLockSkip(command, result = {}) {
   return `[autoresearch] ${command}=skipped reason=${reason}${ownerSuffix}`;
 }
 
-export function mergeSchedulerTabuFingerprints({ schedulerState = {}, recentRejectedFingerprints = [], tabuLimit = 128 } = {}) {
-  const limit = Number.isFinite(tabuLimit) ? Math.max(0, tabuLimit) : 128;
-  const current = Array.isArray(schedulerState.tabuRejectedFingerprints)
-    ? schedulerState.tabuRejectedFingerprints
-    : [];
-  const merged = [...new Set([...current, ...recentRejectedFingerprints.filter(Boolean)])].slice(-limit);
+function normalizeCycleIndex(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : fallback;
+}
+
+function normalizeFingerprint(value) {
+  return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+export function normalizeTabuEntries(raw, { currentCycle = 0, championFingerprint = null } = {}) {
+  if (!Array.isArray(raw)) return [];
+  const resolvedCycle = normalizeCycleIndex(currentCycle);
+  const resolvedChampion = normalizeFingerprint(championFingerprint);
+  return raw
+    .map((entry) => {
+      if (typeof entry === 'string') {
+        const fingerprint = normalizeFingerprint(entry);
+        return fingerprint
+          ? { fingerprint, addedAtCycle: resolvedCycle, championFingerprint: resolvedChampion }
+          : null;
+      }
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) return null;
+      const fingerprint = normalizeFingerprint(entry.fingerprint);
+      if (!fingerprint) return null;
+      return {
+        fingerprint,
+        addedAtCycle: normalizeCycleIndex(entry.addedAtCycle, resolvedCycle),
+        championFingerprint: normalizeFingerprint(entry.championFingerprint) ?? resolvedChampion,
+      };
+    })
+    .filter(Boolean);
+}
+
+function resolveTabuMergePolicy({ policy = null, tabuLimit = 128 } = {}) {
+  if (policy && typeof policy === 'object' && !Array.isArray(policy)) return policy;
+  if (Number.isFinite(tabuLimit)) {
+    return { maxAgeCycles: 20, maxEntries: Math.max(1, Math.floor(tabuLimit)), dropOnChampionChange: true };
+  }
+  return { maxAgeCycles: 20, maxEntries: 32, dropOnChampionChange: true };
+}
+
+export function mergeSchedulerTabuFingerprints({
+  schedulerState = {},
+  recentRejectedFingerprints = [],
+  tabuLimit = 128,
+  currentCycle = schedulerState?.cycleIndex ?? 0,
+  championFingerprint = schedulerState?.lastChampionFingerprint ?? null,
+  policy = null,
+} = {}) {
+  const cycle = normalizeCycleIndex(currentCycle);
+  const champion = normalizeFingerprint(championFingerprint);
+  const current = normalizeTabuEntries(schedulerState.tabuRejectedFingerprints, {
+    currentCycle: cycle,
+    championFingerprint: champion,
+  });
+  const recent = normalizeTabuEntries(recentRejectedFingerprints, {
+    currentCycle: cycle,
+    championFingerprint: champion,
+  });
   return {
     ...schedulerState,
-    tabuRejectedFingerprints: merged,
+    tabuRejectedFingerprints: pruneTabuFingerprints({
+      entries: [...current, ...recent],
+      currentCycle: cycle,
+      currentChampionFingerprint: champion,
+      policy: resolveTabuMergePolicy({ policy, tabuLimit }),
+    }),
   };
 }
 
@@ -2382,10 +2441,20 @@ export async function runScout(config, dependencies = {}) {
   }
   const schedulerStatePath = resolveSchedulerStatePath({ researchRoot: config.researchRoot, matrixId: config.matrixId });
   const loadedSchedulerState = await readSchedulerState(schedulerStatePath);
+  const schedulerChampionFingerprint = configFingerprint(championState.config);
+  const schedulerTabuPolicy = config.searchPolicy?.tabu
+    ?? config.rotationPolicy?.tabu
+    ?? {
+      maxAgeCycles: 20,
+      maxEntries: config.rotationPolicy?.tabuLimit ?? 32,
+      dropOnChampionChange: true,
+    };
   const schedulerState = mergeSchedulerTabuFingerprints({
     schedulerState: loadedSchedulerState,
     recentRejectedFingerprints: await collectRecentRejectedCandidateFingerprints(config, config.rotationPolicy?.tabuBootstrapManifestLimit ?? 16),
-    tabuLimit: config.rotationPolicy?.tabuLimit ?? 128,
+    currentCycle: loadedSchedulerState.cycleIndex ?? 0,
+    championFingerprint: schedulerChampionFingerprint,
+    policy: schedulerTabuPolicy,
   });
   const researchTracks = normalizeResearchTracks(
     Array.isArray(config.researchTracks) && config.researchTracks.length > 0
@@ -2708,7 +2777,7 @@ export async function runScout(config, dependencies = {}) {
 
   const updatedSchedulerState = nextTrackState({
     state: schedulerState,
-    policy: rotationPolicy,
+    policy: { ...rotationPolicy, tabu: schedulerTabuPolicy },
     manifest: {
       activeTrackId: manifest.activeTrackId,
       candidateFingerprint: manifest.candidateFingerprint,

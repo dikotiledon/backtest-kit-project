@@ -68,7 +68,17 @@ function scalePatch(base, patch, temperature) {
 }
 
 function normalizeTabuCache(value) {
-  if (Array.isArray(value)) return new Set(value);
+  if (Array.isArray(value)) {
+    return new Set(value
+      .map((entry) => {
+        if (typeof entry === 'string') return entry;
+        if (entry && typeof entry === 'object' && !Array.isArray(entry) && typeof entry.fingerprint === 'string') {
+          return entry.fingerprint;
+        }
+        return null;
+      })
+      .filter(Boolean));
+  }
   if (value && typeof value === 'object') return new Set(Object.keys(value));
   return new Set();
 }

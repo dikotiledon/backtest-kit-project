@@ -10,6 +10,7 @@ import {
   defaultSchedulerState,
   nextTrackState,
   normalizeResearchTracks,
+  pruneTabuFingerprints,
   readSchedulerState,
   resolveSchedulerStatePath,
   selectActiveTrack,
@@ -281,6 +282,77 @@ test('nextTrackState rotates on current novelty similarity and max-cycle evidenc
   assert.equal(maxCycleRotated.lastRotationTrigger, 'maxCyclesPerTrack');
 });
 
+test('pruneTabuFingerprints drops stale entries, old champions, and trims to newest entries', () => {
+  const pruned = pruneTabuFingerprints({
+    currentCycle: 51,
+    currentChampionFingerprint: 'champ-current',
+    policy: { maxAgeCycles: 20, maxEntries: 2, dropOnChampionChange: true },
+    entries: [
+      { fingerprint: 'a', addedAtCycle: 1, championFingerprint: 'champ-current' },
+      { fingerprint: 'b', addedAtCycle: 35, championFingerprint: 'champ-old' },
+      { fingerprint: 'c', addedAtCycle: 40, championFingerprint: 'champ-current' },
+      { fingerprint: 'd', addedAtCycle: 51, championFingerprint: 'champ-current' },
+    ],
+  });
+
+  assert.deepEqual(pruned, [
+    { fingerprint: 'c', addedAtCycle: 40, championFingerprint: 'champ-current' },
+    { fingerprint: 'd', addedAtCycle: 51, championFingerprint: 'champ-current' },
+  ]);
+});
+
+test('pruneTabuFingerprints ignores malformed legacy entries and keeps newest when capped', () => {
+  const pruned = pruneTabuFingerprints({
+    currentCycle: 12,
+    currentChampionFingerprint: 'champ-current',
+    policy: { maxAgeCycles: 20, maxEntries: 2 },
+    entries: [
+      'legacy-a',
+      { fingerprint: '', addedAtCycle: 11, championFingerprint: 'champ-current' },
+      { fingerprint: 'obj-b', addedAtCycle: 10, championFingerprint: 'champ-current' },
+      { fingerprint: 'obj-c', addedAtCycle: 11, championFingerprint: 'champ-current' },
+      { fingerprint: 'obj-d', addedAtCycle: 12, championFingerprint: 'champ-current' },
+      null,
+    ],
+  });
+
+  assert.deepEqual(pruned, [
+    { fingerprint: 'obj-c', addedAtCycle: 11, championFingerprint: 'champ-current' },
+    { fingerprint: 'obj-d', addedAtCycle: 12, championFingerprint: 'champ-current' },
+  ]);
+});
+
+test('pruneTabuFingerprints can keep current-age old champion entries when configured', () => {
+  const pruned = pruneTabuFingerprints({
+    currentCycle: 12,
+    currentChampionFingerprint: 'champ-current',
+    policy: { maxAgeCycles: 20, maxEntries: 5, dropOnChampionChange: false },
+    entries: [
+      { fingerprint: 'old-champ', addedAtCycle: 10, championFingerprint: 'champ-old' },
+      { fingerprint: 'current-champ', addedAtCycle: 11, championFingerprint: 'champ-current' },
+    ],
+  });
+
+  assert.deepEqual(pruned, [
+    { fingerprint: 'old-champ', addedAtCycle: 10, championFingerprint: 'champ-old' },
+    { fingerprint: 'current-champ', addedAtCycle: 11, championFingerprint: 'champ-current' },
+  ]);
+});
+
+test('pruneTabuFingerprints is robust to null input and clamps invalid policy limits', () => {
+  assert.deepEqual(pruneTabuFingerprints(null), []);
+  assert.deepEqual(pruneTabuFingerprints({
+    currentCycle: 5,
+    policy: { maxAgeCycles: 0, maxEntries: 0 },
+    entries: [
+      { fingerprint: 'stale', addedAtCycle: 3, championFingerprint: 'champ' },
+      { fingerprint: 'fresh', addedAtCycle: 5, championFingerprint: 'champ' },
+    ],
+  }), [
+    { fingerprint: 'fresh', addedAtCycle: 5, championFingerprint: 'champ' },
+  ]);
+});
+
 test('nextTrackState records rejected candidate fingerprints in a bounded tabu list', () => {
   const next = nextTrackState({
     state: {
@@ -297,7 +369,10 @@ test('nextTrackState records rejected candidate fingerprints in a bounded tabu l
     },
   });
 
-  assert.deepEqual(next.tabuRejectedFingerprints, ['old-cand', 'cand-1']);
+  assert.deepEqual(next.tabuRejectedFingerprints, [
+    { fingerprint: 'old-cand', addedAtCycle: 0, championFingerprint: 'champ-1' },
+    { fingerprint: 'cand-1', addedAtCycle: 1, championFingerprint: 'champ-1' },
+  ]);
 
   const bounded = nextTrackState({
     state: next,
@@ -311,7 +386,10 @@ test('nextTrackState records rejected candidate fingerprints in a bounded tabu l
     },
   });
 
-  assert.deepEqual(bounded.tabuRejectedFingerprints, ['cand-1', 'cand-2']);
+  assert.deepEqual(bounded.tabuRejectedFingerprints, [
+    { fingerprint: 'cand-1', addedAtCycle: 1, championFingerprint: 'champ-1' },
+    { fingerprint: 'cand-2', addedAtCycle: 2, championFingerprint: 'champ-1' },
+  ]);
 });
 
 test('nextTrackState does not tabu the champion fingerprint', () => {

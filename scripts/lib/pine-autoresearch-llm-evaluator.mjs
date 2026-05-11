@@ -5,6 +5,7 @@ import {
   evaluateMatrix,
   loadConfig as loadAutoresearchConfig,
 } from '../pine-autoresearch.mjs';
+import { validateLlmMatrixEvidence } from './pine-autoresearch-llm-evidence.mjs';
 import {
   configFingerprint,
   isoNow,
@@ -84,6 +85,7 @@ export async function writeLlmEvaluationManifest({
   challengerSummary,
   labResults,
   matrixDecision,
+  evidence,
   evaluationManifestPath,
 } = {}) {
   if (!baseConfig?.matrixId) throw new Error('baseConfig.matrixId required');
@@ -96,6 +98,8 @@ export async function writeLlmEvaluationManifest({
 
   const generatedAt = isoNow();
   const manifestLabResults = summarizeLlmLabResultsForManifest(labResults);
+  const resolvedEvidence = evidence ?? validateLlmMatrixEvidence({ labResults, matrixDecision });
+  const promotionEligible = resolvedEvidence.ok && shouldEnqueueLlmCandidate({ matrixDecision });
   const manifest = {
     lane: 'llm-evaluator-bridge',
     generatedAt,
@@ -107,11 +111,13 @@ export async function writeLlmEvaluationManifest({
       challenger: challengerSummary,
       labResults: manifestLabResults,
       matrixDecision,
+      evidence: resolvedEvidence,
       robustness: summarizeLlmMatrixDelta({ labResults, matrixDecision }),
     }],
     labResults: manifestLabResults,
     matrixDecision,
-    promotionEligible: shouldEnqueueLlmCandidate({ matrixDecision }),
+    evidence: resolvedEvidence,
+    promotionEligible,
     promotionEligibleReason: matrixDecision?.summary ?? null,
     noNewCandidate: false,
   };
@@ -151,6 +157,7 @@ export async function executeLlmMatrixCandidate({
   );
 
   const metricsDelta = summarizeLlmMatrixDelta({ labResults, matrixDecision });
+  const evidence = validateLlmMatrixEvidence({ labResults, matrixDecision });
   const { manifestPath: evaluationManifestPath } = await writeLlmEvaluationManifest({
     baseConfig,
     runId,
@@ -158,6 +165,7 @@ export async function executeLlmMatrixCandidate({
     challengerSummary,
     labResults,
     matrixDecision,
+    evidence,
   });
 
   return {
@@ -167,6 +175,7 @@ export async function executeLlmMatrixCandidate({
     metricsDelta,
     matrixDecision,
     labResults,
-    promotable: shouldEnqueueLlmCandidate({ matrixDecision }),
+    evidence,
+    promotable: evidence.ok && shouldEnqueueLlmCandidate({ matrixDecision }),
   };
 }

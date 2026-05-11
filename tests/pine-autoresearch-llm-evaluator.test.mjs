@@ -130,7 +130,19 @@ test('executeLlmMatrixCandidate evaluates one LLM patch through injected matrix 
               drawdownDeltaPct: -0.1,
             },
           },
-          challenger: { config: challengerSummary.config },
+          incumbent: {
+            roiPct: 10,
+            profitFactor: 1.6,
+            tradeCount: 40,
+            maxDrawdownPct: 5,
+          },
+          challenger: {
+            roiPct: 13,
+            profitFactor: 2,
+            tradeCount: 44,
+            maxDrawdownPct: 4.9,
+            config: challengerSummary.config,
+          },
           analysis: {
             incumbent: { trades: [{ id: 1 }], rows: [{ bar: 1 }] },
             challenger: { trades: [{ id: 2 }], rows: [{ bar: 2 }] },
@@ -143,6 +155,7 @@ test('executeLlmMatrixCandidate evaluates one LLM patch through injected matrix 
 
     assert.equal(result.ok, true);
     assert.equal(result.promotable, true);
+    assert.equal(result.evidence.reason, 'backtest_evidence_present');
     assert.equal(result.runId, 'llm-matrix-a-2026-05-02T00-00-00-000Z-abc123def456');
     assert.equal(result.metricsDelta.recommendation, 'promote');
     assert.equal(result.metricsDelta.aggregateScoreDelta, 2);
@@ -151,10 +164,64 @@ test('executeLlmMatrixCandidate evaluates one LLM patch through injected matrix 
     const manifest = JSON.parse(await fs.readFile(result.evaluationManifestPath, 'utf8'));
     assert.equal(manifest.lane, 'llm-evaluator-bridge');
     assert.equal(manifest.matrixDecision.recommendation, 'promote');
+    assert.equal(manifest.evidence.reason, 'backtest_evidence_present');
+    assert.equal(manifest.promotionEligible, true);
     assert.equal(manifest.challenger.config.minPredSum, 2.2);
     assert.equal(manifest.challenger.config.useFusionV4, true);
     assert.equal(manifest.labResults[0].analysis, undefined);
     assert.equal(manifest.matrixCandidates[0].labResults[0].analysis, undefined);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('executeLlmMatrixCandidate refuses promotable for fake changed-key evaluator output', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'llm-evaluator-fake-'));
+
+  try {
+    const baseConfig = {
+      matrixId: 'matrix-a',
+      researchRoot: path.join(dir, 'pine/autoresearch/matrix-a'),
+    };
+    const championState = {
+      configId: 'champion-a',
+      config: { minPredSum: 2, divRsiLen: 14, useFusionV4: true },
+    };
+
+    const result = await executeLlmMatrixCandidate({
+      candidate: { patch: { minPredSum: 2.4 }, rationale: 'fake changed key only' },
+      candidateFingerprint: 'fake123def456999',
+      config: { baseConfigPath: './config/pine-autoresearch.default.json' },
+      repoRoot: dir,
+      loadBaseConfig: async () => baseConfig,
+      loadChampionState: async () => championState,
+      evaluateMatrixCandidate: async (resolvedConfig, runId, incumbent, challengerSummary) => ({
+        labResults: [{
+          lab: { labId: 'primary' },
+          decision: {
+            recommendation: 'promote',
+            comparisons: {
+              scoreDelta: 2,
+              roiDeltaPct: 3,
+              profitFactorDelta: 0.4,
+              drawdownDeltaPct: -0.1,
+            },
+          },
+          challenger: { config: challengerSummary.config },
+        }],
+        matrixDecision: { recommendation: 'promote', summary: 'primary passed' },
+      }),
+      nowId: () => '2026-05-02T00-00-00-000Z',
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.promotable, false);
+    assert.equal(result.evidence.reason, 'missing_backtest_evidence');
+    assert.deepEqual(result.evidence.invalidLabIds, ['primary']);
+
+    const manifest = JSON.parse(await fs.readFile(result.evaluationManifestPath, 'utf8'));
+    assert.equal(manifest.promotionEligible, false);
+    assert.equal(manifest.evidence.reason, 'missing_backtest_evidence');
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

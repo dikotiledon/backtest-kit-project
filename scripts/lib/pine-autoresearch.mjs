@@ -91,6 +91,66 @@ export function classifyHoldoutGate(input = {}) {
   };
 }
 
+export function resolveManifestHoldoutGate(manifest = {}) {
+  const decision = manifest?.matrixDecision || manifest?.decision || null;
+  return manifest?.holdoutGate
+    ?? decision?.holdoutGate
+    ?? classifyHoldoutGate({
+      blindHoldoutLabs: manifest?.blindHoldoutLabs ?? [],
+      holdoutVerdict: manifest?.holdoutVerdict ?? null,
+    });
+}
+
+export function assessManifestPromotionReadiness(manifest, {
+  championState = null,
+  requireMatrixPromotion = true,
+  requireCandidateFingerprint = false,
+} = {}) {
+  const decision = manifest?.matrixDecision || manifest?.decision || null;
+  const candidate = manifest?.challenger || null;
+  const challengerConfig = Boolean(candidate?.config);
+  const matrixReady = requireMatrixPromotion
+    ? decision?.recommendation === 'promote'
+    : challengerConfig;
+
+  const hasCandidateFingerprint = Boolean(manifest?.candidateFingerprint);
+  const fingerprintChanged = hasCandidateFingerprint && manifest.candidateFingerprint !== manifest?.championFingerprint;
+  const configChanged = championState?.config && candidate?.config
+    ? !sameConfig(championState.config, candidate.config)
+    : false;
+  const candidateChanged = requireCandidateFingerprint
+    ? fingerprintChanged
+    : (configChanged || fingerprintChanged);
+  const holdoutGate = resolveManifestHoldoutGate(manifest);
+  const holdoutReady = holdoutGate?.passed === true;
+  const promotionReady = manifest?.promotionReady !== false;
+
+  const gates = {
+    matrixReady,
+    challengerConfig,
+    candidateChanged,
+    holdoutReady,
+    promotionReady,
+  };
+  const failedGates = Object.entries(gates)
+    .filter(([, passed]) => !passed)
+    .map(([name]) => name);
+
+  return {
+    ready: failedGates.length === 0,
+    gates,
+    failedGates,
+    holdoutGate,
+    reason: failedGates.length === 0
+      ? 'promotion_ready'
+      : `promotion_not_ready:${failedGates.join(',')}`,
+  };
+}
+
+export function isManifestPromotionReady(manifest, options = {}) {
+  return assessManifestPromotionReadiness(manifest, options).ready;
+}
+
 function isActivatedValue(previous, next) {
   return (previous === false || previous == null) && next === true;
 }
@@ -725,16 +785,10 @@ export function decideAutoPromotionAction({ latestManifest, historyEvents = [], 
   const requireMatrixPromotion = safePolicy.requireMatrixPromotion ?? true;
   const decision = latestManifest?.matrixDecision || latestManifest?.decision || null;
   const candidate = latestManifest?.challenger || null;
-  const candidateChanged = !sameConfig(championState?.config, candidate?.config);
-  const matrixReady = requireMatrixPromotion ? decision?.recommendation === 'promote' : Boolean(candidate);
-  const holdoutGate = latestManifest?.holdoutGate
-    ?? decision?.holdoutGate
-    ?? classifyHoldoutGate({
-      blindHoldoutLabs: latestManifest?.blindHoldoutLabs ?? [],
-      holdoutVerdict: latestManifest?.holdoutVerdict ?? null,
-    });
-  const holdoutReady = holdoutGate?.passed === true;
-  const promotionReady = latestManifest?.promotionReady !== false;
+  const readiness = assessManifestPromotionReadiness(latestManifest, {
+    championState,
+    requireMatrixPromotion,
+  });
   const lineage = summarizePromotionLineage({
     historyEvents: safeHistoryEvents,
     limit: safePolicy.lineagePolicy?.lookbackPromotions ?? 6,
@@ -763,11 +817,12 @@ export function decideAutoPromotionAction({ latestManifest, historyEvents = [], 
 
   const gates = {
     enabled,
-    matrixReady,
-    holdoutReady,
-    promotionReady,
+    matrixReady: readiness.gates.matrixReady,
+    challengerConfig: readiness.gates.challengerConfig,
+    holdoutReady: readiness.gates.holdoutReady,
+    promotionReady: readiness.gates.promotionReady,
     lineage: lineageGate.passed,
-    candidateChanged,
+    candidateChanged: readiness.gates.candidateChanged,
     cooldown: cooldownPassed,
     dailyQuota: dailyQuotaPassed,
   };

@@ -17,6 +17,7 @@ import { detectEntryParameterInvariance } from './lib/pine-entry-invariance.mjs'
 import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
 import {
   appendJsonl,
+  assessManifestPromotionReadiness,
   buildParetoShortlist,
   classifyHoldoutGate,
   computeSweepOffset,
@@ -43,6 +44,7 @@ import {
   buildRegimeAnalysisArtifact,
   summarizeSideMetrics,
 } from './lib/pine-autoresearch.mjs';
+export { isManifestPromotionReady } from './lib/pine-autoresearch.mjs';
 import { stagePinnedDatasetForLab, validatePinnedCacheComplete } from './lib/pine-dataset.mjs';
 import { buildOfflineDataPlan, summarizeOfflineDataPlan } from './lib/pine-offline-data-plan.mjs';
 import {
@@ -1512,28 +1514,8 @@ function promotionQueueFilePath(config) {
   return promotionQueuePath({ researchRoot: config.researchRoot });
 }
 
-function resolveManifestHoldoutGate(manifest = {}) {
-  return manifest?.holdoutGate
-    ?? manifest?.matrixDecision?.holdoutGate
-    ?? classifyHoldoutGate({
-      blindHoldoutLabs: manifest?.blindHoldoutLabs ?? [],
-      holdoutVerdict: manifest?.holdoutVerdict ?? null,
-    });
-}
-
 export function shouldQueuePromotionManifest(manifest) {
-  const matrixPassed = manifest?.matrixDecision?.recommendation === 'promote';
-  const candidateChanged = Boolean(manifest?.candidateFingerprint)
-    && manifest.candidateFingerprint !== manifest.championFingerprint;
-  const holdoutGate = resolveManifestHoldoutGate(manifest);
-  const holdoutReady = holdoutGate?.passed === true;
-  const promotionReadyAllowed = manifest?.promotionReady !== false;
-
-  return matrixPassed
-    && Boolean(manifest?.challenger?.config)
-    && candidateChanged
-    && holdoutReady
-    && promotionReadyAllowed;
+  return assessManifestPromotionReadiness(manifest, { requireCandidateFingerprint: true }).ready;
 }
 
 export function decideCycleStartAction({ pendingPromotion = null, forceCycle = false } = {}) {
@@ -2261,13 +2243,14 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
   };
 }
 
-export async function evaluateMatrix(config, runId, championState, challengerSummary) {
+export async function evaluateMatrix(config, runId, championState, challengerSummary, dependencies = {}) {
+  const evaluateConfigOnLabFn = dependencies.evaluateConfigOnLab || evaluateConfigOnLab;
   const labs = partitionLabs(config).selectionLabs;
   const sameCandidate = sameConfig(championState.config, challengerSummary?.config);
   const labResults = [];
 
   for (const lab of labs) {
-    const incumbentResult = await evaluateConfigOnLab({
+    const incumbentResult = await evaluateConfigOnLabFn({
       config,
       lab,
       runId,
@@ -2282,7 +2265,7 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
           configId: challengerSummary?.configId || incumbentResult.configId,
           config: challengerSummary?.config || incumbentResult.config,
         }
-      : await evaluateConfigOnLab({
+      : await evaluateConfigOnLabFn({
           config,
           lab,
           runId,
@@ -2298,6 +2281,7 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
       complexityPolicy: config.complexityPolicy,
       holdoutVerdict: config.holdoutVerdict ?? null,
       blindHoldoutLabs: config.blindHoldoutLabs ?? [],
+      holdoutMode: config.holdoutMode,
       promotionPolicy: config.regimeExitResearch?.enabled ? config.regimeExitResearch?.promotion : null,
     });
 
@@ -2985,6 +2969,14 @@ export async function runPromote(config, args, mode = 'manual', manifestOverride
       appliedConfigId: championState.configId,
       notePath: null,
     };
+  }
+
+  const readiness = assessManifestPromotionReadiness(latest, {
+    championState,
+    requireMatrixPromotion: !args.force,
+  });
+  if (!readiness.ready) {
+    throw new Error(`Latest manifest is not promotion-ready: ${readiness.failedGates.join(', ')}`);
   }
 
   const source = await fs.readFile(config.scriptPath, 'utf8');

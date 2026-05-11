@@ -254,6 +254,56 @@ test('pine autoresearch exposes neutral evaluator seams for external lanes', () 
   assert.equal(typeof manifestsDir, 'function');
 });
 
+test('evaluateMatrix honors require holdout mode and blocks pending blind holdout', async () => {
+  const champion = makeResult({
+    configId: 'champion',
+    score: 100,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.4,
+    maxDrawdownPct: 5,
+    config: { minPredSum: 2 },
+  });
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 110,
+    tradeCount: 220,
+    roiPct: 55,
+    profitFactor: 1.8,
+    maxDrawdownPct: 5.1,
+    config: { minPredSum: 1.8 },
+  });
+
+  const result = await evaluateMatrix({
+    primaryLab: {
+      labId: 'primary',
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 100,
+        minTradeRatioVsIncumbent: 0.75,
+        significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+      },
+    },
+    shadowLabs: [],
+    blindHoldoutLabs: [{ labId: 'blind-holdout-a' }],
+    holdoutMode: 'require',
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+    expectancyPolicy: { enabled: false },
+  }, 'run-holdout-require', champion, challenger, {
+    evaluateConfigOnLab: async ({ candidate }) => candidate,
+  });
+
+  assert.equal(result.labResults[0].decision.recommendation, 'hold');
+  assert.equal(result.labResults[0].decision.holdoutGate.status, 'pending');
+  assert.equal(result.labResults[0].decision.gates.holdoutVerdict, false);
+  assert.deepEqual(result.labResults[0].decision.failedGates, ['holdoutVerdict']);
+  assert.equal(result.matrixDecision.recommendation, 'hold');
+  assert.equal(result.matrixDecision.gates.primaryPromote, false);
+});
+
 test('collectTestedGlobalPatchFingerprints reads v2 manifest searchPlan variants for same champion only', () => {
   const currentChampion = { configId: 'champ-current', config: { minPredSum: 1.8, adxThreshold: 20 } };
   const championConfigFingerprint = buildChampionConfigFingerprint(currentChampion.config);
@@ -3706,6 +3756,40 @@ test('buildScoutOrchestrationState exposes stagnation metadata in manifest', () 
 });
 
 
+async function createPromotionFixture(prefix, manifestOverrides = {}) {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
+  const configPath = path.join(dir, 'config.json');
+  const scriptPath = path.join(dir, 'strategy.pine');
+  await fs.writeFile(scriptPath, 'minPredSum = input.float(1.8, title="Min Prediction Sum")\n', 'utf8');
+  await fs.writeFile(configPath, JSON.stringify({
+    matrixId: `${prefix}-matrix`,
+    scriptPath,
+    outputs: { researchRoot: path.join(dir, 'research'), digestRoot: path.join(dir, 'digest') },
+    baseConfig: { minPredSum: 1.8 },
+  }), 'utf8');
+  const config = await autoresearchCli.loadConfig(dir, configPath, {});
+  await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+  await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+    configId: 'champion-a',
+    config: { minPredSum: 1.8 },
+    configFingerprint: 'fp-a',
+  }), 'utf8');
+  const manifest = {
+    runId: `${prefix}-run`,
+    generatedAt: '2026-05-12T00:00:00.000Z',
+    champion: { configId: 'champion-a', config: { minPredSum: 1.8 }, configFingerprint: 'fp-a' },
+    challenger: { configId: 'challenger-b', config: { minPredSum: 1.6 } },
+    championFingerprint: 'fp-a',
+    candidateFingerprint: 'fp-b',
+    matrixDecision: { recommendation: 'promote', summary: 'Promote challenger' },
+    ...manifestOverrides,
+  };
+  const manifestPath = path.join(autoresearchCli.manifestsDir(config), `${manifest.runId}.json`);
+  await fs.writeFile(manifestPath, JSON.stringify(manifest), 'utf8');
+  await fs.writeFile(autoresearchCli.latestManifestPath(config), JSON.stringify({ runId: manifest.runId }), 'utf8');
+  return { dir, config, manifestPath };
+}
+
 test('runPromote fails closed when latest pointer canonical manifest is invalid', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-latest-fail-'));
   try {
@@ -3730,6 +3814,37 @@ test('runPromote fails closed when latest pointer canonical manifest is invalid'
     await assert.rejects(
       () => autoresearchCli.runPromote(config, { force: false }, 'manual'),
       /Invalid latest manifest pointer.*latest_manifest_missing/,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('runPromote rejects pending required holdout even with force', async () => {
+  const { dir, config } = await createPromotionFixture('pine-promote-pending-holdout-', {
+    holdoutGate: { required: true, status: 'pending', passed: false, reason: 'blind_holdout_pending' },
+    promotionReady: false,
+  });
+  try {
+    await assert.rejects(
+      () => autoresearchCli.runPromote(config, { force: true }, 'manual'),
+      /promotion-ready: holdoutReady, promotionReady/,
+    );
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+
+test('runPromote rejects failed required holdout even with force', async () => {
+  const { dir, config } = await createPromotionFixture('pine-promote-failed-holdout-', {
+    holdoutGate: { required: true, status: 'failed', passed: false, reason: 'blind_holdout_regression' },
+    promotionReady: true,
+  });
+  try {
+    await assert.rejects(
+      () => autoresearchCli.runPromote(config, { force: true }, 'manual'),
+      /promotion-ready: holdoutReady/,
     );
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

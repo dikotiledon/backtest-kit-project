@@ -94,7 +94,9 @@ function normalizeLaneKey(lane) {
   return LANE_KEYS.includes(lane) ? lane : null;
 }
 
-export function nextLaneBudgetDebt({ currentDebt = {}, allocation = {}, selectedLane = null } = {}) {
+export function nextLaneBudgetDebt(input = {}) {
+  const source = input && typeof input === 'object' ? input : {};
+  const { currentDebt = {}, allocation = {}, selectedLane = null } = source;
   const debtSource = currentDebt && typeof currentDebt === 'object' ? currentDebt : {};
   const allocationSource = allocation && typeof allocation === 'object' ? allocation : {};
   const nextDebt = Object.fromEntries(LANE_KEYS.map((lane) => [

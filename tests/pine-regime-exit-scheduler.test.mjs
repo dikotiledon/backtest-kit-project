@@ -113,6 +113,14 @@ test('nextLaneBudgetDebt normalizes malformed debt/allocation and ignores unknow
   );
 });
 
+test('nextLaneBudgetDebt treats malformed top-level input as defaults', () => {
+  const defaultDebt = { exploit: 0, exitRegime: 0, globalAllParameter: 0, robustness: 0 };
+
+  assert.deepEqual(nextLaneBudgetDebt(null), defaultDebt);
+  assert.deepEqual(nextLaneBudgetDebt('malformed'), defaultDebt);
+  assert.deepEqual(nextLaneBudgetDebt(42), defaultDebt);
+});
+
 test('stagnation metadata strictPromotionGates only enabled at level 3', () => {
   assert.equal(STAGNATION_LANE_METADATA[0].strictPromotionGates, false);
   assert.equal(STAGNATION_LANE_METADATA[1].strictPromotionGates, false);

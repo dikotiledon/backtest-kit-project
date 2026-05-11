@@ -105,12 +105,13 @@ function pickNonTabuVariant({
     return { variant: null, nextIndex: startIndex, tabuSkipped: 0, exhausted: true };
   }
 
+  const enforceRequiredKeys = normalizeStringList(requiredTouchedKeys).length > 0;
   let tabuSkipped = 0;
   for (let probe = 0; probe < pool.length; probe++) {
     const rawPatch = pool[(startIndex + probe) % pool.length];
     const patch = scalePatch(base, rawPatch, temperature);
     const candidate = { ...clone(base), ...patch };
-    if (tabuSet.has(configFingerprint(candidate))) {
+    if (!enforceRequiredKeys && tabuSet.has(configFingerprint(candidate))) {
       tabuSkipped += 1;
       continue;
     }

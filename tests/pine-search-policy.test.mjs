@@ -76,6 +76,11 @@ const riskPatches = [
 
 const requiredMinPredSumPatch = { minPredSum: 1.5 };
 
+const riskFingerprints = riskPatches.map((patch) => fingerprint({
+  ...frozenIncumbent(incumbent),
+  ...patch,
+}));
+
 const enforcedRiskFingerprints = riskPatches.map((patch) => fingerprint({
   ...frozenIncumbent(incumbent),
   ...patch,
@@ -138,6 +143,43 @@ test('buildIncumbentSearchBatch fails closed when all signal candidates are obje
   });
 
   assert.deepEqual(batch, []);
+});
+
+test('buildIncumbentSearchBatch emits final non-tabu config when raw required-key candidate is tabu', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['risk'], requiredTouchedKeys: ['minPredSum'] },
+    schedulerState: { tabuRejectedFingerprints: riskFingerprints },
+  });
+
+  assert.equal(batch.length, 1);
+  assert.equal(batch[0].tabuSkipped, 0);
+  assert.deepEqual(batch[0].patch, { slAtrMult: 0.75, minPredSum: 1.5 });
+  assert.notEqual(fingerprint(batch[0].config), riskFingerprints[0]);
+  assert.equal(fingerprint(batch[0].config), enforcedRiskFingerprints[0]);
+});
+
+test('buildIncumbentSearchBatch emits final non-tabu config when raw object-shaped tabu entry matches', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['risk'], requiredTouchedKeys: ['minPredSum'] },
+    schedulerState: {
+      tabuRejectedFingerprints: riskFingerprints.map((tabuFingerprint, index) => ({
+        fingerprint: tabuFingerprint,
+        addedAtCycle: index + 1,
+        championFingerprint: `raw-risk-champ-${index + 1}`,
+      })),
+    },
+  });
+
+  assert.equal(batch.length, 1);
+  assert.equal(batch[0].tabuSkipped, 0);
+  assert.deepEqual(batch[0].patch, { slAtrMult: 0.75, minPredSum: 1.5 });
+  assert.equal(fingerprint(batch[0].config), enforcedRiskFingerprints[0]);
 });
 
 test('buildIncumbentSearchBatch rejects tabu final configs after required key enforcement', () => {

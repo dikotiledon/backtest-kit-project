@@ -1245,6 +1245,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
     champion: championSummary,
     rankedResults: primarySweep.topConfigs,
     limit: config.searchPolicy.paretoShortlistSize,
+    includeChampion: false,
   });
 
   const selectedCandidate = selectChangedMatrixCandidate({ candidates: matrixCandidates, championState });
@@ -2821,6 +2822,7 @@ export async function runScout(config, dependencies = {}) {
     champion: summarizeResult(championState),
     rankedResults: primarySweep.topConfigs,
     limit: trackedConfig.searchPolicy.paretoShortlistSize,
+    includeChampion: false,
   });
 
   const matrixCandidates = [];

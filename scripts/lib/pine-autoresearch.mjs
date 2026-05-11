@@ -310,8 +310,17 @@ function dominates(left, right) {
   return betterOrEqual && strictlyBetter;
 }
 
-export function buildParetoShortlist({ champion, rankedResults = [], limit = 4 }) {
-  const pool = [champion, ...rankedResults].filter(Boolean);
+export function buildParetoShortlist({ champion, rankedResults = [], limit = 4, includeChampion = true }) {
+  const sourceResults = Array.isArray(rankedResults) ? rankedResults : [];
+  const shortlistResults = includeChampion
+    ? sourceResults
+    : sourceResults.filter((candidate) => {
+      if (!candidate || !champion) return Boolean(candidate);
+      if (champion.configId && candidate.configId && champion.configId === candidate.configId) return false;
+      if (champion.config && candidate.config && sameConfig(champion.config, candidate.config)) return false;
+      return true;
+    });
+  const pool = [includeChampion ? champion : null, ...shortlistResults].filter(Boolean);
   const frontier = pool.filter((candidate, index) => {
     return !pool.some((other, otherIndex) => otherIndex !== index && dominates(other, candidate));
   });
@@ -325,8 +334,18 @@ export function buildParetoShortlist({ champion, rankedResults = [], limit = 4 }
     unique.push(item);
   }
 
-  if (champion && !unique.some((item) => item.configId === champion.configId)) {
+  if (includeChampion && champion && !unique.some((item) => item.configId === champion.configId)) {
     unique.unshift(champion);
+  }
+
+  if (!includeChampion && unique.length < limit) {
+    for (const item of shortlistResults) {
+      const key = item.configId || JSON.stringify(item.config || item);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(item);
+      if (unique.length >= limit) break;
+    }
   }
 
   return unique.slice(0, limit);

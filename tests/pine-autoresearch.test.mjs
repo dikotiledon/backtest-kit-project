@@ -2952,6 +2952,17 @@ test('buildParetoShortlist keeps non-dominated configs and always retains champi
   assert.deepEqual(shortlist.map((item) => item.configId), ['champion', 'c1', 'c2']);
 });
 
+test('buildParetoShortlist can reserve all shortlist slots for challengers', () => {
+  const champion = { configId: 'champ', score: 10, roiPct: 10, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 2, config: { a: 1 } };
+  const rankedResults = [
+    { configId: 'cand-1', score: 11, roiPct: 12, profitFactor: 1.5, tradeCount: 100, maxDrawdownPct: 2, config: { a: 2 } },
+    { configId: 'cand-2', score: 10.5, roiPct: 11, profitFactor: 1.45, tradeCount: 100, maxDrawdownPct: 2, config: { a: 3 } },
+  ];
+  const shortlist = buildParetoShortlist({ champion, rankedResults, limit: 2, includeChampion: false });
+
+  assert.deepEqual(shortlist.map((item) => item.configId), ['cand-1', 'cand-2']);
+});
+
 test('selectRobustMatrixCandidate prefers multi-window strength over single primary peak', () => {
   const selected = selectRobustMatrixCandidate({
     candidates: [
@@ -3553,6 +3564,38 @@ test('buildScoutOrchestrationState marks no-new-candidate when selected candidat
   assert.match(result.manifest.matrixDecision.summary, /No new candidate/);
 });
 
+test('buildScoutOrchestrationState leaves challenger shortlist empty when sweep only returns champion', () => {
+  const championConfig = { minPredSum: 2, tpAtrMult: 5.5 };
+  const championState = { configId: 'champion', score: 70, config: championConfig };
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-empty-challenger-shortlist',
+    championState,
+    historyEventsBefore: [],
+    searchBatch: [{ variantId: 'v1', lane: 'self-loop', family: 'fallback', config: { ...championConfig } }],
+    primarySweep: {
+      topConfigs: [{ configId: 'champion', score: 70, roiPct: 40, profitFactor: 1.5, maxDrawdownPct: 5, tradeCount: 200, config: { ...championConfig } }],
+    },
+    matrixCandidates: [],
+    trackState: { rejectedCandidateFingerprint: 'stale-reject' },
+  });
+
+  assert.deepEqual(result.paretoShortlist, []);
+  assert.equal(result.selectedCandidate, null);
+  assert.equal(result.manifest.noNewCandidate, true);
+  assert.equal(result.manifest.rejectedCandidateFingerprint, null);
+  assert.match(result.manifest.matrixDecision.summary, /No new candidate/);
+});
+
 
 test('buildScoutOrchestrationState wires variant files, shortlist, matrix selection, and manifest fields', () => {
   const config = {
@@ -3585,7 +3628,7 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
   const primarySweep = {
     topConfigs: [
       { configId: 'c1', score: 72, roiPct: 48, profitFactor: 1.9, maxDrawdownPct: 4.1, tradeCount: 230 },
-      { configId: 'c2', score: 71, roiPct: 47, profitFactor: 1.8, maxDrawdownPct: 4.3, tradeCount: 225 },
+      { configId: 'c2', score: 71, roiPct: 49, profitFactor: 1.8, maxDrawdownPct: 4.3, tradeCount: 225 },
       { configId: 'c3', score: 69, roiPct: 46, profitFactor: 1.7, maxDrawdownPct: 4.6, tradeCount: 220 },
     ],
   };
@@ -3640,7 +3683,7 @@ test('buildScoutOrchestrationState wires variant files, shortlist, matrix select
   });
 
   assert.match(result.variantFilePath, /pine-autoresearch-123-variants\.json$/);
-  assert.deepEqual(result.paretoShortlist.map((item) => item.configId), ['champion', 'c1']);
+  assert.deepEqual(result.paretoShortlist.map((item) => item.configId), ['c1', 'c2']);
   assert.equal(result.selectedCandidate.challenger.configId, 'c1');
   assert.equal(result.manifest.searchPlan.variantCount, 2);
   assert.deepEqual(result.manifest.searchPlan.variants.map((variant) => variant.variantId), ['v1', 'v2']);

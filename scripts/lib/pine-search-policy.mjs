@@ -89,7 +89,18 @@ function normalizeStringList(value) {
   return [];
 }
 
-function pickNonTabuVariant({ base, pool, startIndex, lane, family, batchIndex, tabuSet, temperature }) {
+function pickNonTabuVariant({
+  base,
+  pool,
+  startIndex,
+  lane,
+  family,
+  batchIndex,
+  tabuSet,
+  temperature,
+  requiredTouchedKeys,
+  enforcementBatchIndex = batchIndex,
+}) {
   if (!Array.isArray(pool) || !pool.length) {
     return { variant: null, nextIndex: startIndex, tabuSkipped: 0, exhausted: true };
   }
@@ -99,14 +110,29 @@ function pickNonTabuVariant({ base, pool, startIndex, lane, family, batchIndex, 
     const rawPatch = pool[(startIndex + probe) % pool.length];
     const patch = scalePatch(base, rawPatch, temperature);
     const candidate = { ...clone(base), ...patch };
-    if (!tabuSet.has(configFingerprint(candidate))) {
+    if (tabuSet.has(configFingerprint(candidate))) {
+      tabuSkipped += 1;
+      continue;
+    }
+
+    const variant = withPatch(base, patch, { lane, family, index: batchIndex, temperature, tabuSkipped });
+    const enforcedVariant = enforceRequiredTouchedKeys({
+      base,
+      variant,
+      requiredTouchedKeys,
+      batchIndex: enforcementBatchIndex,
+      temperature,
+    });
+
+    if (!tabuSet.has(configFingerprint(enforcedVariant.config))) {
       return {
-        variant: withPatch(base, patch, { lane, family, index: batchIndex, temperature, tabuSkipped }),
+        variant: enforcedVariant,
         nextIndex: startIndex + probe + 1,
         tabuSkipped,
         exhausted: false,
       };
     }
+
     tabuSkipped += 1;
   }
 
@@ -218,16 +244,12 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       batchIndex: exploitSlot + 1,
       tabuSet,
       temperature,
+      requiredTouchedKeys: policy.requiredTouchedKeys,
+      enforcementBatchIndex: batch.length,
     });
     index = picked.nextIndex;
     if (!picked.variant) continue;
-    batch.push(enforceRequiredTouchedKeys({
-      base,
-      variant: picked.variant,
-      requiredTouchedKeys: policy.requiredTouchedKeys,
-      batchIndex: batch.length,
-      temperature,
-    }));
+    batch.push(picked.variant);
   }
 
   for (let exploreIndex = 0; exploreIndex < explore; exploreIndex++) {
@@ -242,15 +264,11 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       batchIndex: exploreIndex + 1,
       tabuSet,
       temperature,
+      requiredTouchedKeys: policy.requiredTouchedKeys,
+      enforcementBatchIndex: batch.length,
     });
     if (!picked.variant) continue;
-    batch.push(enforceRequiredTouchedKeys({
-      base,
-      variant: picked.variant,
-      requiredTouchedKeys: policy.requiredTouchedKeys,
-      batchIndex: batch.length,
-      temperature,
-    }));
+    batch.push(picked.variant);
   }
 
   return batch;

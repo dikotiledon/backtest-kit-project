@@ -61,6 +61,27 @@ const signalFingerprints = signalPatches.map((patch) => fingerprint({
   ...patch,
 }));
 
+const riskPatches = [
+  { slAtrMult: 0.75 },
+  { slAtrMult: 1.25 },
+  { tpAtrMult: 2 },
+  { tpAtrMult: 3 },
+  { trailAtrMult: 0.75 },
+  { trailAtrMult: 1.25 },
+  { trailActivateR: 0 },
+  { trailActivateR: 1 },
+  { riskAtrLen: 7 },
+  { riskAtrLen: 21 },
+];
+
+const requiredMinPredSumPatch = { minPredSum: 1.5 };
+
+const enforcedRiskFingerprints = riskPatches.map((patch) => fingerprint({
+  ...frozenIncumbent(incumbent),
+  ...patch,
+  ...requiredMinPredSumPatch,
+}));
+
 const firstSignalFingerprint = signalFingerprints[0];
 
 function firstExploitVariantWith(tabuRejectedFingerprints) {
@@ -112,6 +133,51 @@ test('buildIncumbentSearchBatch fails closed when all signal candidates are obje
         fingerprint: tabuFingerprint,
         addedAtCycle: index + 1,
         championFingerprint: `champ-${index + 1}`,
+      })),
+    },
+  });
+
+  assert.deepEqual(batch, []);
+});
+
+test('buildIncumbentSearchBatch rejects tabu final configs after required key enforcement', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['risk'], requiredTouchedKeys: ['minPredSum'] },
+    schedulerState: { tabuRejectedFingerprints: enforcedRiskFingerprints },
+  });
+
+  assert.deepEqual(batch, []);
+});
+
+test('buildIncumbentSearchBatch tries the next candidate when required key enforcement makes the first final config tabu', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['risk'], requiredTouchedKeys: ['minPredSum'] },
+    schedulerState: { tabuRejectedFingerprints: [enforcedRiskFingerprints[0]] },
+  });
+
+  assert.equal(batch.length, 1);
+  assert.equal(batch[0].tabuSkipped, 1);
+  assert.deepEqual(batch[0].patch, { slAtrMult: 1.25, minPredSum: 1.5 });
+  assert.notEqual(fingerprint(batch[0].config), enforcedRiskFingerprints[0]);
+});
+
+test('buildIncumbentSearchBatch rejects object-shaped tabu entries for enforced final configs', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['risk'], requiredTouchedKeys: ['minPredSum'] },
+    schedulerState: {
+      tabuRejectedFingerprints: enforcedRiskFingerprints.map((tabuFingerprint, index) => ({
+        fingerprint: tabuFingerprint,
+        addedAtCycle: index + 1,
+        championFingerprint: `risk-champ-${index + 1}`,
       })),
     },
   });

@@ -28,6 +28,7 @@ import {
 } from '../scripts/lib/pine-global-search.mjs';
 import { buildLanePatchFingerprint } from '../scripts/lib/pine-lane-novelty.mjs';
 import { selectNextResearchLane } from '../scripts/lib/pine-regime-exit-scheduler.mjs';
+import { buildTrackCandidateBatch } from '../scripts/lib/pine-track-generators.mjs';
 import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs';
 import * as autoresearchCli from '../scripts/pine-autoresearch.mjs';
 import {
@@ -3058,6 +3059,136 @@ test('entry invariance enforcement injects entry mutation after generated global
   assert.equal(enforced[0].metadata.forcedEntryMutation, true);
   assert.equal(enforced[0].metadata.forcedEntryMutationSource, 'entry-invariance-post-selection');
   assert.notEqual(enforced[0].metadata.patchFingerprint, 'stale-fingerprint');
+});
+
+test('entry invariance enforcement does not replay object-shaped tabu after active-track entry mutation', () => {
+  const championConfig = {
+    useSignalFusion: true,
+    useFusionV4: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 7.6,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+  const requiredTouchedKeys = ['minPredSum'];
+  const rejectedConfig = {
+    ...championConfig,
+    useTimeStop: true,
+    timeStopBars: 8,
+    minPredSum: 1.5,
+  };
+  const rejectedFingerprint = configFingerprint(rejectedConfig);
+  const schedulerState = {
+    cycleIndex: 7,
+    tabuRejectedFingerprints: [{
+      fingerprint: rejectedFingerprint,
+      addedAtCycle: 7,
+      championFingerprint: configFingerprint(championConfig),
+    }],
+  };
+
+  const selectedSearchBatch = buildTrackCandidateBatch({
+    track: { trackId: 'exit-state', sourceFamily: 'exit-state' },
+    incumbent: championConfig,
+    maxConfigs: 3,
+    historyEvents: [],
+    budgetPolicy: {},
+    schedulerState,
+  });
+
+  assert.equal(selectedSearchBatch[0].config.timeStopBars, 8);
+  assert.equal(configFingerprint(selectedSearchBatch[0].config) === rejectedFingerprint, false);
+
+  const enforced = autoresearchCli.enforceEntryInvarianceOnSearchBatch({
+    searchBatch: selectedSearchBatch,
+    championConfig,
+    historyEvents: [{ type: 'cycle' }],
+    policy: {
+      mode: 'force-entry-mutation',
+      requiredTouchedKeys,
+      exploitRatio: 1,
+      exploitFamilies: ['risk'],
+      exploreFamilies: ['risk'],
+    },
+    schedulerState,
+    entryInvariance: {
+      flagged: true,
+      reason: 'exit_only_drift',
+      untouchedEntryKeys: requiredTouchedKeys,
+    },
+  });
+
+  assert.equal(enforced.length > 0, true);
+  assert.equal(enforced.some((variant) => Object.keys(variant.patch || {}).some((key) => requiredTouchedKeys.includes(key))), true);
+  assert.equal(enforced.some((variant) => configFingerprint(variant.config) === rejectedFingerprint), false);
+});
+
+test('entry invariance enforcement fails closed when every forced final config is tabu', () => {
+  const championConfig = {
+    useSignalFusion: true,
+    useFusionV4: true,
+    neighborsCount: 32,
+    adxThreshold: 20,
+    minPredSum: 2,
+    minBarsBetween: 2,
+    h: 8,
+    r: 8,
+    x: 25,
+    riskAtrLen: 14,
+    slAtrMult: 1,
+    tpAtrMult: 7.6,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+  const requiredTouchedKeys = ['minPredSum'];
+  const selectedSearchBatch = buildTrackCandidateBatch({
+    track: { trackId: 'exit-state', sourceFamily: 'exit-state' },
+    incumbent: championConfig,
+    maxConfigs: 3,
+    historyEvents: [],
+    budgetPolicy: {},
+    schedulerState: {},
+  });
+  const rejectedFingerprints = selectedSearchBatch.flatMap((variant) => [1.5, 2.5].map((minPredSum) => configFingerprint({
+    ...championConfig,
+    ...variant.patch,
+    minPredSum,
+  })));
+
+  const enforced = autoresearchCli.enforceEntryInvarianceOnSearchBatch({
+    searchBatch: selectedSearchBatch,
+    championConfig,
+    historyEvents: [{ type: 'cycle' }],
+    policy: {
+      mode: 'force-entry-mutation',
+      requiredTouchedKeys,
+      exploitRatio: 1,
+      exploitFamilies: ['risk'],
+      exploreFamilies: ['risk'],
+    },
+    schedulerState: {
+      tabuRejectedFingerprints: rejectedFingerprints.map((fingerprint, index) => (
+        index === 0
+          ? fingerprint
+          : { fingerprint, addedAtCycle: 3, championFingerprint: configFingerprint(championConfig) }
+      )),
+    },
+    entryInvariance: {
+      flagged: true,
+      reason: 'exit_only_drift',
+      untouchedEntryKeys: requiredTouchedKeys,
+    },
+  });
+
+  assert.deepEqual(enforced, []);
 });
 
 test('entry invariance enforcement injects entry mutation after generated exitRegime lane selection', () => {

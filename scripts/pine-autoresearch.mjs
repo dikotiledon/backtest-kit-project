@@ -12,7 +12,7 @@ import {
 } from './lib/pine-promotion-queue.mjs';
 import { classifyPromotionHoldReason, isForceablePromotionStatus, PROMOTION_STATUS } from './lib/pine-promotion-status.mjs';
 import { applyPatchPlan, buildPatchPlan } from './lib/pine-tuner.mjs';
-import { buildIncumbentSearchBatch } from './lib/pine-search-policy.mjs';
+import { buildIncumbentSearchBatch, normalizeTabuFingerprintSet } from './lib/pine-search-policy.mjs';
 import { detectEntryParameterInvariance } from './lib/pine-entry-invariance.mjs';
 import { buildTrackCandidateBatch } from './lib/pine-track-generators.mjs';
 import {
@@ -851,10 +851,10 @@ function filterPatchToKeys(patch = {}, keys = []) {
   return Object.fromEntries(Object.entries(patch).filter(([key]) => allowed.has(key)));
 }
 
-function forcedEntryPatchForBatch({ championConfig, policy = {}, historyEvents = [], schedulerState = {}, requiredTouchedKeys = [] } = {}) {
+function forcedEntryPatchesForBatch({ championConfig, policy = {}, historyEvents = [], schedulerState = {}, requiredTouchedKeys = [] } = {}) {
   const forcedBatch = buildIncumbentSearchBatch({
     incumbent: championConfig,
-    maxConfigs: 1,
+    maxConfigs: Math.max(1, Math.min(8, Math.max(1, requiredTouchedKeys.length) * 2)),
     historyEvents,
     policy: {
       ...policy,
@@ -866,8 +866,18 @@ function forcedEntryPatchForBatch({ championConfig, policy = {}, historyEvents =
     },
     schedulerState,
   });
-  const forcedVariant = forcedBatch.find((variant) => variantTouchesAnyKey(variant, requiredTouchedKeys));
-  return filterPatchToKeys(forcedVariant?.patch, requiredTouchedKeys);
+  const seen = new Set();
+  const patches = [];
+  for (const forcedVariant of forcedBatch) {
+    if (!variantTouchesAnyKey(forcedVariant, requiredTouchedKeys)) continue;
+    const patch = filterPatchToKeys(forcedVariant?.patch, requiredTouchedKeys);
+    if (!Object.keys(patch).some((key) => requiredTouchedKeys.includes(key))) continue;
+    const fingerprint = configFingerprint(patch);
+    if (seen.has(fingerprint)) continue;
+    seen.add(fingerprint);
+    patches.push(patch);
+  }
+  return patches;
 }
 
 function buildUpdatedGeneratedPatchFingerprint({ variant = {}, championConfig = {}, patch = {} } = {}) {
@@ -883,6 +893,42 @@ function buildUpdatedGeneratedPatchFingerprint({ variant = {}, championConfig = 
   return variant?.patchFingerprint ?? variant?.metadata?.patchFingerprint ?? null;
 }
 
+function searchVariantConfigFingerprint({ variant = {}, championConfig = {}, patch = null } = {}) {
+  const config = patch
+    ? { ...(championConfig || {}), ...patch }
+    : (variant?.config || { ...(championConfig || {}), ...(variant?.patch || {}) });
+  return configFingerprint(config);
+}
+
+function variantIsSchedulerTabu({ variant = {}, championConfig = {}, tabuSet = new Set(), patch = null } = {}) {
+  return tabuSet.has(searchVariantConfigFingerprint({ variant, championConfig, patch }));
+}
+
+function filterSchedulerTabuVariants({ batch = [], championConfig = {}, schedulerState = {} } = {}) {
+  const tabuSet = normalizeTabuFingerprintSet(schedulerState?.tabuRejectedFingerprints);
+  if (!tabuSet.size) return batch;
+  return batch.filter((variant) => !variantIsSchedulerTabu({ variant, championConfig, tabuSet }));
+}
+
+function buildEntryEnforcedVariant({ variant = {}, championConfig = {}, entryPatch = {}, requiredTouchedKeys = [] } = {}) {
+  const patch = { ...(variant?.patch || {}), ...entryPatch };
+  const patchFingerprint = buildUpdatedGeneratedPatchFingerprint({ variant, championConfig, patch });
+  return {
+    ...variant,
+    patch,
+    touchedKeys: [...new Set([...normalizeTouchedKeyList(variant?.touchedKeys), ...Object.keys(patch)])],
+    config: { ...(championConfig || {}), ...patch },
+    patchFingerprint,
+    metadata: {
+      ...(variant?.metadata || {}),
+      forcedEntryMutation: true,
+      forcedEntryMutationSource: 'entry-invariance-post-selection',
+      requiredTouchedKeys,
+      patchFingerprint,
+    },
+  };
+}
+
 export function enforceEntryInvarianceOnSearchBatch({
   searchBatch = [],
   championConfig = {},
@@ -895,36 +941,43 @@ export function enforceEntryInvarianceOnSearchBatch({
   if (entryInvariance?.flagged !== true || batch.length === 0) return batch;
 
   const requiredTouchedKeys = normalizeTouchedKeyList(entryInvariance.untouchedEntryKeys || policy.requiredTouchedKeys || []);
-  if (!requiredTouchedKeys.length || batch.some((variant) => variantTouchesAnyKey(variant, requiredTouchedKeys))) return batch;
+  const nonTabuBatch = filterSchedulerTabuVariants({ batch, championConfig, schedulerState });
+  if (!requiredTouchedKeys.length) return nonTabuBatch;
+  if (nonTabuBatch.some((variant) => variantTouchesAnyKey(variant, requiredTouchedKeys))) return nonTabuBatch;
 
-  const entryPatch = forcedEntryPatchForBatch({
+  const entryPatches = forcedEntryPatchesForBatch({
     championConfig,
     policy,
     historyEvents,
     schedulerState,
     requiredTouchedKeys,
   });
-  if (!entryPatch || !Object.keys(entryPatch).some((key) => requiredTouchedKeys.includes(key))) return batch;
+  if (!entryPatches.length) return filterSchedulerTabuVariants({ batch, championConfig, schedulerState });
 
-  return batch.map((variant, index) => {
-    if (index !== 0) return variant;
-    const patch = { ...(variant?.patch || {}), ...entryPatch };
-    const patchFingerprint = buildUpdatedGeneratedPatchFingerprint({ variant, championConfig, patch });
-    return {
-      ...variant,
-      patch,
-      touchedKeys: [...new Set([...normalizeTouchedKeyList(variant?.touchedKeys), ...Object.keys(patch)])],
-      config: { ...(championConfig || {}), ...patch },
-      patchFingerprint,
-      metadata: {
-        ...(variant?.metadata || {}),
-        forcedEntryMutation: true,
-        forcedEntryMutationSource: 'entry-invariance-post-selection',
-        requiredTouchedKeys,
-        patchFingerprint,
-      },
-    };
-  });
+  const tabuSet = normalizeTabuFingerprintSet(schedulerState?.tabuRejectedFingerprints);
+  const finalBatch = [];
+  let entryMutationEmitted = false;
+
+  for (const variant of batch) {
+    if (!entryMutationEmitted) {
+      const enforcedVariant = entryPatches
+        .map((entryPatch) => buildEntryEnforcedVariant({
+          variant,
+          championConfig,
+          entryPatch,
+          requiredTouchedKeys,
+        }))
+        .find((candidate) => !variantIsSchedulerTabu({ variant: candidate, championConfig, tabuSet }));
+      if (!enforcedVariant) continue;
+      finalBatch.push(enforcedVariant);
+      entryMutationEmitted = true;
+      continue;
+    }
+
+    if (!variantIsSchedulerTabu({ variant, championConfig, tabuSet })) finalBatch.push(variant);
+  }
+
+  return entryMutationEmitted ? finalBatch : [];
 }
 
 export function decideQueuedPromotionAction({ queuedItem, manifest, championState, autoAction } = {}) {

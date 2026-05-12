@@ -30,6 +30,7 @@ import { buildLanePatchFingerprint } from '../scripts/lib/pine-lane-novelty.mjs'
 import { selectNextResearchLane } from '../scripts/lib/pine-regime-exit-scheduler.mjs';
 import { buildTrackCandidateBatch } from '../scripts/lib/pine-track-generators.mjs';
 import { buildPromotionQueueItem } from '../scripts/lib/pine-promotion-queue.mjs';
+import { createEvaluationCache } from '../scripts/lib/pine-evaluation-cache.mjs';
 import * as autoresearchCli from '../scripts/pine-autoresearch.mjs';
 import {
   buildScoutOrchestrationState,
@@ -421,6 +422,72 @@ test('evaluateMatrix honors require holdout mode and blocks pending blind holdou
   assert.deepEqual(result.labResults[0].decision.failedGates, ['holdoutVerdict']);
   assert.equal(result.matrixDecision.recommendation, 'hold');
   assert.equal(result.matrixDecision.gates.primaryPromote, false);
+});
+
+test('evaluateMatrix reuses supplied cache for incumbent lab evaluations', async () => {
+  const champion = makeResult({
+    configId: 'champion',
+    score: 100,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.4,
+    maxDrawdownPct: 5,
+    config: { minPredSum: 2 },
+  });
+  const challengerA = makeResult({
+    configId: 'challenger-a',
+    score: 110,
+    tradeCount: 220,
+    roiPct: 55,
+    profitFactor: 1.8,
+    maxDrawdownPct: 5.1,
+    config: { minPredSum: 1.8 },
+  });
+  const challengerB = makeResult({
+    configId: 'challenger-b',
+    score: 112,
+    tradeCount: 225,
+    roiPct: 57,
+    profitFactor: 1.85,
+    maxDrawdownPct: 5.2,
+    config: { minPredSum: 1.7 },
+  });
+  const calls = [];
+  const config = {
+    primaryLab: {
+      labId: 'primary',
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 100,
+        minTradeRatioVsIncumbent: 0.75,
+        significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+      },
+    },
+    shadowLabs: [],
+    blindHoldoutLabs: [],
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+    expectancyPolicy: { enabled: false },
+  };
+  const dependencies = {
+    evaluationCache: createEvaluationCache(),
+    evaluateConfigOnLab: async ({ variantKey, candidate }) => {
+      calls.push(`${variantKey}:${candidate.configId}`);
+      return candidate;
+    },
+  };
+
+  await evaluateMatrix(config, 'run-cache', champion, challengerA, dependencies);
+  await evaluateMatrix(config, 'run-cache', champion, challengerB, dependencies);
+
+  assert.deepEqual(calls, [
+    'champion:champion',
+    'challenger:challenger-a',
+    'challenger:challenger-b',
+  ]);
+  assert.equal(dependencies.evaluationCache.size(), 1);
 });
 
 test('collectTestedGlobalPatchFingerprints reads v2 manifest searchPlan variants for same champion only', () => {

@@ -85,6 +85,7 @@ import {
   buildGlobalMutationBatch,
   buildGlobalPatchFingerprint,
 } from './lib/pine-global-search.mjs';
+import { buildEvaluationCacheKey, createEvaluationCache } from './lib/pine-evaluation-cache.mjs';
 
 export { buildCanonicalConfigFingerprint };
 
@@ -2461,18 +2462,26 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
 
 export async function evaluateMatrix(config, runId, championState, challengerSummary, dependencies = {}) {
   const evaluateConfigOnLabFn = dependencies.evaluateConfigOnLab || evaluateConfigOnLab;
+  const evaluationCache = dependencies.evaluationCache || createEvaluationCache();
   const labs = partitionLabs(config).selectionLabs;
   const sameCandidate = sameConfig(championState.config, challengerSummary?.config);
+  const championConfigFingerprint = buildCanonicalConfigFingerprint(championState.config || {});
   const labResults = [];
 
   for (const lab of labs) {
-    const incumbentResult = await evaluateConfigOnLabFn({
+    const incumbentCacheKey = buildEvaluationCacheKey({
+      runId,
+      labId: lab.labId,
+      variantKey: 'champion',
+      configFingerprint: championConfigFingerprint,
+    });
+    const incumbentResult = await evaluationCache.getOrCompute(incumbentCacheKey, () => evaluateConfigOnLabFn({
       config,
       lab,
       runId,
       variantKey: 'champion',
       candidate: championState,
-    });
+    }));
 
     const challengerResult = sameCandidate
       ? {
@@ -2869,8 +2878,11 @@ export async function runScout(config, dependencies = {}) {
   });
 
   const matrixCandidates = [];
+  const matrixEvaluationCache = createEvaluationCache();
   for (const candidate of paretoShortlist.slice(0, trackedConfig.searchPolicy.matrixCandidateLimit)) {
-    const { labResults, matrixDecision } = await evaluateMatrix(trackedConfig, runId, championState, candidate);
+    const { labResults, matrixDecision } = await evaluateMatrix(trackedConfig, runId, championState, candidate, {
+      evaluationCache: matrixEvaluationCache,
+    });
     const robustness = {
       aggregateScoreDelta: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.scoreDelta || 0), 0),
       aggregateRoiDeltaPct: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.roiDeltaPct || 0), 0),

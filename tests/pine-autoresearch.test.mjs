@@ -68,6 +68,9 @@ import {
   buildGlobalAllParameterExhaustedManifest,
   resolveConsumedBudgetLane,
   resolveLaneBudgetDebtAdvance,
+  buildStagnationEscapeSearchPolicy,
+  resolveSearchEfficiencyExploitExhausted,
+  resolveScoutStagnationEscape,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -3550,6 +3553,47 @@ test('buildScoutOrchestrationState exposes lane budget debt in manifest debug st
   assert.deepEqual(result.manifest.laneBudgetDebt, { exploit: 2, exitRegime: -5, globalAllParameter: 2, robustness: 1 });
 });
 
+test('buildScoutOrchestrationState persists explicit stagnation escape metadata', () => {
+  const championConfig = { minPredSum: 2, adxThreshold: 20 };
+  const stagnationEscape = { mode: 'progressive-widen', reason: 'all-lanes-exhausted' };
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch-stagnation-escape',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+      },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-stagnation-escape',
+    championState: { configId: 'champion', score: 70, config: championConfig },
+    historyEventsBefore: [],
+    searchBatch: [],
+    primarySweep: { topConfigs: [] },
+    matrixCandidates: [],
+    trackState: { stagnationEscape },
+  });
+
+  assert.deepEqual(result.manifest.stagnationEscape, stagnationEscape);
+});
+
+test('applySchedulerStateToManifest preserves explicit stagnation metadata while allowing new escape metadata upstream', () => {
+  const manifest = applySchedulerStateToManifest(
+    { runId: 'run-1', stagnationEscape: { mode: 'progressive-widen' } },
+    { stagnationLevel: 3, stagnationReason: 'noRegimeResearchLane' },
+  );
+
+  assert.deepEqual(manifest.stagnationEscape, { mode: 'progressive-widen' });
+  assert.equal(manifest.stagnationLevel, 3);
+});
+
 test('buildScoutOrchestrationState exposes search efficiency metadata in manifest', () => {
   const championConfig = { minPredSum: 2, adxThreshold: 20 };
   const result = buildScoutOrchestrationState({
@@ -5887,6 +5931,72 @@ test('shouldSkipGlobalAllParameterSweep returns true only for exhausted empty gl
     },
     searchBatch: [],
   }), false);
+});
+
+test('buildStagnationEscapeSearchPolicy extends novelty policy during progressive widen', () => {
+  const priorManifest = { runId: 'prior' };
+  const policy = buildStagnationEscapeSearchPolicy({
+    searchPolicy: { mode: 'incumbent-local', exploitRatio: 0.8 },
+    recentManifestsForNovelty: [priorManifest],
+    stagnationEscape: {
+      mode: 'progressive-widen',
+      allowArchitectureKeys: true,
+      multiKeyMutationCount: 3,
+      ladderScale: 2,
+    },
+  });
+
+  assert.equal(policy.mode, 'incumbent-local');
+  assert.equal(policy.allowArchitectureKeys, true);
+  assert.equal(policy.multiKeyMutationCount, 3);
+  assert.equal(policy.ladderScale, 2);
+  assert.deepEqual(policy.recentManifestsForNovelty, [priorManifest]);
+});
+
+test('resolveSearchEfficiencyExploitExhausted respects real Task 6 exhaustion source metadata', () => {
+  assert.equal(resolveSearchEfficiencyExploitExhausted(null), false);
+  assert.equal(resolveSearchEfficiencyExploitExhausted({ emittedVariantCount: 0 }), true);
+  assert.equal(resolveSearchEfficiencyExploitExhausted({ allCandidatesTabu: true }), true);
+  assert.equal(resolveSearchEfficiencyExploitExhausted({ emittedVariantCount: 0, exhaustionSource: 'regimeLaneScheduler' }), false);
+  assert.equal(resolveSearchEfficiencyExploitExhausted({ allCandidatesTabu: true, exhaustionSource: 'generatedLaneExhaustion' }), false);
+});
+
+test('resolveScoutStagnationEscape uses generated-lane exhaustion and avoids generic no-search false positives', () => {
+  const champion = globalAllParameterChampion('champ-stagnation-escape-resolve');
+  const championConfigFingerprint = buildChampionConfigFingerprint(champion.config);
+  const schedulerState = {
+    stagnationLevel: 3,
+    laneExhaustions: {
+      [championConfigFingerprint]: {
+        globalAllParameter: { lane: 'globalAllParameter', championConfigFingerprint },
+        exitRegime: { lane: 'exitRegime', championConfigFingerprint },
+      },
+    },
+  };
+
+  assert.deepEqual(resolveScoutStagnationEscape({
+    schedulerState,
+    championState: champion,
+    latestManifest: { searchEfficiency: { emittedVariantCount: 0, exhaustionSource: 'regimeLaneScheduler' } },
+  }), {
+    mode: 'exploit-deepen',
+    reason: 'exploit-still-available',
+    allowArchitectureKeys: false,
+    multiKeyMutationCount: 2,
+    ladderScale: 1.25,
+  });
+
+  assert.deepEqual(resolveScoutStagnationEscape({
+    schedulerState,
+    championState: champion,
+    latestManifest: { searchEfficiency: { emittedVariantCount: 0 } },
+  }), {
+    mode: 'progressive-widen',
+    reason: 'all-lanes-exhausted',
+    allowArchitectureKeys: true,
+    multiKeyMutationCount: 3,
+    ladderScale: 2,
+  });
 });
 
 test('buildGlobalAllParameterExhaustedManifest records exhausted globalAllParameter evidence', () => {

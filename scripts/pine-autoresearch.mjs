@@ -86,6 +86,7 @@ import {
   buildGlobalPatchFingerprint,
 } from './lib/pine-global-search.mjs';
 import { buildEvaluationCacheKey, createEvaluationCache } from './lib/pine-evaluation-cache.mjs';
+import { decideStagnationEscapePlan } from './lib/pine-stagnation-escape.mjs';
 import { mapWithConcurrency } from './lib/pine-async-pool.mjs';
 
 export { buildCanonicalConfigFingerprint };
@@ -551,6 +552,7 @@ export function buildGlobalAllParameterExhaustedManifest({
     noNewCandidateStreak: Number(schedulerState?.noNewCandidateStreak ?? 0) + 1,
     stagnationLevel: schedulerState?.stagnationLevel ?? 0,
     stagnationReason: generatedLaneStagnationReason(exhaustedLane),
+    stagnationEscape: trackState.stagnationEscape ?? null,
     globalNoveltyGuardVersion: 1,
     activeTrackId: trackState.activeTrackId ?? null,
     windowSetId: trackState.windowSetId ?? null,
@@ -707,6 +709,7 @@ export function buildNoRegimeResearchLaneManifest({
     noNewCandidateStreak: Number(schedulerState?.noNewCandidateStreak ?? 0) + 1,
     stagnationLevel: schedulerState?.stagnationLevel ?? 0,
     stagnationReason: 'noRegimeResearchLane',
+    stagnationEscape: trackState.stagnationEscape ?? null,
     globalNoveltyGuardVersion: 1,
     activeTrackId: trackState.activeTrackId ?? null,
     windowSetId: trackState.windowSetId ?? null,
@@ -1282,6 +1285,55 @@ function buildSearchEfficiency(searchBatch = [], options = {}) {
   return efficiency;
 }
 
+export function resolveSearchEfficiencyExploitExhausted(previousSearchEfficiency = null) {
+  if (!previousSearchEfficiency || typeof previousSearchEfficiency !== 'object' || Array.isArray(previousSearchEfficiency)) return false;
+  const source = previousSearchEfficiency.exhaustionSource;
+  if (typeof source === 'string' && source.length > 0) {
+    const exploitSearchSources = new Set([
+      'exploitSearchExhaustion',
+      'incumbentSearchExhaustion',
+      'searchPolicyExhaustion',
+      'tabuExhaustion',
+    ]);
+    if (!exploitSearchSources.has(source)) return false;
+  }
+  return previousSearchEfficiency.allCandidatesTabu === true
+    || Number(previousSearchEfficiency.emittedVariantCount) === 0;
+}
+
+export function resolveScoutStagnationEscape({ schedulerState = {}, championState = null, latestManifest = null } = {}) {
+  const championConfigFingerprint = championState?.config
+    ? buildChampionConfigFingerprint(championState.config)
+    : null;
+  const exhaustedLanes = resolveExhaustedResearchLanes({
+    schedulerState,
+    championConfigFingerprint,
+  });
+  const generatedLanesExhausted = exhaustedLanes.includes('globalAllParameter')
+    && exhaustedLanes.includes('exitRegime');
+  const previousSearchEfficiency = latestManifest?.searchEfficiency ?? null;
+  const exploitExhausted = resolveSearchEfficiencyExploitExhausted(previousSearchEfficiency);
+  return decideStagnationEscapePlan({
+    stagnationLevel: schedulerState?.stagnationLevel ?? 0,
+    generatedLanesExhausted,
+    exploitExhausted,
+  });
+}
+
+export function buildStagnationEscapeSearchPolicy({
+  searchPolicy = {},
+  recentManifestsForNovelty = [],
+  stagnationEscape = null,
+} = {}) {
+  return {
+    ...(searchPolicy || {}),
+    recentManifestsForNovelty,
+    allowArchitectureKeys: stagnationEscape?.allowArchitectureKeys === true,
+    multiKeyMutationCount: stagnationEscape?.multiKeyMutationCount ?? 1,
+    ladderScale: stagnationEscape?.ladderScale ?? 1,
+  };
+}
+
 function buildNoSearchEfficiency({ reason, source } = {}) {
   return buildSearchEfficiency([], {
     exhaustionReason: reason,
@@ -1483,6 +1535,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       laneBudgetDebt: trackState.budgetDebt ?? null,
       stagnationLevel: trackState.stagnationLevel ?? 0,
       stagnationReason: trackState.stagnationReason ?? null,
+      stagnationEscape: trackState.stagnationEscape ?? null,
       lastEscalatedAt: trackState.lastEscalatedAt ?? null,
       candidateFingerprint: trackState.candidateFingerprint ?? null,
       candidateFamilyKey: buildCandidateFamilyKey({ config: challengerSummary?.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys }),
@@ -2703,6 +2756,7 @@ export async function runScout(config, dependencies = {}) {
       config: trackedConfig,
       limit: null,
     });
+    const latestManifest = recentManifestsForNovelty.at(-1) ?? null;
     const testedCandidateFingerprints = collectTestedCandidateFingerprintsFromManifests(recentManifestsForNovelty);
     const entryInvariance = buildEntryInvarianceVerdict({
       historyEvents: historyEventsBefore,
@@ -2796,12 +2850,23 @@ export async function runScout(config, dependencies = {}) {
     }, entryInvariance),
   };
 
+  const stagnationEscape = resolveScoutStagnationEscape({
+    schedulerState,
+    championState,
+    latestManifest,
+  });
+  const searchPolicyWithNovelty = buildStagnationEscapeSearchPolicy({
+    searchPolicy: trackedConfig.searchPolicy,
+    recentManifestsForNovelty,
+    stagnationEscape,
+  });
+
   const fallbackSearchBatch = entryInvariance.flagged
     ? buildIncumbentSearchBatch({
         incumbent: championState.config,
         maxConfigs: trackedConfig.maxConfigs,
         historyEvents: historyEventsBefore,
-        policy: trackedConfig.searchPolicy,
+        policy: searchPolicyWithNovelty,
         schedulerState,
       })
     : activeTrack
@@ -2810,22 +2875,18 @@ export async function runScout(config, dependencies = {}) {
           incumbent: championState.config,
           maxConfigs: trackedConfig.maxConfigs,
           historyEvents: historyEventsBefore,
-          budgetPolicy: trackedConfig.searchPolicy,
+          budgetPolicy: searchPolicyWithNovelty,
           schedulerState,
         })
       : buildIncumbentSearchBatch({
           incumbent: championState.config,
           maxConfigs: trackedConfig.maxConfigs,
           historyEvents: historyEventsBefore,
-          policy: trackedConfig.searchPolicy,
+          policy: searchPolicyWithNovelty,
           schedulerState,
         });
   const championSource = { configId: championState.configId, config: championState.config };
   const regimeNoveltyContext = {
-    recentManifestsForNovelty,
-  };
-  const searchPolicyWithNovelty = {
-    ...trackedConfig.searchPolicy,
     recentManifestsForNovelty,
   };
 
@@ -2861,7 +2922,7 @@ export async function runScout(config, dependencies = {}) {
     searchBatch: selectedSearchBatch,
     championConfig: championState.config,
     historyEvents: historyEventsBefore,
-    policy: trackedConfig.searchPolicy,
+    policy: searchPolicyWithNovelty,
     schedulerState,
     entryInvariance,
   });
@@ -2896,6 +2957,7 @@ export async function runScout(config, dependencies = {}) {
         windowSetId,
         rotationTrigger: hardRotationTrigger,
         rotationReason: 'no-regime-research-lane',
+        stagnationEscape,
         candidateFingerprint: championFingerprint,
         championFingerprint,
         labSetId,
@@ -2948,6 +3010,7 @@ export async function runScout(config, dependencies = {}) {
         windowSetId,
         rotationTrigger: hardRotationTrigger,
         rotationReason: exhaustionReason,
+        stagnationEscape,
         candidateFingerprint: championFingerprint,
         championFingerprint,
         labSetId,
@@ -3089,6 +3152,7 @@ export async function runScout(config, dependencies = {}) {
       stagnationLevel: schedulerState.stagnationLevel ?? 0,
       stagnationReason: schedulerState.stagnationReason ?? null,
       lastEscalatedAt: schedulerState.lastEscalatedAt ?? null,
+      stagnationEscape,
       championFingerprint,
       labSetId,
       gridName,

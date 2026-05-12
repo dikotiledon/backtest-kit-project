@@ -62,3 +62,32 @@ test('mapWithConcurrency propagates mapper errors', async () => {
     /boom/,
   );
 });
+
+test('mapWithConcurrency stops scheduling and settles in-flight work before rejecting', async () => {
+  const releases = [defer(), defer(), defer()];
+  const started = [];
+  const settled = [];
+  let caught = false;
+
+  const resultPromise = mapWithConcurrency(['fail', 'slow', 'unscheduled'], 2, async (item, index) => {
+    started.push(index);
+    if (index === 0) throw new Error('boom');
+    await releases[index].promise;
+    settled.push(index);
+    return item;
+  });
+  const observed = resultPromise.catch((error) => {
+    caught = true;
+    return error.message;
+  });
+
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(started, [0, 1]);
+  assert.equal(caught, false);
+
+  releases[1].resolve();
+  assert.equal(await observed, 'boom');
+  assert.equal(caught, true);
+  assert.deepEqual(settled, [1]);
+  assert.deepEqual(started, [0, 1]);
+});

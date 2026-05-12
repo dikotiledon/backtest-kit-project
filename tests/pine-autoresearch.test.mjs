@@ -100,6 +100,29 @@ test('loadConfig preserves searchPolicy tabu policy from file config', async () 
   }
 });
 
+test('loadConfig preserves retention pruneVariantFiles opt-out', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-config-retention-'));
+  const configPath = path.join(dir, 'autoresearch.json');
+
+  try {
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'retention-load-test',
+      scriptPath: 'strategy.pine',
+      grid: 'phase3-core',
+      primaryLab: { labId: 'Primary', symbol: 'XRPUSDT', timeframe: '15m', limit: 120 },
+      outputs: { researchRoot: 'research', digestRoot: 'digest' },
+      retention: { keepLatestRuns: 3, pruneVariantFiles: false },
+    }), 'utf8');
+
+    const config = await loadConfig(dir, configPath, {});
+
+    assert.equal(config.retention.keepLatestRuns, 3);
+    assert.equal(config.retention.pruneVariantFiles, false);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 
 test('loadConfig preserves incumbent search policy mutation bounds and architecture knobs', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-config-policy-'));
@@ -512,41 +535,96 @@ test('evaluateMatrix short-circuits shadow labs when primary cannot promote', as
     config: { minPredSum: 1.8 },
   });
   const calls = [];
-  assert.equal(typeof autoresearchCli.__testOverrides, 'object');
-  autoresearchCli.__testOverrides.evaluateConfigOnLab = async ({ lab, variantKey, candidate }) => {
-    calls.push(`${lab.labId}:${variantKey}`);
-    return candidate;
-  };
-
-  try {
-    const result = await evaluateMatrix({
-      primaryLab: {
-        labId: 'primary',
-        thresholds: {
-          minScoreDelta: 0.25,
-          minRoiDeltaPct: 0,
-          minProfitFactorDelta: 0,
-          maxDrawdownDeltaPct: 0.75,
-          minTradeCount: 100,
-          minTradeRatioVsIncumbent: 0.75,
-          significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
-        },
+  const result = await evaluateMatrix({
+    primaryLab: {
+      labId: 'primary',
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 100,
+        minTradeRatioVsIncumbent: 0.75,
+        significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
       },
-      shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
-      blindHoldoutLabs: [],
-      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
-      expectancyPolicy: { enabled: false },
-      regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
-    }, 'run-primary-hold', champion, challenger);
+    },
+    shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
+    blindHoldoutLabs: [],
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+    expectancyPolicy: { enabled: false },
+    regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
+  }, 'run-primary-hold', champion, challenger, {
+    evaluateConfigOnLab: async ({ lab, variantKey, candidate }) => {
+      calls.push(`${lab.labId}:${variantKey}`);
+      return candidate;
+    },
+  });
 
-    assert.deepEqual(result.labResults.map((entry) => entry.lab.labId), ['primary']);
-    assert.deepEqual(calls, ['primary:champion', 'primary:challenger']);
-    assert.equal(result.labResults[0].decision.recommendation, 'hold');
-    assert.equal(result.matrixDecision.recommendation, 'hold');
-    assert.equal(result.matrixDecision.gates.primaryPromote, false);
-  } finally {
-    delete autoresearchCli.__testOverrides.evaluateConfigOnLab;
-  }
+  assert.deepEqual(result.labResults.map((entry) => entry.lab.labId), ['primary']);
+  assert.deepEqual(calls, ['primary:champion', 'primary:challenger']);
+  assert.equal(result.labResults[0].decision.recommendation, 'hold');
+  assert.equal(result.matrixDecision.recommendation, 'hold');
+  assert.equal(result.matrixDecision.gates.primaryPromote, false);
+});
+
+test('evaluateMatrix still evaluates shadow labs after primary hold when primary promote is optional', async () => {
+  const thresholds = {
+    minScoreDelta: 0.25,
+    minRoiDeltaPct: 0,
+    minProfitFactorDelta: 0,
+    maxDrawdownDeltaPct: 0.75,
+    minTradeCount: 100,
+    minTradeRatioVsIncumbent: 0.75,
+    significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+  };
+  const champion = makeResult({
+    configId: 'champion',
+    score: 100,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.4,
+    maxDrawdownPct: 5,
+    config: { minPredSum: 2 },
+  });
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 85,
+    tradeCount: 210,
+    roiPct: 20,
+    profitFactor: 1.1,
+    maxDrawdownPct: 5.1,
+    config: { minPredSum: 1.8 },
+  });
+  const calls = [];
+
+  const result = await evaluateMatrix({
+    primaryLab: { labId: 'primary', thresholds },
+    shadowLabs: [
+      { labId: 'shadow-one', thresholds },
+      { labId: 'shadow-two', thresholds },
+    ],
+    blindHoldoutLabs: [],
+    matrixPolicy: { requirePrimaryPromote: false, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+    expectancyPolicy: { enabled: false },
+    regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
+  }, 'run-primary-hold-shadow-optional', champion, challenger, {
+    evaluateConfigOnLab: async ({ lab, variantKey, candidate }) => {
+      calls.push(`${lab.labId}:${variantKey}`);
+      return candidate;
+    },
+  });
+
+  assert.deepEqual(result.labResults.map((entry) => entry.lab.labId), ['primary', 'shadow-one', 'shadow-two']);
+  assert.equal(result.labResults[0].decision.recommendation, 'hold');
+  assert.equal(result.matrixDecision.gates.primaryPromote, true);
+  assert.deepEqual(new Set(calls), new Set([
+    'primary:champion',
+    'primary:challenger',
+    'shadow-one:champion',
+    'shadow-one:challenger',
+    'shadow-two:champion',
+    'shadow-two:challenger',
+  ]));
 });
 
 test('collectTestedGlobalPatchFingerprints reads v2 manifest searchPlan variants for same champion only', () => {
@@ -3171,6 +3249,35 @@ test('pruneRunArtifacts deletes stale variant files while retaining latest manif
     await fs.access(path.join(researchRoot, 'run-2-variants.json'));
     await fs.access(path.join(researchRoot, 'run-3-variants.json'));
     await fs.access(path.join(researchRoot, 'run-0-other.json'));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('pruneRunArtifacts honors pruneVariantFiles opt-out', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-variant-prune-opt-out-'));
+  const researchRoot = path.join(dir, 'research');
+  const config = {
+    projectRoot: dir,
+    researchRoot,
+    matrixId: 'matrix-a',
+    retention: { keepLatestRuns: 1, pruneVariantFiles: false },
+  };
+
+  try {
+    await fs.mkdir(manifestsDir(config), { recursive: true });
+    for (const runId of ['run-1', 'run-2']) {
+      await fs.writeFile(path.join(manifestsDir(config), `${runId}.json`), JSON.stringify({ runId }), 'utf8');
+      await fs.writeFile(path.join(researchRoot, `${runId}-variants.json`), JSON.stringify([{ runId }]), 'utf8');
+    }
+    await fs.writeFile(path.join(researchRoot, 'run-x-variants.json'), JSON.stringify([{ runId: 'run-x' }]), 'utf8');
+
+    const result = await pruneRunArtifacts(config);
+
+    assert.deepEqual(result.deleteVariantRunIds, ['run-1', 'run-x']);
+    assert.deepEqual(result.deletedVariantFiles, []);
+    await fs.access(path.join(researchRoot, 'run-1-variants.json'));
+    await fs.access(path.join(researchRoot, 'run-x-variants.json'));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

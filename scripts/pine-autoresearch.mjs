@@ -89,7 +89,6 @@ import { buildEvaluationCacheKey, createEvaluationCache } from './lib/pine-evalu
 import { mapWithConcurrency } from './lib/pine-async-pool.mjs';
 
 export { buildCanonicalConfigFingerprint };
-export const __testOverrides = {};
 
 const DEFAULT_REGIME_EXIT_STATE = {
   enabled: false,
@@ -1945,6 +1944,7 @@ export async function loadConfig(cwd, configPath, overrides = {}) {
       pruneSweepRuns: raw.retention?.pruneSweepRuns ?? true,
       pruneEvaluationRuns: raw.retention?.pruneEvaluationRuns ?? true,
       prunePartialRuns: raw.retention?.prunePartialRuns ?? true,
+      pruneVariantFiles: raw.retention?.pruneVariantFiles ?? true,
     },
     regimeExitResearch: normalizeRegimeExitResearchConfig(raw.regimeExitResearch || {}),
   };
@@ -2493,7 +2493,7 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
 }
 
 export async function evaluateMatrix(config, runId, championState, challengerSummary, dependencies = {}) {
-  const evaluateConfigOnLabFn = dependencies.evaluateConfigOnLab || __testOverrides.evaluateConfigOnLab || evaluateConfigOnLab;
+  const evaluateConfigOnLabFn = dependencies.evaluateConfigOnLab || evaluateConfigOnLab;
   const evaluationCache = dependencies.evaluationCache || createEvaluationCache();
   const labs = partitionLabs(config).selectionLabs;
   const sameCandidate = sameConfig(championState.config, challengerSummary?.config);

@@ -74,16 +74,20 @@ export function summarizePromotionLineage({ historyEvents = [], limit = 12 } = {
   };
 }
 
+function normalizeNumericConfigValue(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 function numericKeysMatch(left, right, numericKeys = []) {
   if (!isPlainObject(left) || !isPlainObject(right) || !Array.isArray(numericKeys) || numericKeys.length === 0) return false;
   for (const key of numericKeys) {
-    const leftValue = left?.[key];
-    const rightValue = right?.[key];
-    if (leftValue === undefined || rightValue === undefined) return false;
-    const leftNumber = Number(leftValue);
-    const rightNumber = Number(rightValue);
-    if (!Number.isFinite(leftNumber) || !Number.isFinite(rightNumber)) return false;
-    if (!Object.is(leftNumber, rightNumber)) return false;
+    const leftValue = normalizeNumericConfigValue(left?.[key]);
+    const rightValue = normalizeNumericConfigValue(right?.[key]);
+    if (leftValue === null || rightValue === null) return false;
+    if (leftValue !== rightValue) return false;
   }
   return true;
 }

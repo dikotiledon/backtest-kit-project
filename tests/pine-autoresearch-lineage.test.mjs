@@ -155,6 +155,46 @@ test('detectPingPongRisk does not match numeric reversal when configured keys ar
   assert.equal(risk.level, 'none');
 });
 
+test('detectPingPongRisk does not coerce null, blank, or boolean values into numeric reversal matches', () => {
+  for (const rawValue of [null, '', '   ', false]) {
+    const risk = detectPingPongRisk({
+      candidateConfig: { tpAtrMult: rawValue, slAtrMult: 0.5 },
+      currentChampionConfig: { tpAtrMult: 7.6, slAtrMult: 0.5 },
+      lineage: {
+        recentTransitions: [
+          {
+            fromConfig: { tpAtrMult: 0, slAtrMult: 0.5 },
+            toConfig: { tpAtrMult: 7.6, slAtrMult: 0.5 },
+          },
+        ],
+      },
+      policy: { numericKeys: ['tpAtrMult', 'slAtrMult'] },
+    });
+
+    assert.equal(risk.blocked, false, `rawValue=${String(rawValue)}`);
+    assert.equal(risk.level, 'none');
+  }
+});
+
+test('detectPingPongRisk treats negative zero and zero as matching numeric config values', () => {
+  const risk = detectPingPongRisk({
+    candidateConfig: { tpAtrMult: -0, slAtrMult: 0.5 },
+    currentChampionConfig: { tpAtrMult: 7.6, slAtrMult: 0.5 },
+    lineage: {
+      recentTransitions: [
+        {
+          fromConfig: { tpAtrMult: 0, slAtrMult: 0.5 },
+          toConfig: { tpAtrMult: 7.6, slAtrMult: 0.5 },
+        },
+      ],
+    },
+    policy: { numericKeys: ['tpAtrMult', 'slAtrMult'] },
+  });
+
+  assert.equal(risk.blocked, true);
+  assert.equal(risk.level, 'numeric-reversal');
+});
+
 test('decideLineagePromotionGate allows risky reversal only with configured extra proof margin', () => {
   const lineage = summarizePromotionLineage({
     historyEvents: [

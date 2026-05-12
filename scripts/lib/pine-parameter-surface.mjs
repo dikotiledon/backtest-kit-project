@@ -208,27 +208,105 @@ function candidateForSpec(spec, config, value) {
       parameterKey: spec.key,
       parameterFamily: spec.family,
       parameterType: spec.type,
+      parameterArchitecture: spec.architecture === true,
     },
   };
 }
 
-function familyCandidates(specs, config, levels) {
+function canonicalPatchKey(patch = {}) {
+  return JSON.stringify(Object.fromEntries(
+    Object.entries(patch).sort(([left], [right]) => compareCodePoints(left, right)),
+  ));
+}
+
+function buildMultiKeyFamilyCandidates(byAxis, config, multiKeyMutationCount) {
+  const requestedKeyCount = Math.max(1, Math.floor(Number(multiKeyMutationCount) || 1));
+  if (requestedKeyCount <= 1) return [];
+
+  const eligibleAxes = byAxis.filter(({ candidates }) => {
+    const first = candidates[0];
+    return first
+      && first.metadata?.parameterArchitecture !== true
+      && first.metadata?.parameterType !== 'bool';
+  });
+  if (eligibleAxes.length < 2) return [];
+
+  const keyCount = Math.min(requestedKeyCount, eligibleAxes.length);
+  const maxAxisDepth = Math.max(0, ...eligibleAxes.map(({ candidates }) => candidates.length));
+  const out = [];
+  const seen = new Set();
+
+  for (let depth = 0; depth < maxAxisDepth; depth += 1) {
+    for (let start = 0; start < eligibleAxes.length; start += 1) {
+      const parts = [];
+      const touched = new Set();
+      for (let offset = 0; offset < keyCount; offset += 1) {
+        const axis = eligibleAxes[(start + offset) % eligibleAxes.length];
+        const candidate = axis.candidates[depth % axis.candidates.length];
+        const key = candidate?.metadata?.parameterKey;
+        if (!candidate || !key || touched.has(key)) continue;
+        parts.push(candidate);
+        touched.add(key);
+      }
+      if (parts.length < 2) continue;
+
+      const patch = Object.assign({}, ...parts.map((candidate) => candidate.patch));
+      const patchKey = canonicalPatchKey(patch);
+      if (seen.has(patchKey)) continue;
+      seen.add(patchKey);
+
+      const touchedKeys = Object.keys(patch).sort(compareCodePoints);
+      out.push({
+        family: parts[0].family,
+        mutationFamily: parts[0].mutationFamily,
+        axis: touchedKeys.join('+'),
+        patch,
+        config: { ...config, ...patch },
+        touchedKeys,
+        metadata: {
+          parameterKey: touchedKeys.join('+'),
+          parameterKeys: touchedKeys,
+          parameterFamily: parts[0].family,
+          parameterType: 'multi',
+          multiKeyMutation: true,
+          multiKeyMutationCount: touchedKeys.length,
+        },
+      });
+    }
+  }
+
+  return out;
+}
+
+function interleaveEscapeCandidates(singleCandidates, multiKeyCandidates) {
+  if (!multiKeyCandidates.length) return singleCandidates;
+  const out = [];
+  if (singleCandidates[0]) out.push(singleCandidates[0]);
+  if (multiKeyCandidates[0]) out.push(multiKeyCandidates[0]);
+  out.push(...singleCandidates.slice(1), ...multiKeyCandidates.slice(1));
+  return out;
+}
+
+function familyCandidates(specs, config, levels, multiKeyMutationCount = 1) {
   const byAxis = [];
   for (const spec of specs) {
     const current = config[spec.key];
     const values = mutationValuesForSpec(spec, current, levels)
       .filter((value) => !Object.is(value, current));
-    if (values.length > 0) byAxis.push(values.map((value) => candidateForSpec(spec, config, value)));
+    if (values.length > 0) byAxis.push({ spec, candidates: values.map((value) => candidateForSpec(spec, config, value)) });
   }
 
   const candidates = [];
-  const maxAxisDepth = Math.max(0, ...byAxis.map((items) => items.length));
+  const maxAxisDepth = Math.max(0, ...byAxis.map(({ candidates: items }) => items.length));
   for (let depth = 0; depth < maxAxisDepth; depth += 1) {
-    for (const axisCandidates of byAxis) {
+    for (const { candidates: axisCandidates } of byAxis) {
       if (axisCandidates[depth]) candidates.push(axisCandidates[depth]);
     }
   }
-  return candidates;
+  return interleaveEscapeCandidates(
+    candidates,
+    buildMultiKeyFamilyCandidates(byAxis, config, multiKeyMutationCount),
+  );
 }
 
 export function parameterSurfaceCatalog({ families = null, includeArchitecture = false } = {}) {
@@ -271,7 +349,7 @@ export function buildParameterLadder({ value, min = null, max = null, step = 1, 
   return values;
 }
 
-export function buildSurfaceMutationCandidates({ champion, incumbent, maxConfigs = 8, families = null, levels = 4, includeArchitecture = false } = {}) {
+export function buildSurfaceMutationCandidates({ champion, incumbent, maxConfigs = 8, families = null, levels = 4, includeArchitecture = false, multiKeyMutationCount = 1 } = {}) {
   const config = sourceConfig(incumbent ?? champion);
   const limit = Math.max(0, Math.floor(Number(maxConfigs) || 0));
   if (limit === 0) return [];
@@ -285,7 +363,7 @@ export function buildSurfaceMutationCandidates({ champion, incumbent, maxConfigs
 
   const queues = [...grouped.entries()]
     .sort(([left], [right]) => familyOrderRank(left) - familyOrderRank(right) || compareCodePoints(left, right))
-    .map(([family, specs]) => ({ family, candidates: familyCandidates(specs, config, levels) }))
+    .map(([family, specs]) => ({ family, candidates: familyCandidates(specs, config, levels, multiKeyMutationCount) }))
     .filter((queue) => queue.candidates.length > 0);
 
   const candidates = [];

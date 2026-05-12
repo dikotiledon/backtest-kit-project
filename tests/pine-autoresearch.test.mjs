@@ -25,6 +25,7 @@ import {
 } from '../scripts/lib/pine-autoresearch.mjs';
 import {
   buildChampionConfigFingerprint,
+  buildGlobalMutationBatch,
   buildGlobalPatchFingerprint,
 } from '../scripts/lib/pine-global-search.mjs';
 import { buildLanePatchFingerprint } from '../scripts/lib/pine-lane-novelty.mjs';
@@ -3594,6 +3595,125 @@ test('applySchedulerStateToManifest preserves explicit stagnation metadata while
   assert.equal(manifest.stagnationLevel, 3);
 });
 
+function maxAbsolutePatchDelta(candidates, key, baseValue) {
+  return Math.max(0, ...candidates
+    .map((candidate) => candidate?.patch?.[key])
+    .filter((value) => Number.isFinite(Number(value)))
+    .map((value) => Math.abs(Number(value) - baseValue)));
+}
+
+test('stagnation escape ladderScale deepens emitted global mutation ladders', () => {
+  const champion = { config: { minPredSum: 2, minBarsBetween: 2, useTrendXConf: false } };
+  const baselinePolicy = buildStagnationEscapeSearchPolicy({
+    searchPolicy: {},
+    stagnationEscape: null,
+  });
+  const widenedPolicy = buildStagnationEscapeSearchPolicy({
+    searchPolicy: {},
+    stagnationEscape: {
+      mode: 'widen-bounds',
+      allowArchitectureKeys: false,
+      multiKeyMutationCount: 1,
+      ladderScale: 3,
+    },
+  });
+
+  const baseline = buildGlobalMutationBatch({
+    champion,
+    maxConfigs: 10,
+    families: ['entry'],
+    variantsPerFamily: 1,
+    policy: baselinePolicy,
+  });
+  const widened = buildGlobalMutationBatch({
+    champion,
+    maxConfigs: 10,
+    families: ['entry'],
+    variantsPerFamily: 1,
+    policy: widenedPolicy,
+  });
+
+  assert.ok(widened.length > baseline.length);
+  assert.ok(
+    maxAbsolutePatchDelta(widened, 'minPredSum', 2) > maxAbsolutePatchDelta(baseline, 'minPredSum', 2),
+    `expected widened ladder to exceed baseline: ${JSON.stringify({ baseline: baseline.map((item) => item.patch), widened: widened.map((item) => item.patch) })}`,
+  );
+});
+
+test('stagnation escape can emit architecture keys only through progressive global widening', () => {
+  const architectureKeys = new Set(['useFusionV2', 'useFusionV3', 'useFusionV4']);
+  const championConfig = {
+    useSignalFusion: true,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    minFusionScore: 2,
+    fusionBonusPerSignal: 1,
+    fusionMaxBonus: 3,
+    fusionPenaltyPerMissing: 1,
+    fusionV4MinAbsPrediction: 2,
+    fusionV4MaxAbsPrediction: 10,
+    fusionV4LongAtrWeight: 0,
+    fusionV4LongEngulfWeight: 0,
+    fusionV4LongEmaWeight: 0,
+    fusionV4ShortAtrWeight: 0,
+    fusionV4ShortEngulfWeight: 0,
+    fusionV4ShortEmaWeight: 0,
+  };
+  const containsArchitecturePatch = (batch) => batch.some((variant) => Object.keys(variant.patch || {})
+    .some((key) => architectureKeys.has(key)));
+
+  const safeBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion: { configId: 'champion', config: championConfig },
+    maxConfigs: 20,
+    policy: buildStagnationEscapeSearchPolicy({
+      searchPolicy: {},
+      stagnationEscape: { mode: 'widen-bounds', allowArchitectureKeys: false, multiKeyMutationCount: 1, ladderScale: 1 },
+    }),
+    regimeExitResearch: { enabled: true },
+  });
+  const progressiveBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion: { configId: 'champion', config: championConfig },
+    maxConfigs: 20,
+    policy: buildStagnationEscapeSearchPolicy({
+      searchPolicy: {},
+      stagnationEscape: { mode: 'progressive-widen', allowArchitectureKeys: true, multiKeyMutationCount: 1, ladderScale: 1 },
+    }),
+    regimeExitResearch: { enabled: true },
+  });
+
+  assert.equal(containsArchitecturePatch(safeBatch), false);
+  assert.equal(containsArchitecturePatch(progressiveBatch), true);
+});
+
+test('stagnation escape multiKeyMutationCount emits safe multi-key generated mutations', () => {
+  const champion = { config: { minPredSum: 2, minBarsBetween: 2, useTrendXConf: false } };
+  const policy = buildStagnationEscapeSearchPolicy({
+    searchPolicy: {},
+    stagnationEscape: {
+      mode: 'widen-bounds',
+      allowArchitectureKeys: false,
+      multiKeyMutationCount: 2,
+      ladderScale: 2,
+    },
+  });
+
+  const batch = buildGlobalMutationBatch({
+    champion,
+    maxConfigs: 6,
+    families: ['entry'],
+    variantsPerFamily: 1,
+    policy,
+  });
+  const multiKey = batch.find((variant) => Object.keys(variant.patch || {}).length > 1);
+
+  assert.ok(multiKey, JSON.stringify(batch.map((variant) => variant.patch)));
+  assert.deepEqual(Object.keys(multiKey.patch).sort(), ['minBarsBetween', 'minPredSum']);
+  assert.equal(multiKey.metadata.multiKeyMutation, true);
+});
+
 test('buildScoutOrchestrationState exposes search efficiency metadata in manifest', () => {
   const championConfig = { minPredSum: 2, adxThreshold: 20 };
   const result = buildScoutOrchestrationState({
@@ -5473,6 +5593,40 @@ test('buildRegimeAwareSearchBatch injects selected exitRegime candidates', () =>
   assert.ok(batch.every((variant) => variant.variantId));
   assert.ok(batch.every((variant) => variant.config));
   assert.ok(batch.every((variant) => variant.patch && Object.keys(variant.patch).length > 0));
+});
+
+
+test('buildRegimeAwareSearchBatch applies stagnation escape knobs to exitRegime generation', () => {
+  const champion = {
+    useRegimeFilter: false,
+    useTrailingStop: true,
+    trailAtrLen: 14,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+    useStopsTP: true,
+    riskAtrLen: 14,
+    slAtrMult: 0.5,
+    tpAtrMult: 7.6,
+  };
+
+  const batch = buildRegimeAwareSearchBatch({
+    selectedLane: 'exitRegime',
+    champion,
+    maxConfigs: 5,
+    policy: buildStagnationEscapeSearchPolicy({
+      searchPolicy: {},
+      stagnationEscape: {
+        mode: 'exploit-deepen',
+        allowArchitectureKeys: false,
+        multiKeyMutationCount: 2,
+        ladderScale: 2,
+      },
+    }),
+    regimeExitResearch: { enabled: true, exitRegimeEnabled: true },
+  });
+
+  assert.ok(batch.some((variant) => Object.keys(variant.patch || {}).length > 1), JSON.stringify(batch.map((variant) => variant.patch)));
+  assert.ok(batch.some((variant) => variant.metadata?.multiKeyMutation === true));
 });
 
 function exitRegimeChampion(configId = 'champ-exit-repeat') {

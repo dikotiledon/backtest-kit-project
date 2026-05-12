@@ -29,6 +29,44 @@ function normalizeMaxConfigs(maxConfigs) {
   return Math.max(0, Math.floor(parsed));
 }
 
+function normalizePositiveNumber(value, fallback = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizePositiveInteger(value, fallback = 1) {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function prioritizeEscapeSurfaceCandidates(candidates = [], policy = {}) {
+  const pool = Array.isArray(candidates) ? candidates : [];
+  if (pool.length <= 1) return pool;
+
+  const promoted = [];
+  const used = new Set();
+  const promoteFirst = (predicate) => {
+    const index = pool.findIndex((candidate, candidateIndex) => !used.has(candidateIndex) && predicate(candidate));
+    if (index >= 0) {
+      used.add(index);
+      promoted.push(pool[index]);
+    }
+  };
+
+  if (normalizePositiveInteger(policy?.multiKeyMutationCount, 1) > 1) {
+    promoteFirst((candidate) => candidate?.metadata?.multiKeyMutation === true);
+  }
+  if (policy?.allowArchitectureKeys === true) {
+    promoteFirst((candidate) => Object.keys(candidate?.patch || {}).some((key) => ARCHITECTURE_BOOLEAN_KEYS.has(key)));
+  }
+
+  if (!promoted.length) return pool;
+  return [
+    ...promoted,
+    ...pool.filter((_, index) => !used.has(index)),
+  ];
+}
+
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
@@ -205,6 +243,9 @@ export function buildGlobalMutationBatch({
   if (limit === 0) return [];
 
   const safeVariantsPerFamily = Math.max(1, Math.floor(Number(variantsPerFamily) || 1));
+  const ladderScale = normalizePositiveNumber(policy?.ladderScale, 1);
+  const surfaceLevels = Math.max(1, Math.ceil(safeVariantsPerFamily * ladderScale));
+  const multiKeyMutationCount = normalizePositiveInteger(policy?.multiKeyMutationCount, 1);
   const testedFingerprints = new Set(
     Array.isArray(testedPatchFingerprints)
       ? testedPatchFingerprints
@@ -222,14 +263,17 @@ export function buildGlobalMutationBatch({
     : (source?.championConfigFingerprint ?? source?.metadata?.championConfigFingerprint ?? null);
   const out = [];
   const lane = 'global-all-parameter';
+  // Progressive architecture escape is intentionally scoped to globalAllParameter.
+  const allowGlobalArchitectureKeys = policy?.allowArchitectureKeys === true;
 
-  const surfaceCandidates = buildSurfaceMutationCandidates({
+  const surfaceCandidates = prioritizeEscapeSurfaceCandidates(buildSurfaceMutationCandidates({
     champion: source,
-    maxConfigs: limit * Math.max(1, safeVariantsPerFamily) * 4,
+    maxConfigs: limit * Math.max(1, surfaceLevels) * 4,
     families: selectedFamilies,
-    levels: safeVariantsPerFamily,
-    includeArchitecture: policy?.allowArchitectureKeys === true,
-  });
+    levels: surfaceLevels,
+    includeArchitecture: allowGlobalArchitectureKeys,
+    multiKeyMutationCount,
+  }), policy);
 
   for (const surfaceCandidate of surfaceCandidates) {
     const family = surfaceCandidate.mutationFamily ?? surfaceCandidate.family;
@@ -238,7 +282,7 @@ export function buildGlobalMutationBatch({
     const normalizedPatch = Object.fromEntries(toPatchEntries(surfaceCandidate.patch || {}));
     const validation = validateGlobalMutationPatch(normalizedPatch, {
       frozenKeys,
-      allowArchitectureKeys: policy?.allowArchitectureKeys === true,
+      allowArchitectureKeys: allowGlobalArchitectureKeys,
     });
     if (!validation.ok) continue;
 

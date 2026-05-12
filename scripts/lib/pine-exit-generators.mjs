@@ -63,15 +63,39 @@ function normalizeMaxConfigs(maxConfigs) {
   return Math.max(0, Math.floor(parsed));
 }
 
+function normalizePositiveNumber(value, fallback = 1) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function normalizePositiveInteger(value, fallback = 1) {
+  const parsed = Math.floor(Number(value));
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function prioritizeEscapeSurfaceCandidates(candidates = [], policy = {}) {
+  if (normalizePositiveInteger(policy?.multiKeyMutationCount, 1) <= 1) return candidates;
+  const index = candidates.findIndex((candidate) => candidate?.metadata?.multiKeyMutation === true);
+  if (index <= 0) return candidates;
+  return [candidates[index], ...candidates.slice(0, index), ...candidates.slice(index + 1)];
+}
+
 function axisPriority(candidate) {
   const index = SUPPORTED_EXIT_PATCH_KEYS.indexOf(candidate?.metadata?.axis);
   return index === -1 ? SUPPORTED_EXIT_PATCH_KEYS.length : index;
 }
 
-function prioritizeFirstPassByAxis(candidates) {
+function prioritizeFirstPassByAxis(candidates, policy = {}) {
   const remaining = [...candidates];
   const prioritized = [];
   const seenAxes = new Set();
+
+  if (normalizePositiveInteger(policy?.multiKeyMutationCount, 1) > 1) {
+    const multiKeyIndex = remaining.findIndex((candidate) => candidate?.metadata?.multiKeyMutation === true);
+    if (multiKeyIndex >= 0) {
+      prioritized.push(remaining.splice(multiKeyIndex, 1)[0]);
+    }
+  }
 
   for (const key of SUPPORTED_EXIT_PATCH_KEYS) {
     const index = remaining.findIndex((candidate) => candidate?.metadata?.axis === key && !seenAxes.has(key));
@@ -135,18 +159,24 @@ function normalizeBase(source) {
   return { config };
 }
 
-export function buildExitFamilyCandidates({ incumbent, champion, regimeSliceId, maxConfigs, testedPatchFingerprints } = {}) {
+export function buildExitFamilyCandidates({ incumbent, champion, regimeSliceId, maxConfigs, testedPatchFingerprints, policy = {} } = {}) {
   const limit = normalizeMaxConfigs(maxConfigs);
   if (limit === 0) return [];
 
   const source = incumbent ?? champion;
   const base = normalizeBase(source);
-  const rawCandidates = buildSurfaceMutationCandidates({
+  const ladderScale = normalizePositiveNumber(policy?.ladderScale, 1);
+  const surfaceLevels = Math.max(1, Math.ceil(6 * ladderScale));
+  const multiKeyMutationCount = normalizePositiveInteger(policy?.multiKeyMutationCount, 1);
+  // Architecture-key escape is intentionally scoped to globalAllParameter; exitRegime
+  // only widens supported exit/risk/state parameters from EXIT_SURFACE_FAMILIES.
+  const rawCandidates = prioritizeEscapeSurfaceCandidates(buildSurfaceMutationCandidates({
     champion: source,
-    maxConfigs: limit * 6,
+    maxConfigs: limit * Math.max(1, surfaceLevels),
     families: EXIT_SURFACE_FAMILIES,
-    levels: 6,
-  })
+    levels: surfaceLevels,
+    multiKeyMutationCount,
+  }), policy)
     .map((item) => {
       const patch = canonicalPatch(item.patch);
       const exitFamily = item.family === 'risk' ? 'atr-stop-take-profit' : item.family;
@@ -173,7 +203,7 @@ export function buildExitFamilyCandidates({ incumbent, champion, regimeSliceId, 
     .filter((item) => validateExitPatch(item.patch).ok);
 
   return filterNovelLaneCandidates({
-    candidates: prioritizeFirstPassByAxis(rawCandidates),
+    candidates: prioritizeFirstPassByAxis(rawCandidates, policy),
     champion: source,
     lane: 'exitRegime',
     testedPatchFingerprints,

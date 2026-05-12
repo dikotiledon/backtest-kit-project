@@ -3193,7 +3193,8 @@ test('planArtifactPrune keeps latest manifest-backed runs and deletes older plus
   assert.deepEqual(result.oldEvaluationRunIds, ['run-2']);
   assert.deepEqual(result.deleteSweepRunIds, ['run-0', 'run-1', 'run-2', 'run-x']);
   assert.deepEqual(result.deleteEvaluationRunIds, ['run-2', 'run-y']);
-  assert.deepEqual(result.oldVariantRunIds, ['run-1', 'run-2', 'run-z']);
+  assert.deepEqual(result.partialVariantRunIds, ['run-z']);
+  assert.deepEqual(result.oldVariantRunIds, ['run-1', 'run-2']);
   assert.deepEqual(result.deleteVariantRunIds, ['run-1', 'run-2', 'run-z']);
 });
 
@@ -3249,6 +3250,39 @@ test('pruneRunArtifacts deletes stale variant files while retaining latest manif
     await fs.access(path.join(researchRoot, 'run-2-variants.json'));
     await fs.access(path.join(researchRoot, 'run-3-variants.json'));
     await fs.access(path.join(researchRoot, 'run-0-other.json'));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('pruneRunArtifacts preserves partial variant files when partial pruning is disabled', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-variant-prune-partial-'));
+  const researchRoot = path.join(dir, 'research');
+  const config = {
+    projectRoot: dir,
+    researchRoot,
+    matrixId: 'matrix-a',
+    retention: { keepLatestRuns: 1, pruneVariantFiles: true, prunePartialRuns: false },
+  };
+
+  try {
+    await fs.mkdir(manifestsDir(config), { recursive: true });
+    for (const runId of ['run-1', 'run-2']) {
+      await fs.writeFile(path.join(manifestsDir(config), `${runId}.json`), JSON.stringify({ runId }), 'utf8');
+      await fs.writeFile(path.join(researchRoot, `${runId}-variants.json`), JSON.stringify([{ runId }]), 'utf8');
+    }
+    await fs.writeFile(path.join(researchRoot, 'run-x-variants.json'), JSON.stringify([{ runId: 'run-x' }]), 'utf8');
+
+    const result = await pruneRunArtifacts(config);
+
+    assert.deepEqual(result.keepRunIds, ['run-2']);
+    assert.deepEqual(result.oldVariantRunIds, ['run-1']);
+    assert.deepEqual(result.partialVariantRunIds, ['run-x']);
+    assert.deepEqual(result.deleteVariantRunIds, ['run-1', 'run-x']);
+    assert.deepEqual(result.deletedVariantFiles, ['run-1-variants.json']);
+    await assert.rejects(() => fs.access(path.join(researchRoot, 'run-1-variants.json')), /ENOENT/);
+    await fs.access(path.join(researchRoot, 'run-2-variants.json'));
+    await fs.access(path.join(researchRoot, 'run-x-variants.json'));
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

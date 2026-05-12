@@ -241,7 +241,8 @@ export function planArtifactPrune({
   const oldSweepRunIds = [...sweepRunIds].filter((runId) => manifestSet.has(runId) && !keepSet.has(runId)).sort();
   const partialEvaluationRunIds = [...evaluationRunIds].filter((runId) => !manifestSet.has(runId)).sort();
   const oldEvaluationRunIds = [...evaluationRunIds].filter((runId) => manifestSet.has(runId) && !keepSet.has(runId)).sort();
-  const oldVariantRunIds = [...variantRunIds].filter((runId) => !keepSet.has(runId)).sort();
+  const partialVariantRunIds = [...variantRunIds].filter((runId) => !manifestSet.has(runId)).sort();
+  const oldVariantRunIds = [...variantRunIds].filter((runId) => manifestSet.has(runId) && !keepSet.has(runId)).sort();
 
   return {
     keepRunIds,
@@ -249,10 +250,11 @@ export function planArtifactPrune({
     oldSweepRunIds,
     partialEvaluationRunIds,
     oldEvaluationRunIds,
+    partialVariantRunIds,
     oldVariantRunIds,
     deleteSweepRunIds: [...new Set([...partialSweepRunIds, ...oldSweepRunIds])].sort(),
     deleteEvaluationRunIds: [...new Set([...partialEvaluationRunIds, ...oldEvaluationRunIds])].sort(),
-    deleteVariantRunIds: [...new Set(oldVariantRunIds)].sort(),
+    deleteVariantRunIds: [...new Set([...partialVariantRunIds, ...oldVariantRunIds])].sort(),
   };
 }
 

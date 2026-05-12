@@ -2146,9 +2146,12 @@ export async function pruneRunArtifacts(config) {
   const deleteEvaluationRunIds = config.retention?.pruneEvaluationRuns
     ? (config.retention?.prunePartialRuns ? plan.deleteEvaluationRunIds : plan.oldEvaluationRunIds)
     : [];
+  const deleteVariantRunIds = config.retention?.prunePartialRuns === false
+    ? plan.oldVariantRunIds
+    : plan.deleteVariantRunIds;
   const deleteVariantFiles = config.retention?.pruneVariantFiles === false
     ? []
-    : plan.deleteVariantRunIds.map((runId) => variantFileByRunId.get(runId)).filter(Boolean).sort();
+    : deleteVariantRunIds.map((runId) => variantFileByRunId.get(runId)).filter(Boolean).sort();
   const deleteFailures = [];
   const deletedSweepRunIds = [];
   const deletedEvaluationRunIds = [];

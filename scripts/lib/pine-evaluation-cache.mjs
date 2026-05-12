@@ -1,7 +1,10 @@
 export function buildEvaluationCacheKey({ runId, labId, variantKey, configFingerprint } = {}) {
-  return [runId, labId, variantKey, configFingerprint]
-    .map((value) => value == null ? '' : String(value))
-    .join('|');
+  return JSON.stringify([
+    runId ?? null,
+    labId ?? null,
+    variantKey ?? null,
+    configFingerprint ?? null,
+  ]);
 }
 
 export function createEvaluationCache() {

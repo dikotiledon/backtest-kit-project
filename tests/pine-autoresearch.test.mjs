@@ -40,6 +40,8 @@ import {
   decideQueuedPromotionAction,
   evaluateMatrix,
   ensureChampionState,
+  listVariantFiles,
+  pruneRunArtifacts,
   latestManifestPath,
   loadConfig,
   manifestsDir,
@@ -488,6 +490,63 @@ test('evaluateMatrix reuses supplied cache for incumbent lab evaluations', async
     'challenger:challenger-b',
   ]);
   assert.equal(dependencies.evaluationCache.size(), 1);
+});
+
+test('evaluateMatrix short-circuits shadow labs when primary cannot promote', async () => {
+  const champion = makeResult({
+    configId: 'champion',
+    score: 100,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.4,
+    maxDrawdownPct: 5,
+    config: { minPredSum: 2 },
+  });
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 85,
+    tradeCount: 210,
+    roiPct: 20,
+    profitFactor: 1.1,
+    maxDrawdownPct: 5.1,
+    config: { minPredSum: 1.8 },
+  });
+  const calls = [];
+  assert.equal(typeof autoresearchCli.__testOverrides, 'object');
+  autoresearchCli.__testOverrides.evaluateConfigOnLab = async ({ lab, variantKey, candidate }) => {
+    calls.push(`${lab.labId}:${variantKey}`);
+    return candidate;
+  };
+
+  try {
+    const result = await evaluateMatrix({
+      primaryLab: {
+        labId: 'primary',
+        thresholds: {
+          minScoreDelta: 0.25,
+          minRoiDeltaPct: 0,
+          minProfitFactorDelta: 0,
+          maxDrawdownDeltaPct: 0.75,
+          minTradeCount: 100,
+          minTradeRatioVsIncumbent: 0.75,
+          significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+        },
+      },
+      shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
+      blindHoldoutLabs: [],
+      matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+      expectancyPolicy: { enabled: false },
+      regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
+    }, 'run-primary-hold', champion, challenger);
+
+    assert.deepEqual(result.labResults.map((entry) => entry.lab.labId), ['primary']);
+    assert.deepEqual(calls, ['primary:champion', 'primary:challenger']);
+    assert.equal(result.labResults[0].decision.recommendation, 'hold');
+    assert.equal(result.matrixDecision.recommendation, 'hold');
+    assert.equal(result.matrixDecision.gates.primaryPromote, false);
+  } finally {
+    delete autoresearchCli.__testOverrides.evaluateConfigOnLab;
+  }
 });
 
 test('collectTestedGlobalPatchFingerprints reads v2 manifest searchPlan variants for same champion only', () => {
@@ -3045,6 +3104,7 @@ test('planArtifactPrune keeps latest manifest-backed runs and deletes older plus
     manifestRunIds: ['run-1', 'run-2', 'run-3', 'run-4'],
     sweepRunIds: ['run-0', 'run-1', 'run-2', 'run-3', 'run-4', 'run-x'],
     evaluationRunIds: ['run-2', 'run-3', 'run-4', 'run-y'],
+    variantRunIds: ['run-1', 'run-2', 'run-3', 'run-4', 'run-z'],
     keepLatestRuns: 2,
   });
 
@@ -3055,6 +3115,8 @@ test('planArtifactPrune keeps latest manifest-backed runs and deletes older plus
   assert.deepEqual(result.oldEvaluationRunIds, ['run-2']);
   assert.deepEqual(result.deleteSweepRunIds, ['run-0', 'run-1', 'run-2', 'run-x']);
   assert.deepEqual(result.deleteEvaluationRunIds, ['run-2', 'run-y']);
+  assert.deepEqual(result.oldVariantRunIds, ['run-1', 'run-2', 'run-z']);
+  assert.deepEqual(result.deleteVariantRunIds, ['run-1', 'run-2', 'run-z']);
 });
 
 test('planArtifactPrune can preserve all manifest-backed runs when keepLatestRuns covers them', () => {
@@ -3071,6 +3133,47 @@ test('planArtifactPrune can preserve all manifest-backed runs when keepLatestRun
   assert.deepEqual(result.partialSweepRunIds, ['run-x']);
   assert.deepEqual(result.deleteSweepRunIds, ['run-x']);
   assert.deepEqual(result.deleteEvaluationRunIds, []);
+});
+
+test('pruneRunArtifacts deletes stale variant files while retaining latest manifest-backed variants', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-variant-prune-'));
+  const researchRoot = path.join(dir, 'research');
+  const config = {
+    projectRoot: dir,
+    researchRoot,
+    matrixId: 'matrix-a',
+    retention: { keepLatestRuns: 2 },
+  };
+
+  try {
+    await fs.mkdir(manifestsDir(config), { recursive: true });
+    for (const runId of ['run-1', 'run-2', 'run-3']) {
+      await fs.writeFile(path.join(manifestsDir(config), `${runId}.json`), JSON.stringify({ runId }), 'utf8');
+    }
+    for (const runId of ['run-1', 'run-2', 'run-3', 'run-x']) {
+      await fs.writeFile(path.join(researchRoot, `${runId}-variants.json`), JSON.stringify([{ runId }]), 'utf8');
+    }
+    await fs.writeFile(path.join(researchRoot, 'run-0-other.json'), '{}', 'utf8');
+
+    assert.deepEqual(await listVariantFiles(config), [
+      'run-1-variants.json',
+      'run-2-variants.json',
+      'run-3-variants.json',
+      'run-x-variants.json',
+    ]);
+
+    const result = await pruneRunArtifacts(config);
+
+    assert.deepEqual(result.keepRunIds, ['run-2', 'run-3']);
+    assert.deepEqual(result.deletedVariantFiles, ['run-1-variants.json', 'run-x-variants.json']);
+    await assert.rejects(() => fs.access(path.join(researchRoot, 'run-1-variants.json')), /ENOENT/);
+    await assert.rejects(() => fs.access(path.join(researchRoot, 'run-x-variants.json')), /ENOENT/);
+    await fs.access(path.join(researchRoot, 'run-2-variants.json'));
+    await fs.access(path.join(researchRoot, 'run-3-variants.json'));
+    await fs.access(path.join(researchRoot, 'run-0-other.json'));
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('buildParetoShortlist keeps non-dominated configs and always retains champion', () => {

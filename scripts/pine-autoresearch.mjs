@@ -86,8 +86,10 @@ import {
   buildGlobalPatchFingerprint,
 } from './lib/pine-global-search.mjs';
 import { buildEvaluationCacheKey, createEvaluationCache } from './lib/pine-evaluation-cache.mjs';
+import { mapWithConcurrency } from './lib/pine-async-pool.mjs';
 
 export { buildCanonicalConfigFingerprint };
+export const __testOverrides = {};
 
 const DEFAULT_REGIME_EXIT_STATE = {
   enabled: false,
@@ -2071,6 +2073,19 @@ async function listManifestFiles(config) {
   }
 }
 
+export async function listVariantFiles(config) {
+  try {
+    const names = await fs.readdir(config.researchRoot);
+    return names.filter((name) => name.endsWith('-variants.json')).sort();
+  } catch {
+    return [];
+  }
+}
+
+function variantRunIdFromFileName(fileName) {
+  return fileName.replace(/-variants\.json$/, '');
+}
+
 async function readLatestManifest(config) {
   const pointer = validateLatestManifestPointer({ root: config.researchRoot });
   if (!pointer.ok) {
@@ -2107,17 +2122,21 @@ async function listRunDirectories(rootDir, prefix = null) {
   }
 }
 
-async function pruneRunArtifacts(config) {
+export async function pruneRunArtifacts(config) {
   const keepLatestRuns = Number(config.retention?.keepLatestRuns ?? 8);
   if (!(keepLatestRuns >= 0)) return null;
 
   const manifestRunIds = (await listManifestFiles(config)).map((name) => name.replace(/\.json$/, ''));
   const sweepRunIds = await listRunDirectories(path.resolve(config.projectRoot, 'pine', 'sweeps'), `${slug(config.matrixId)}-`);
   const evaluationRunIds = await listRunDirectories(evaluationsRoot(config));
+  const variantFiles = await listVariantFiles(config);
+  const variantRunIds = variantFiles.map(variantRunIdFromFileName);
+  const variantFileByRunId = new Map(variantFiles.map((fileName) => [variantRunIdFromFileName(fileName), fileName]));
   const plan = planArtifactPrune({
     manifestRunIds,
     sweepRunIds,
     evaluationRunIds,
+    variantRunIds,
     keepLatestRuns,
   });
 
@@ -2127,9 +2146,13 @@ async function pruneRunArtifacts(config) {
   const deleteEvaluationRunIds = config.retention?.pruneEvaluationRuns
     ? (config.retention?.prunePartialRuns ? plan.deleteEvaluationRunIds : plan.oldEvaluationRunIds)
     : [];
+  const deleteVariantFiles = config.retention?.pruneVariantFiles === false
+    ? []
+    : plan.deleteVariantRunIds.map((runId) => variantFileByRunId.get(runId)).filter(Boolean).sort();
   const deleteFailures = [];
   const deletedSweepRunIds = [];
   const deletedEvaluationRunIds = [];
+  const deletedVariantFiles = [];
 
   for (const runId of deleteSweepRunIds) {
     try {
@@ -2147,11 +2170,20 @@ async function pruneRunArtifacts(config) {
       deleteFailures.push({ kind: 'evaluation', runId, error: error?.message || String(error) });
     }
   }
+  for (const fileName of deleteVariantFiles) {
+    try {
+      await fs.rm(path.join(config.researchRoot, fileName), { force: true });
+      deletedVariantFiles.push(fileName);
+    } catch (error) {
+      deleteFailures.push({ kind: 'variant', fileName, error: error?.message || String(error) });
+    }
+  }
 
   return {
     ...plan,
     deletedSweepRunIds,
     deletedEvaluationRunIds,
+    deletedVariantFiles,
     deleteFailures,
   };
 }
@@ -2461,14 +2493,13 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
 }
 
 export async function evaluateMatrix(config, runId, championState, challengerSummary, dependencies = {}) {
-  const evaluateConfigOnLabFn = dependencies.evaluateConfigOnLab || evaluateConfigOnLab;
+  const evaluateConfigOnLabFn = dependencies.evaluateConfigOnLab || __testOverrides.evaluateConfigOnLab || evaluateConfigOnLab;
   const evaluationCache = dependencies.evaluationCache || createEvaluationCache();
   const labs = partitionLabs(config).selectionLabs;
   const sameCandidate = sameConfig(championState.config, challengerSummary?.config);
   const championConfigFingerprint = buildCanonicalConfigFingerprint(championState.config || {});
-  const labResults = [];
 
-  for (const lab of labs) {
+  const evaluateLabPair = async (lab) => {
     const incumbentCacheKey = buildEvaluationCacheKey({
       runId,
       labId: lab.labId,
@@ -2510,7 +2541,7 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
       promotionPolicy: config.regimeExitResearch?.enabled ? config.regimeExitResearch?.promotion : null,
     });
 
-    labResults.push({
+    return {
       lab,
       incumbent: summarizeResult(incumbentResult),
       challenger: summarizeResult(challengerResult),
@@ -2525,8 +2556,40 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
           rows: challengerResult.rows,
         },
       },
-    });
+    };
+  };
+
+  if (!labs.length) {
+    const labResults = [];
+    return {
+      labResults,
+      matrixDecision: decideMatrixPromotion({
+        labResults,
+        policy: config.matrixPolicy,
+        champion: championState,
+        challenger: challengerSummary,
+      }),
+    };
   }
+
+  const primaryResult = await evaluateLabPair(labs[0]);
+  const requiresPrimaryPromote = config.matrixPolicy?.requirePrimaryPromote !== false;
+  if (requiresPrimaryPromote && primaryResult.decision.recommendation !== 'promote') {
+    const labResults = [primaryResult];
+    return {
+      labResults,
+      matrixDecision: decideMatrixPromotion({
+        labResults,
+        policy: config.matrixPolicy,
+        champion: championState,
+        challenger: challengerSummary,
+      }),
+    };
+  }
+
+  const shadowConcurrency = config.regimeExitResearch?.resource?.maxConcurrentLabWorkers ?? 3;
+  const shadowResults = await mapWithConcurrency(labs.slice(1), shadowConcurrency, evaluateLabPair);
+  const labResults = [primaryResult, ...shadowResults];
 
   return {
     labResults,

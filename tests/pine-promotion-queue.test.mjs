@@ -10,6 +10,7 @@ import {
   readPromotionQueue,
   selectNextPendingPromotion,
 } from '../scripts/lib/pine-promotion-queue.mjs';
+import { classifyPromotionHoldReason } from '../scripts/lib/pine-promotion-status.mjs';
 
 async function makeTempDir() {
   return fs.mkdtemp(path.join(os.tmpdir(), 'pine-promotion-queue-'));
@@ -19,6 +20,12 @@ test('promotionQueuePath stores queue under researchRoot state folder', () => {
   const queuePath = promotionQueuePath({ researchRoot: 'pine/autoresearch/matrix-a' });
 
   assert.equal(queuePath, path.join('pine/autoresearch/matrix-a', 'state', 'promotion-queue.jsonl'));
+});
+
+test('promotion hold reason classification does not mark failed gates as forceable queue blocks', () => {
+  assert.equal(classifyPromotionHoldReason('Auto-promote hold: failed cooldown gate(s).'), 'safety_failed');
+  assert.equal(classifyPromotionHoldReason('Blind holdout failed: premise burn.'), 'holdout_failed');
+  assert.equal(classifyPromotionHoldReason('operator requested manual queue pause'), 'queue_blocked');
 });
 
 test('buildPromotionQueueItem captures exact manifest identity and champion fingerprint', () => {

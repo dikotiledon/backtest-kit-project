@@ -2355,17 +2355,14 @@ test('resolveAutopromoteQueueStatus maps promoted false results to a queue statu
   assert.equal(resolveAutopromoteQueueStatus({ promoted: false, reason: 'promotion_noop' }), 'queue_blocked');
 });
 
-test('canForceQueuedPromotion rejects failed strategy safety gates', () => {
-  assert.equal(canForceQueuedPromotion({ status: 'safety_failed', reason: 'matrix gates failed' }), false);
-  assert.equal(canForceQueuedPromotion({ status: 'expectancy_failed', reason: 'expectancy regression' }), false);
-  assert.equal(canForceQueuedPromotion({ status: 'holdout_failed', reason: 'blind holdout failed' }), false);
-});
-
-test('canForceQueuedPromotion allows only operator recoverable blockers', () => {
-  assert.equal(canForceQueuedPromotion({ status: 'operator_blocked', reason: 'manual queue approval required' }), true);
-  assert.equal(canForceQueuedPromotion({ status: 'queue_blocked', reason: 'queue lock stale' }), true);
-  assert.equal(canForceQueuedPromotion({ status: 'stale', reason: 'already promoted' }), false);
-  assert.equal(canForceQueuedPromotion({ status: 'invalid', reason: 'fingerprint mismatch' }), false);
+test('canForceQueuedPromotion only allows explicit operator or queue blocks', () => {
+  assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'operator_blocked' }), true);
+  assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'queue_blocked' }), true);
+  assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'safety_failed' }), false);
+  assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'expectancy_failed' }), false);
+  assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'holdout_failed' }), false);
+  assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'stale' }), false);
+  assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'invalid' }), false);
 });
 
 test('decideQueuedPromotionAction fails when queued manifest is missing or runId mismatches', () => {

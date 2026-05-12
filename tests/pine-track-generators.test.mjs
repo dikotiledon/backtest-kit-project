@@ -186,6 +186,25 @@ test('track batch skips tabu rejected candidate fingerprints instead of replayin
   assert.equal(filtered[0].tabuSkipped, 1);
 });
 
+test('track batch skips previously tested candidate fingerprints from the search policy', () => {
+  const track = { trackId: 'squeeze-context', sourceFamily: 'squeeze' };
+  const baseline = buildTrackCandidateBatch({ track, incumbent, maxConfigs: 5, historyEvents: [], budgetPolicy: {} });
+  const testedFingerprint = configFingerprint(baseline[0].config);
+
+  const filtered = buildTrackCandidateBatch({
+    track,
+    incumbent,
+    maxConfigs: 5,
+    historyEvents: [],
+    budgetPolicy: { testedCandidateFingerprints: new Set([testedFingerprint]) },
+    schedulerState: {},
+  });
+
+  assert.equal(filtered.length, 4);
+  assert.equal(filtered.some((item) => configFingerprint(item.config) === testedFingerprint), false);
+  assert.equal(filtered[0].tabuSkipped, 1);
+});
+
 test('track batch normalizes object-shaped tabu entries to candidate fingerprints', () => {
   const track = { trackId: 'squeeze-context', sourceFamily: 'squeeze' };
   const baseline = buildTrackCandidateBatch({ track, incumbent, maxConfigs: 5, historyEvents: [], budgetPolicy: {} });

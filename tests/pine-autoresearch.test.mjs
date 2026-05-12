@@ -115,6 +115,38 @@ test('canonical config fingerprint ignores identity-only keys everywhere', () =>
   );
 });
 
+test('collectRecentTestedCandidateFingerprints includes held, promoted, and no-new-candidate variants', () => {
+  const fingerprints = autoresearchCli.collectTestedCandidateFingerprintsFromManifests([
+    { searchPlan: { variants: [{ config: { a: 1 } }, { config: { a: 2 } }] } },
+    { matrixCandidates: [{ challenger: { config: { a: 3 } } }] },
+  ]);
+
+  assert.equal(fingerprints.size, 3);
+  assert.ok(fingerprints.has(autoresearchCli.buildCanonicalConfigFingerprint({ a: 1 })));
+  assert.ok(fingerprints.has(autoresearchCli.buildCanonicalConfigFingerprint({ a: 2 })));
+  assert.ok(fingerprints.has(autoresearchCli.buildCanonicalConfigFingerprint({ a: 3 })));
+});
+
+test('collectTestedCandidateFingerprintsFromManifests includes challenger config and ignores malformed manifests', () => {
+  const fingerprints = autoresearchCli.collectTestedCandidateFingerprintsFromManifests([
+    null,
+    { searchPlan: { variants: [{ config: null }, {}, { config: [] }] } },
+    { matrixCandidates: [null, { challenger: {} }] },
+    { challenger: { config: { a: 4 } } },
+  ]);
+
+  assert.deepEqual([...fingerprints], [autoresearchCli.buildCanonicalConfigFingerprint({ a: 4 })]);
+});
+
+test('collectTestedCandidateFingerprintsFromManifests canonicalizes identity-only metadata', () => {
+  const fingerprints = autoresearchCli.collectTestedCandidateFingerprintsFromManifests([
+    { challenger: { config: { a: 5, configId: 'first', sourceRunId: 'run-a' } } },
+    { searchPlan: { variants: [{ config: { a: 5, configId: 'second', promotedAt: '2026-05-12T00:00:00.000Z' } }] } },
+  ]);
+
+  assert.deepEqual([...fingerprints], [autoresearchCli.buildCanonicalConfigFingerprint({ a: 5 })]);
+});
+
 function psSingleQuote(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
 }

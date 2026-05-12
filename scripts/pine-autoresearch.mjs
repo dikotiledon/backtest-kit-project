@@ -1649,6 +1649,34 @@ export function collectTestedGlobalPatchFingerprints({ champion, historyEvents =
   return fingerprints;
 }
 
+function addTestedConfigFingerprint(fingerprints, config) {
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return;
+  fingerprints.add(buildCanonicalConfigFingerprint(config));
+}
+
+export function collectTestedCandidateFingerprintsFromManifests(manifests = []) {
+  const fingerprints = new Set();
+  if (!Array.isArray(manifests)) return fingerprints;
+
+  for (const manifest of manifests) {
+    if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) continue;
+
+    const variants = Array.isArray(manifest?.searchPlan?.variants) ? manifest.searchPlan.variants : [];
+    for (const variant of variants) {
+      addTestedConfigFingerprint(fingerprints, variant?.config);
+    }
+
+    const matrixCandidates = Array.isArray(manifest?.matrixCandidates) ? manifest.matrixCandidates : [];
+    for (const candidate of matrixCandidates) {
+      addTestedConfigFingerprint(fingerprints, candidate?.challenger?.config);
+    }
+
+    addTestedConfigFingerprint(fingerprints, manifest?.challenger?.config);
+  }
+
+  return fingerprints;
+}
+
 function hasUnsafeManifestRunId(runId) {
   const value = String(runId);
   return value.includes('/') || value.includes('\\') || value.includes('..');
@@ -2521,6 +2549,7 @@ export async function runScout(config, dependencies = {}) {
       config: trackedConfig,
       limit: null,
     });
+    const testedCandidateFingerprints = collectTestedCandidateFingerprintsFromManifests(recentManifestsForNovelty);
     const entryInvariance = buildEntryInvarianceVerdict({
       historyEvents: historyEventsBefore,
       manifests: recentManifestsForNovelty,
@@ -2606,7 +2635,10 @@ export async function runScout(config, dependencies = {}) {
 
   trackedConfig = {
     ...trackedConfig,
-    searchPolicy: buildForcedEntryMutationPolicy(trackedConfig.searchPolicy, entryInvariance),
+    searchPolicy: buildForcedEntryMutationPolicy({
+      ...trackedConfig.searchPolicy,
+      testedCandidateFingerprints,
+    }, entryInvariance),
   };
 
   const fallbackSearchBatch = entryInvariance.flagged

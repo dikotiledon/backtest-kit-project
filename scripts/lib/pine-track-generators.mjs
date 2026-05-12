@@ -1,23 +1,13 @@
 import { sharedKnobKeys as tunerSharedKnobKeys, trackOwnKnobKeys as tunerTrackOwnKnobKeys } from './pine-tuner.mjs';
+import { buildCanonicalConfigFingerprint } from './pine-global-search.mjs';
 import { computeAnnealingState, normalizeTabuFingerprintSet } from './pine-search-policy.mjs';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map((item) => stableValue(item));
-  if (isPlainObject(value)) {
-    return Object.keys(value).sort().reduce((acc, key) => {
-      acc[key] = stableValue(value[key]);
-      return acc;
-    }, {});
-  }
-  return value;
-}
-
 function configFingerprint(config) {
-  return JSON.stringify(stableValue(config || {}));
+  return buildCanonicalConfigFingerprint(config || {});
 }
 
 function isPlainObject(value) {
@@ -331,7 +321,10 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
     ? getFallbackPatchPool(fallbackFamilies, base, { interleave: fallbackInterleave })
     : [];
   const trackLimit = Math.max(0, Math.min(limit, pool.length));
-  const tabuSet = normalizeTabuFingerprintSet(schedulerState.tabuRejectedFingerprints);
+  const tabuSet = new Set([
+    ...normalizeTabuFingerprintSet(schedulerState.tabuRejectedFingerprints),
+    ...normalizeTabuFingerprintSet(budgetPolicy.testedCandidateFingerprints),
+  ]);
   let tabuSkipped = 0;
 
   for (let probe = 0; probe < pool.length && batch.length < trackLimit; probe++) {

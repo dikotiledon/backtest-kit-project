@@ -2,20 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import { buildIncumbentSearchBatch } from '../scripts/lib/pine-search-policy.mjs';
-
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map((item) => stableValue(item));
-  if (value && typeof value === 'object') {
-    return Object.keys(value).sort().reduce((acc, key) => {
-      acc[key] = stableValue(value[key]);
-      return acc;
-    }, {});
-  }
-  return value;
-}
+import { buildCanonicalConfigFingerprint } from '../scripts/lib/pine-global-search.mjs';
 
 function fingerprint(config) {
-  return JSON.stringify(stableValue(config || {}));
+  return buildCanonicalConfigFingerprint(config || {});
 }
 
 function frozenIncumbent(config) {
@@ -104,6 +94,47 @@ test('buildIncumbentSearchBatch keeps legacy string tabu entries blocking candid
 
   assert.equal(variant.tabuSkipped, 1);
   assert.equal(variant.patch.neighborsCount, 40);
+});
+
+test('buildIncumbentSearchBatch skips previously tested candidate fingerprints', () => {
+  const firstBatch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['signal'] },
+    schedulerState: {},
+  });
+  const firstFingerprint = fingerprint(firstBatch[0].config);
+
+  const secondBatch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: {
+      exploitFamilies: ['signal'],
+      testedCandidateFingerprints: new Set([firstFingerprint]),
+    },
+    schedulerState: {},
+  });
+
+  assert.equal(secondBatch.length, 1);
+  assert.notEqual(fingerprint(secondBatch[0].config), firstFingerprint);
+  assert.equal(secondBatch[0].patch.neighborsCount, 40);
+});
+
+test('buildIncumbentSearchBatch fails closed when all signal candidates are tested entries', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: {
+      exploitFamilies: ['signal'],
+      testedCandidateFingerprints: signalFingerprints,
+    },
+    schedulerState: {},
+  });
+
+  assert.deepEqual(batch, []);
 });
 
 test('buildIncumbentSearchBatch reads object tabu entries by fingerprint', () => {

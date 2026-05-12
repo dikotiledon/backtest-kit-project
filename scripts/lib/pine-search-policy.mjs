@@ -1,20 +1,11 @@
+import { buildCanonicalConfigFingerprint } from './pine-global-search.mjs';
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function stableValue(value) {
-  if (Array.isArray(value)) return value.map((item) => stableValue(item));
-  if (value && typeof value === 'object') {
-    return Object.keys(value).sort().reduce((acc, key) => {
-      acc[key] = stableValue(value[key]);
-      return acc;
-    }, {});
-  }
-  return value;
-}
-
 function configFingerprint(config) {
-  return JSON.stringify(stableValue(config || {}));
+  return buildCanonicalConfigFingerprint(config || {});
 }
 
 export function allocateLaneBudget(maxConfigs, exploitRatio = 0.8) {
@@ -67,19 +58,22 @@ function scalePatch(base, patch, temperature) {
   }));
 }
 
-export function normalizeTabuFingerprintSet(value) {
-  if (Array.isArray(value)) {
-    return new Set(value
-      .map((entry) => {
-        if (typeof entry === 'string') return entry;
-        if (entry && typeof entry === 'object' && !Array.isArray(entry) && typeof entry.fingerprint === 'string') {
-          return entry.fingerprint;
-        }
-        return null;
-      })
-      .filter(Boolean));
+function normalizeFingerprintEntry(entry) {
+  if (typeof entry === 'string') return entry;
+  if (entry && typeof entry === 'object' && !Array.isArray(entry) && typeof entry.fingerprint === 'string') {
+    return entry.fingerprint;
   }
-  if (value && typeof value === 'object') return new Set(Object.keys(value));
+  return null;
+}
+
+export function normalizeTabuFingerprintSet(value) {
+  if (value instanceof Set || Array.isArray(value)) {
+    return new Set([...value].map(normalizeFingerprintEntry).filter(Boolean));
+  }
+  if (value && typeof value === 'object') {
+    if (typeof value.fingerprint === 'string') return new Set([value.fingerprint]);
+    return new Set(Object.keys(value));
+  }
   return new Set();
 }
 
@@ -222,7 +216,10 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
   const cycleCount = countCycles(historyEvents);
   const annealingState = computeAnnealingState({ schedulerState, policy });
   const temperature = annealingState.temperature;
-  const tabuSet = normalizeTabuFingerprintSet(schedulerState.tabuRejectedFingerprints);
+  const tabuSet = new Set([
+    ...normalizeTabuFingerprintSet(schedulerState.tabuRejectedFingerprints),
+    ...normalizeTabuFingerprintSet(policy.testedCandidateFingerprints),
+  ]);
 
   const familyPatchMap = {
     signal: signalPatches(base),

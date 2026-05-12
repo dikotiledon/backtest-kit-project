@@ -2243,7 +2243,7 @@ async function rebuildHistoryArtifacts(config, championState) {
   return events;
 }
 
-function buildAutoresearchArtifactWarnings(config) {
+export function buildAutoresearchArtifactWarnings(config) {
   const warnings = [];
   const latestPointer = validateLatestManifestPointer({ root: config.researchRoot });
   if (!latestPointer.ok && latestPointer.reason !== 'latest_missing') {
@@ -2252,7 +2252,10 @@ function buildAutoresearchArtifactWarnings(config) {
 
   const orphanRuns = findOrphanEvaluationRuns({ root: config.researchRoot });
   if (!orphanRuns.ok) {
-    warnings.push(`Found ${orphanRuns.orphans.length} evaluation run(s) without manifest or incomplete marker.`);
+    const orphanRunIds = orphanRuns.orphans
+      .slice(0, 5)
+      .map((orphan) => (typeof orphan === 'string' ? orphan : orphan.runId));
+    warnings.push(`Found ${orphanRuns.orphans.length} evaluation run(s) without manifest or incomplete marker: ${orphanRunIds.join(', ')}.`);
   }
 
   return warnings;

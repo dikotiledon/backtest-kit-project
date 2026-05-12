@@ -4,10 +4,17 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { validateLatestManifestPointer, findOrphanEvaluationRuns } from '../scripts/lib/pine-autoresearch-artifacts.mjs';
+import { buildAutoresearchArtifactWarnings } from '../scripts/pine-autoresearch.mjs';
 import { buildChampionConfigFingerprint, buildGlobalPatchFingerprint } from '../scripts/lib/pine-global-search.mjs';
 
 const repoRoot = path.resolve(import.meta.dirname, '..');
 const configPath = path.join(repoRoot, 'config/pine-autoresearch.default.json');
+const fixtureResearchRoot = path.join(
+  process.cwd(),
+  'pine',
+  'autoresearch',
+  'pine-fusion-v4-core-15m-locked-window',
+);
 
 function readJson(filePath) {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
@@ -610,6 +617,32 @@ test('production artifact invariant catches duplicate collapse by champion confi
   assert.equal(
     violations.find((violation) => violation.code === 'duplicate_global_patch_fingerprint')?.championConfigFingerprint,
     championConfigFingerprint,
+  );
+});
+
+test('latest manifest pointer never resolves to an incomplete run marker', () => {
+  const pointer = validateLatestManifestPointer({ root: fixtureResearchRoot });
+  if (pointer.ok) {
+    assert.notEqual(pointer.manifest?.incomplete, true);
+    assert.ok(pointer.manifest?.runId);
+  }
+});
+
+test('autoresearch artifact warnings mention orphan evaluation runs', () => {
+  const warnings = buildAutoresearchArtifactWarnings({ researchRoot: fixtureResearchRoot });
+  assert.ok(Array.isArray(warnings));
+});
+
+test('autoresearch artifact warnings name orphan evaluation runs actionably', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'pine-artifact-warnings-'));
+  fs.mkdirSync(path.join(root, 'evaluations', 'run-orphan-a'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'evaluations', 'run-orphan-b'), { recursive: true });
+
+  const warnings = buildAutoresearchArtifactWarnings({ researchRoot: root });
+
+  assert.ok(
+    warnings.includes('Found 2 evaluation run(s) without manifest or incomplete marker: run-orphan-a, run-orphan-b.'),
+    JSON.stringify(warnings, null, 2),
   );
 });
 

@@ -1,4 +1,9 @@
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import {
+  buildOfflineDataPreflight,
+  loadConfig as loadAutoresearchConfig,
+} from './pine-autoresearch.mjs';
 import {
   assertDatasetMatchesLab,
   datasetFilePath,
@@ -15,6 +20,10 @@ function parseArgs(argv) {
   const out = { _: [] };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === '-h') {
+      out.help = true;
+      continue;
+    }
     if (!arg.startsWith('--')) {
       out._.push(arg);
       continue;
@@ -49,6 +58,24 @@ function normalizeLab(rawLab, index, role) {
     when: rawLab.when,
     exchange: rawLab.exchange || null,
   };
+}
+
+export function formatDatasetHelp() {
+  return `Usage: node scripts/pine-dataset.mjs <command> [options]
+
+Commands:
+  verify      Verify pinned datasets and cache completeness
+  stage       Materialize pinned datasets into the local candle cache
+  pin         Pin datasets from local cache or network source
+  preflight   Run the same offline preflight used by autoresearch and print readiness JSON
+  help        Show this help
+
+Options:
+  --config <path>   Autoresearch config path
+  --profile <name>  Autoresearch profile for preflight
+  --source <mode>   pin source mode: local-cache, local-first, network
+  --no-stage        Skip staging after pin
+  -h, --help        Show this help`;
 }
 
 async function loadDatasetConfig(cwd, configPath) {
@@ -160,6 +187,13 @@ async function runStage(config) {
   }
 }
 
+async function runPreflight(args) {
+  const config = await loadAutoresearchConfig(process.cwd(), args.config, { profile: args.profile });
+  const summary = await buildOfflineDataPreflight(config);
+  console.log(JSON.stringify(summary, null, 2));
+  if (summary.ok !== true) process.exitCode = 2;
+}
+
 async function runVerify(config) {
   for (const lab of config.labs) {
     const filePath = datasetFilePath(config.pinnedData.datasetsRoot, lab);
@@ -184,7 +218,18 @@ async function runVerify(config) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const command = args._[0] || 'verify';
+  const command = args.help ? 'help' : (args._[0] || 'verify');
+
+  if (command === 'help') {
+    console.log(formatDatasetHelp());
+    return;
+  }
+
+  if (command === 'preflight') {
+    await runPreflight(args);
+    return;
+  }
+
   const config = await loadDatasetConfig(process.cwd(), args.config);
 
   if (command === 'pin') {
@@ -205,7 +250,9 @@ async function main() {
   throw new Error(`Unknown command: ${command}`);
 }
 
-main().catch((err) => {
-  console.error(err?.stack || err?.message || String(err));
-  process.exit(1);
-});
+if (pathToFileURL(process.argv[1] || '').href === import.meta.url) {
+  main().catch((err) => {
+    console.error(err?.stack || err?.message || String(err));
+    process.exit(1);
+  });
+}

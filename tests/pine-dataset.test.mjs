@@ -3,6 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { formatDatasetHelp } from '../scripts/pine-dataset.mjs';
 import {
   assertDatasetMatchesLab,
   expectedCandleTimestamps,
@@ -12,6 +15,20 @@ import {
   validatePinnedCacheComplete,
   writePinnedDataset,
 } from '../scripts/lib/pine-dataset.mjs';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+function runNode(args, { cwd = repoRoot } = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk.toString(); });
+    child.stderr.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', reject);
+    child.on('close', (code) => resolve({ code, stdout, stderr }));
+  });
+}
 
 function makeLab(overrides = {}) {
   return {
@@ -35,6 +52,57 @@ function makeCandles(lab) {
     volume: 1000 + index,
   }));
 }
+
+test('dataset preflight command documents autoresearch readiness, not only cache completeness', () => {
+  const helpText = formatDatasetHelp();
+  assert.match(helpText, /preflight/);
+  assert.match(helpText, /same offline preflight used by autoresearch/);
+});
+
+test('dataset preflight command returns autoresearch offline readiness JSON', async () => {
+  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-dataset-preflight-test-'));
+  const configPath = path.join(tempRoot, 'pine-autoresearch.json');
+
+  try {
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'dataset-preflight-test',
+      scriptPath: 'strategy.pine',
+      grid: 'phase3-core',
+      outputs: { researchRoot: 'research', digestRoot: 'digest' },
+      primaryLab: {
+        labId: 'Primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 2,
+        when: '2026-04-21T10:30:00.000Z',
+      },
+      pinnedData: {
+        enabled: true,
+        cacheRoot: 'cache',
+        exchangeName: 'ccxt-exchange',
+      },
+      regimeExitResearch: {
+        offline: { mode: 'offline-strict' },
+      },
+    }), 'utf8');
+
+    const result = await runNode([
+      path.join(repoRoot, 'scripts', 'pine-dataset.mjs'),
+      'preflight',
+      '--config',
+      configPath,
+    ], { cwd: tempRoot });
+
+    assert.equal(result.code, 2);
+    assert.equal(result.stderr, '');
+    const summary = JSON.parse(result.stdout);
+    assert.equal(summary.ok, false);
+    assert.equal(summary.reason, 'offlineDataMissing');
+    assert.equal(summary.missingLabs[0].symbol, 'XRPUSDT');
+  } finally {
+    await fs.rm(tempRoot, { recursive: true, force: true });
+  }
+});
 
 test('getPinnedWindow aligns when and computes since correctly', () => {
   const window = getPinnedWindow({

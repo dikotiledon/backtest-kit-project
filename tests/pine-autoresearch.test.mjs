@@ -71,6 +71,10 @@ import {
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
+test('autoresearch exports offline data preflight builder for dataset verification parity', () => {
+  assert.equal(typeof autoresearchCli.buildOfflineDataPreflight, 'function');
+});
+
 test('loadConfig preserves searchPolicy tabu policy from file config', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-config-tabu-'));
   const configPath = path.join(dir, 'autoresearch.json');

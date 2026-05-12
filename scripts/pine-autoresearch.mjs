@@ -1990,7 +1990,7 @@ function collectOfflinePreflightLabs(config = {}) {
   return [...uniqueLabs.values()];
 }
 
-async function buildOfflineDataPreflight(config) {
+export async function buildOfflineDataPreflight(config) {
   const plan = buildOfflineDataPlan({
     matrixId: config.matrixId,
     pinnedData: config.pinnedData,

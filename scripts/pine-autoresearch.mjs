@@ -529,7 +529,11 @@ export function buildGlobalAllParameterExhaustedManifest({
       variantCount: 0,
       variants: [],
     },
-    searchEfficiency: buildSearchEfficiency([]),
+    searchEfficiency: buildGeneratedLaneSearchEfficiency({
+      lane: exhaustedLane,
+      reason: exhaustionReason,
+      regimeExitState: normalizedRegimeExitState,
+    }),
     paretoShortlist: [],
     matrixCandidates: [],
     labResults: [],
@@ -602,7 +606,10 @@ export function buildOfflineDataMissingManifest({
       variantCount: 0,
       variants: [],
     },
-    searchEfficiency: buildSearchEfficiency([]),
+    searchEfficiency: buildNoSearchEfficiency({
+      reason: 'offlineDataMissing',
+      source: 'offlineDataPreflight',
+    }),
     paretoShortlist: [],
     matrixCandidates: [],
     labResults: [],
@@ -679,7 +686,10 @@ export function buildNoRegimeResearchLaneManifest({
       variantCount: 0,
       variants: [],
     },
-    searchEfficiency: buildSearchEfficiency([]),
+    searchEfficiency: buildNoSearchEfficiency({
+      reason: noLaneReason,
+      source: 'regimeLaneScheduler',
+    }),
     paretoShortlist: [],
     matrixCandidates: [],
     labResults: [],
@@ -1244,17 +1254,51 @@ export function selectChangedMatrixCandidate({ candidates = [], championState = 
   return selectRobustMatrixCandidate({ candidates: changed });
 }
 
-function buildSearchEfficiency(searchBatch = []) {
+function uniqueStrings(values = []) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .map((value) => String(value || '').trim())
+    .filter(Boolean))];
+}
+
+function buildSearchEfficiency(searchBatch = [], options = {}) {
   const variants = Array.isArray(searchBatch) ? searchBatch : [];
   const emittedVariants = variants.filter((variant) => Boolean(variant) && !variant?.exhaustedFamily);
-  return {
-    variantCount: variants.length,
-    emittedVariantCount: emittedVariants.length,
-    exhaustedFamilies: variants
+  const exhaustedFamilies = uniqueStrings([
+    ...variants
       .filter((variant) => variant?.exhaustedFamily)
       .map((variant) => variant.exhaustedFamily),
-    allCandidatesTabu: emittedVariants.length === 0,
+    ...(Array.isArray(options.exhaustedFamilies) ? options.exhaustedFamilies : []),
+  ]);
+  const explicitAllCandidatesTabu = options.allCandidatesTabu === true
+    || variants.some((variant) => variant?.allCandidatesTabu === true || variant?.metadata?.allCandidatesTabu === true);
+  const efficiency = {
+    variantCount: variants.length,
+    emittedVariantCount: emittedVariants.length,
+    exhaustedFamilies,
+    allCandidatesTabu: emittedVariants.length === 0 && explicitAllCandidatesTabu,
   };
+  if (options.exhaustionReason) efficiency.exhaustionReason = options.exhaustionReason;
+  if (options.exhaustionSource) efficiency.exhaustionSource = options.exhaustionSource;
+  return efficiency;
+}
+
+function buildNoSearchEfficiency({ reason, source } = {}) {
+  return buildSearchEfficiency([], {
+    exhaustionReason: reason,
+    exhaustionSource: source,
+  });
+}
+
+function buildGeneratedLaneSearchEfficiency({ lane, reason, regimeExitState = {} } = {}) {
+  const generatorSummary = regimeExitState?.shadowRegimeScoreboard?.generatorSummary;
+  const exhaustedFamilies = generatorSummary?.exhausted === true
+    ? [generatorSummary.laneKind || generatorSummary.lane || lane].filter(Boolean)
+    : [];
+  return buildSearchEfficiency([], {
+    exhaustedFamilies,
+    exhaustionReason: reason,
+    exhaustionSource: generatorSummary?.countSource === 'exhausted' ? 'generatedLaneExhaustion' : 'generatedLaneNoSearch',
+  });
 }
 
 export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {}, regimeExitState = DEFAULT_REGIME_EXIT_STATE, entryInvariance = null }) {
@@ -2629,7 +2673,7 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
 
 export async function runScout(config, dependencies = {}) {
   const startedAtMs = Date.now();
-  const withDuration = (manifest) => ({ ...manifest, durationMs: Date.now() - startedAtMs });
+  const withDuration = (manifest) => ({ ...manifest, durationMs: Math.max(0, Date.now() - startedAtMs) });
   const runPrimarySweepFn = dependencies.runPrimarySweep || runPrimarySweep;
   await ensureDirs(config);
   const queue = await readPromotionQueue(promotionQueueFilePath(config));

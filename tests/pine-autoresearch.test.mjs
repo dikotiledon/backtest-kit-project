@@ -3588,7 +3588,7 @@ test('buildScoutOrchestrationState exposes search efficiency metadata in manifes
   });
 });
 
-test('buildScoutOrchestrationState marks empty search batch as all candidates tabu', () => {
+test('buildScoutOrchestrationState does not treat generic empty search batch as all candidates tabu', () => {
   const championConfig = { minPredSum: 2, adxThreshold: 20 };
   const result = buildScoutOrchestrationState({
     config: {
@@ -3618,6 +3618,42 @@ test('buildScoutOrchestrationState marks empty search batch as all candidates ta
     variantCount: 0,
     emittedVariantCount: 0,
     exhaustedFamilies: [],
+    allCandidatesTabu: false,
+  });
+});
+
+test('buildScoutOrchestrationState only marks all candidates tabu from explicit generator signal', () => {
+  const championConfig = { minPredSum: 2, adxThreshold: 20 };
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch-explicit-tabu-efficiency',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+      },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-explicit-tabu-efficiency',
+    championState: { configId: 'champion', score: 70, config: championConfig },
+    historyEventsBefore: [],
+    searchBatch: [
+      { exhaustedFamily: 'signal', allCandidatesTabu: true },
+    ],
+    primarySweep: { topConfigs: [] },
+    matrixCandidates: [],
+  });
+
+  assert.deepEqual(result.manifest.searchEfficiency, {
+    variantCount: 1,
+    emittedVariantCount: 0,
+    exhaustedFamilies: ['signal'],
     allCandidatesTabu: true,
   });
 });
@@ -6151,6 +6187,16 @@ test('runScout skips primary sweep and records selected exitRegime exhaustion wi
     assert.equal(result.manifest.matrixDecision.reason, 'exit-regime-exhausted');
     assert.equal(result.manifest.shadowRegimeScoreboard.selectedLane, 'exitRegime');
     assert.equal(result.manifest.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
+    assert.equal(Number.isInteger(result.manifest.durationMs), true);
+    assert.ok(result.manifest.durationMs >= 0);
+    assert.deepEqual(result.manifest.searchEfficiency, {
+      variantCount: 0,
+      emittedVariantCount: 0,
+      exhaustedFamilies: ['exitRegime'],
+      allCandidatesTabu: false,
+      exhaustionReason: 'exit-regime-exhausted',
+      exhaustionSource: 'generatedLaneExhaustion',
+    });
 
     const variantFilePath = path.join(config.researchRoot, `${result.manifest.runId}-variants.json`);
     assert.equal(await readIfExists(variantFilePath), null);
@@ -6258,6 +6304,14 @@ test('runScout skips primary sweep and updates scheduler state when globalAllPar
     assert.deepEqual(result.manifest.searchPlan.variants, []);
     assert.equal(result.manifest.matrixDecision.reason, 'global-all-parameter-exhausted');
     assert.equal(result.manifest.shadowRegimeScoreboard.generatorSummary.countSource, 'exhausted');
+    assert.deepEqual(result.manifest.searchEfficiency, {
+      variantCount: 0,
+      emittedVariantCount: 0,
+      exhaustedFamilies: ['globalAllParameter'],
+      allCandidatesTabu: false,
+      exhaustionReason: 'global-all-parameter-exhausted',
+      exhaustionSource: 'generatedLaneExhaustion',
+    });
     assert.equal(result.manifestPath, path.join(autoresearchCli.manifestsDir(config), `${result.manifest.runId}.json`));
 
     const variantFilePath = path.join(config.researchRoot, `${result.manifest.runId}-variants.json`);
@@ -6410,6 +6464,8 @@ test('runScout exhausted globalAllParameter finalizes comparable artifacts and m
     assert.equal(cycleEvent.noNewCandidate, true);
     assert.equal(cycleEvent.promotionEligible, false);
     assert.equal(cycleEvent.promotionEligibleReason, 'global-all-parameter-exhausted');
+    assert.equal(cycleEvent.durationMs, result.manifest.durationMs);
+    assert.deepEqual(cycleEvent.searchEfficiency, result.manifest.searchEfficiency);
 
     const scoutMarkdown = await fs.readFile(result.scoutPath, 'utf8');
     assert.match(scoutMarkdown, /Primary sweep: \*\*skipped\*\*/);
@@ -6507,6 +6563,16 @@ test('runScout returns terminal no-lane hold when only globalAllParameter lane i
     assert.equal(result.manifest.shadowRegimeScoreboard.selectedLane, null);
     assert.equal(result.manifest.shadowRegimeScoreboard.noLaneReason, 'all-enabled-lanes-exhausted');
     assert.deepEqual(result.manifest.searchPlan.variants, []);
+    assert.equal(Number.isInteger(result.manifest.durationMs), true);
+    assert.ok(result.manifest.durationMs >= 0);
+    assert.deepEqual(result.manifest.searchEfficiency, {
+      variantCount: 0,
+      emittedVariantCount: 0,
+      exhaustedFamilies: [],
+      allCandidatesTabu: false,
+      exhaustionReason: 'all-enabled-lanes-exhausted',
+      exhaustionSource: 'regimeLaneScheduler',
+    });
     assert.equal(result.scoutPath, path.join(config.digestRoot, `${result.manifest.runId}.md`));
     assert.equal(result.liveDigestPath, path.join(config.digestRoot, 'latest-digest.md'));
     assert.ok(result.pruneResult);
@@ -6530,6 +6596,8 @@ test('runScout returns terminal no-lane hold when only globalAllParameter lane i
     assert.equal(noLaneEvent.steadyState, true);
     assert.equal(noLaneEvent.promotionEligible, false);
     assert.equal(noLaneEvent.promotionEligibleReason, 'no-regime-research-lane');
+    assert.equal(noLaneEvent.durationMs, result.manifest.durationMs);
+    assert.deepEqual(noLaneEvent.searchEfficiency, result.manifest.searchEfficiency);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
@@ -6708,6 +6776,16 @@ test('runScout offline-strict missing branch appends cycle history and returns s
     assert.equal(result.manifest.matrixDecision.recommendation, 'hold');
     assert.equal(result.manifest.matrixDecision.reason, 'offlineDataMissing');
     assert.equal(result.manifest.offlineDataSummary.reason, 'offlineDataMissing');
+    assert.equal(Number.isInteger(result.manifest.durationMs), true);
+    assert.ok(result.manifest.durationMs >= 0);
+    assert.deepEqual(result.manifest.searchEfficiency, {
+      variantCount: 0,
+      emittedVariantCount: 0,
+      exhaustedFamilies: [],
+      allCandidatesTabu: false,
+      exhaustionReason: 'offlineDataMissing',
+      exhaustionSource: 'offlineDataPreflight',
+    });
 
     const latest = JSON.parse(await fs.readFile(path.join(config.researchRoot, 'latest.json'), 'utf8'));
     assert.equal(latest.manifestPath, result.manifestPath);
@@ -6716,6 +6794,8 @@ test('runScout offline-strict missing branch appends cycle history and returns s
     const persistedManifest = JSON.parse(await fs.readFile(result.manifestPath, 'utf8'));
     assert.equal(persistedManifest.runId, result.manifest.runId);
     assert.equal(persistedManifest.matrixDecision.reason, 'offlineDataMissing');
+    assert.equal(persistedManifest.durationMs, result.manifest.durationMs);
+    assert.deepEqual(persistedManifest.searchEfficiency, result.manifest.searchEfficiency);
 
     const scoutMarkdown = await fs.readFile(result.scoutPath, 'utf8');
     assert.match(scoutMarkdown, /Primary sweep: \*\*skipped\*\*/);
@@ -6738,6 +6818,8 @@ test('runScout offline-strict missing branch appends cycle history and returns s
     assert.equal(cycleEvent.promotionEligibleReason, 'offlineDataMissing');
     assert.equal(cycleEvent.offlineDataSummary.reason, 'offlineDataMissing');
     assert.equal(cycleEvent.runId, result.manifest.runId);
+    assert.equal(cycleEvent.durationMs, result.manifest.durationMs);
+    assert.deepEqual(cycleEvent.searchEfficiency, result.manifest.searchEfficiency);
 
     const missingLab = cycleEvent.offlineDataSummary.missingLabs[0];
     assert.ok(missingLab);

@@ -2358,6 +2358,10 @@ test('resolveAutopromoteQueueStatus maps promoted false results to a queue statu
 test('canForceQueuedPromotion only allows explicit operator or queue blocks', () => {
   assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'operator_blocked' }), true);
   assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'queue_blocked' }), true);
+  assert.equal(autoresearchCli.canForceQueuedPromotion(null), false);
+  assert.equal(autoresearchCli.canForceQueuedPromotion(undefined), false);
+  assert.equal(autoresearchCli.canForceQueuedPromotion({}), false);
+  assert.equal(autoresearchCli.canForceQueuedPromotion({ status: null }), false);
   assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'safety_failed' }), false);
   assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'expectancy_failed' }), false);
   assert.equal(autoresearchCli.canForceQueuedPromotion({ status: 'holdout_failed' }), false);

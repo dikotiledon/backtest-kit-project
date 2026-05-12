@@ -231,6 +231,7 @@ export function buildRegimeAwareSearchBatch({
     const candidates = buildGlobalMutationBatch({
       champion,
       maxConfigs: safeMaxConfigs,
+      frozenKeys: resolveGlobalMutationFrozenKeys(policy),
       historyEvents,
       schedulerState,
       policy,
@@ -841,6 +842,13 @@ function normalizeTouchedKeyList(value) {
   if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
   if (typeof value === 'string') return value.split(/[\s,]+/).map((item) => item.trim()).filter(Boolean);
   return [];
+}
+
+function resolveGlobalMutationFrozenKeys(policy = {}) {
+  return [...new Set([
+    ...normalizeTouchedKeyList(policy?.frozenKeys),
+    ...normalizeTouchedKeyList(policy?.frozenArchitectureKeys),
+  ])];
 }
 
 function normalizePatchBounds(value) {

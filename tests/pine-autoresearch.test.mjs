@@ -3683,9 +3683,62 @@ test('stagnation escape can emit architecture keys only through progressive glob
     }),
     regimeExitResearch: { enabled: true },
   });
+  const exitRegimeBatch = buildRegimeAwareSearchBatch({
+    selectedLane: 'exitRegime',
+    champion: { configId: 'champion', config: championConfig },
+    maxConfigs: 20,
+    policy: buildStagnationEscapeSearchPolicy({
+      searchPolicy: {},
+      stagnationEscape: { mode: 'progressive-widen', allowArchitectureKeys: true, multiKeyMutationCount: 1, ladderScale: 1 },
+    }),
+    regimeExitResearch: { enabled: true },
+  });
 
   assert.equal(containsArchitecturePatch(safeBatch), false);
   assert.equal(containsArchitecturePatch(progressiveBatch), true);
+  assert.equal(containsArchitecturePatch(exitRegimeBatch), false);
+});
+
+test('stagnation escape progressive global widening honors frozen architecture keys', () => {
+  const architectureKeys = new Set(['useFusionV2', 'useFusionV3', 'useFusionV4']);
+  const championConfig = {
+    useSignalFusion: true,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    minFusionScore: 2,
+    fusionBonusPerSignal: 1,
+    fusionMaxBonus: 3,
+    fusionPenaltyPerMissing: 1,
+    fusionV4MinAbsPrediction: 2,
+    fusionV4MaxAbsPrediction: 10,
+    fusionV4LongAtrWeight: 0,
+    fusionV4LongEngulfWeight: 0,
+    fusionV4LongEmaWeight: 0,
+    fusionV4ShortAtrWeight: 0,
+    fusionV4ShortEngulfWeight: 0,
+    fusionV4ShortEmaWeight: 0,
+  };
+  const batch = buildRegimeAwareSearchBatch({
+    selectedLane: 'globalAllParameter',
+    champion: { configId: 'champion', config: championConfig },
+    maxConfigs: 80,
+    policy: buildStagnationEscapeSearchPolicy({
+      searchPolicy: { frozenArchitectureKeys: ['useFusionV2'] },
+      stagnationEscape: { mode: 'progressive-widen', allowArchitectureKeys: true, multiKeyMutationCount: 1, ladderScale: 1 },
+    }),
+    regimeExitResearch: { enabled: true },
+  });
+  const architecturePatches = batch
+    .map((variant) => variant.patch || {})
+    .filter((patch) => Object.keys(patch).some((key) => architectureKeys.has(key)));
+
+  assert.ok(architecturePatches.length > 0, JSON.stringify(batch.map((variant) => variant.patch)));
+  assert.equal(batch.some((variant) => Object.hasOwn(variant.patch || {}, 'useFusionV2')), false);
+  assert.ok(
+    architecturePatches.some((patch) => Object.hasOwn(patch, 'useFusionV3') || Object.hasOwn(patch, 'useFusionV4')),
+    JSON.stringify(architecturePatches),
+  );
 });
 
 test('stagnation escape multiKeyMutationCount emits safe multi-key generated mutations', () => {

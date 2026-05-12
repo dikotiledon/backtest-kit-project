@@ -178,6 +178,53 @@ test('buildIncumbentSearchBatch uses hot annealing for bounded diverse patches',
   }
 });
 
+test('buildIncumbentSearchBatch does not replay duplicate final configs within one batch', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 20,
+    historyEvents: [],
+    policy: { exploitRatio: 1, exploitFamilies: ['signal'] },
+    schedulerState: {},
+  });
+  const fingerprints = batch.map((variant) => fingerprint(variant.config));
+
+  assert.equal(batch.length, 12);
+  assert.equal(new Set(fingerprints).size, fingerprints.length);
+});
+
+test('buildIncumbentSearchBatch hot annealing keeps default signal bounds off reckless edges', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 12,
+    historyEvents: [],
+    policy: {
+      exploitRatio: 1,
+      exploitFamilies: ['signal'],
+      annealing: { enabled: true, baseTemperature: 0.5, growthFactor: 2, maxTemperature: 4 },
+    },
+    schedulerState: { noChangeStreak: 4 },
+  });
+
+  assert.equal(batch.length, 12);
+  for (const variant of batch) {
+    if (Object.hasOwn(variant.patch, 'neighborsCount')) {
+      assert.ok(variant.patch.neighborsCount >= 12, `neighborsCount was ${variant.patch.neighborsCount}`);
+    }
+    if (Object.hasOwn(variant.patch, 'minPredSum')) {
+      assert.ok(variant.patch.minPredSum >= 1, `minPredSum was ${variant.patch.minPredSum}`);
+    }
+    if (Object.hasOwn(variant.patch, 'h')) {
+      assert.ok(variant.patch.h >= 4, `h was ${variant.patch.h}`);
+    }
+    if (Object.hasOwn(variant.patch, 'r')) {
+      assert.ok(variant.patch.r >= 2, `r was ${variant.patch.r}`);
+    }
+    if (Object.hasOwn(variant.patch, 'x')) {
+      assert.ok(variant.patch.x >= 15, `x was ${variant.patch.x}`);
+    }
+  }
+});
+
 test('buildIncumbentSearchBatch freezes architecture from champion values instead of defaults', () => {
   const champion = {
     ...incumbent,

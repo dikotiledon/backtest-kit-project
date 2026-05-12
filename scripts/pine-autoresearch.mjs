@@ -825,6 +825,11 @@ function normalizeTouchedKeyList(value) {
   return [];
 }
 
+function normalizePatchBounds(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return clone(value);
+}
+
 function summarizeChallengerSignalMetrics(challenger = {}) {
   return {
     configId: challenger?.configId ?? null,
@@ -1821,6 +1826,10 @@ export async function loadConfig(cwd, configPath, overrides = {}) {
   const selectedProfile = overrides.profile || raw.defaultProfile || 'full';
   const profileSettings = raw.scoutProfiles?.[selectedProfile] || null;
 
+  const rawSearchPolicy = raw.searchPolicy || {};
+  const frozenArchitectureKeys = normalizeTouchedKeyList(rawSearchPolicy.frozenArchitectureKeys);
+  const patchBounds = normalizePatchBounds(rawSearchPolicy.patchBounds);
+
   const legacyPrimary = {
     labId: raw.labId || raw.matrixId || 'primary',
     symbol: overrides.symbol || raw.symbol,
@@ -1850,17 +1859,19 @@ export async function loadConfig(cwd, configPath, overrides = {}) {
     maxConfigs: overrides.maxConfigs ? Number(overrides.maxConfigs) : (profileSettings?.maxConfigs ?? raw.maxConfigs ?? null),
     minTrades: overrides.minTrades ? Number(overrides.minTrades) : (profileSettings?.minTrades ?? raw.minTrades ?? 10),
     searchPolicy: {
-      mode: raw.searchPolicy?.mode || 'incumbent-local',
-      exploitRatio: raw.searchPolicy?.exploitRatio ?? 0.8,
-      freezeArchitecture: raw.searchPolicy?.freezeArchitecture ?? true,
-      exploitFamilies: raw.searchPolicy?.exploitFamilies || ['signal', 'risk'],
-      exploreFamilies: raw.searchPolicy?.exploreFamilies || ['signal'],
-      paretoShortlistSize: raw.searchPolicy?.paretoShortlistSize ?? 4,
-      matrixCandidateLimit: raw.searchPolicy?.matrixCandidateLimit ?? 3,
-      annealing: raw.searchPolicy?.annealing || {},
-      selfLoopEscape: raw.searchPolicy?.selfLoopEscape || {},
-      ...(raw.searchPolicy?.tabu && typeof raw.searchPolicy.tabu === 'object' && !Array.isArray(raw.searchPolicy.tabu)
-        ? { tabu: { ...raw.searchPolicy.tabu } }
+      mode: rawSearchPolicy.mode || 'incumbent-local',
+      exploitRatio: rawSearchPolicy.exploitRatio ?? 0.8,
+      freezeArchitecture: rawSearchPolicy.freezeArchitecture ?? true,
+      exploitFamilies: rawSearchPolicy.exploitFamilies || ['signal', 'risk'],
+      exploreFamilies: rawSearchPolicy.exploreFamilies || ['signal'],
+      paretoShortlistSize: rawSearchPolicy.paretoShortlistSize ?? 4,
+      matrixCandidateLimit: rawSearchPolicy.matrixCandidateLimit ?? 3,
+      annealing: rawSearchPolicy.annealing || {},
+      selfLoopEscape: rawSearchPolicy.selfLoopEscape || {},
+      ...(frozenArchitectureKeys.length ? { frozenArchitectureKeys } : {}),
+      ...(patchBounds ? { patchBounds } : {}),
+      ...(rawSearchPolicy.tabu && typeof rawSearchPolicy.tabu === 'object' && !Array.isArray(rawSearchPolicy.tabu)
+        ? { tabu: { ...rawSearchPolicy.tabu } }
         : {}),
     },
     seedChampionPath: resolveMaybeRelative(baseDir, raw.seedChampion?.path || raw.incumbent?.path),

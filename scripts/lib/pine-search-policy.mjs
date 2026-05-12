@@ -21,13 +21,13 @@ const LEGACY_ARCHITECTURE_DEFAULTS = {
 const DEFAULT_FROZEN_ARCHITECTURE_KEYS = Object.keys(LEGACY_ARCHITECTURE_DEFAULTS);
 
 const DEFAULT_PATCH_BOUNDS = {
-  neighborsCount: [1, 128],
+  neighborsCount: [12, 128],
   adxThreshold: [0, 30],
-  minPredSum: [0, 10],
+  minPredSum: [1, 10],
   minBarsBetween: [0, 50],
-  h: [1, 128],
-  r: [1, 128],
-  x: [1, 128],
+  h: [4, 128],
+  r: [2, 128],
+  x: [15, 128],
   slAtrMult: [0.25, 10],
   tpAtrMult: [0.25, 20],
   trailAtrMult: [0.25, 10],
@@ -354,6 +354,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
     index = picked.nextIndex;
     if (!picked.variant) continue;
     batch.push(picked.variant);
+    tabuSet.add(configFingerprint(picked.variant.config));
   }
 
   for (let exploreIndex = 0; exploreIndex < explore; exploreIndex++) {
@@ -374,6 +375,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
     });
     if (!picked.variant) continue;
     batch.push(picked.variant);
+    tabuSet.add(configFingerprint(picked.variant.config));
   }
 
   return batch;

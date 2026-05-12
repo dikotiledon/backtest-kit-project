@@ -97,6 +97,42 @@ test('loadConfig preserves searchPolicy tabu policy from file config', async () 
   }
 });
 
+
+test('loadConfig preserves incumbent search policy mutation bounds and architecture knobs', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-config-policy-'));
+  const configPath = path.join(dir, 'autoresearch.json');
+
+  try {
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'policy-load-test',
+      scriptPath: 'strategy.pine',
+      grid: 'phase3-core',
+      primaryLab: { labId: 'Primary', symbol: 'XRPUSDT', timeframe: '15m', limit: 120 },
+      outputs: { researchRoot: 'research', digestRoot: 'digest' },
+      searchPolicy: {
+        mode: 'incumbent-local',
+        freezeArchitecture: false,
+        frozenArchitectureKeys: 'useSignalFusion,useFusionV4',
+        patchBounds: {
+          minPredSum: [1.25, 8],
+          neighborsCount: { min: 16, max: 96 },
+        },
+      },
+    }), 'utf8');
+
+    const config = await loadConfig(dir, configPath, {});
+
+    assert.equal(config.searchPolicy.freezeArchitecture, false);
+    assert.deepEqual(config.searchPolicy.frozenArchitectureKeys, ['useSignalFusion', 'useFusionV4']);
+    assert.deepEqual(config.searchPolicy.patchBounds, {
+      minPredSum: [1.25, 8],
+      neighborsCount: { min: 16, max: 96 },
+    });
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('canonical config fingerprint ignores identity-only keys everywhere', () => {
   const semantic = { tpAtrMult: 7.6, slAtrMult: 0.5, useFusionV4: true };
   const withIdentity = {

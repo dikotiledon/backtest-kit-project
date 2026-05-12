@@ -2860,6 +2860,55 @@ test('decideAutoPromotionAction blocks when candidate is unchanged', () => {
   assert.deepEqual(result.failedGates, ['candidateChanged']);
 });
 
+test('decideAutoPromotionAction blocks numeric ping-pong reversal without exact fingerprint match', () => {
+  const result = decideAutoPromotionAction({
+    latestManifest: {
+      challenger: { configId: 'old-b-v2', config: { tpAtrMult: 10.6, slAtrMult: 0.5 } },
+      candidateFingerprint: 'fp-b-v2',
+      candidateFamilyKey: 'family-b',
+      championFingerprint: 'fp-c-v2',
+      championFamilyKey: 'family-c',
+      matrixDecision: {
+        recommendation: 'promote',
+        counts: { shadowPassCount: 3, shadowPassRatio: 0.6 },
+      },
+      robustness: { aggregateScoreDelta: 2, aggregateRoiDeltaPct: 1, aggregateProfitFactorDelta: 0.03 },
+    },
+    championState: { configId: 'current-c', config: { tpAtrMult: 7.6, slAtrMult: 0.5 }, configFingerprint: 'fp-c-v2' },
+    historyEvents: [
+      {
+        type: 'promote',
+        timestamp: '2026-05-03T00:00:00.000Z',
+        fromFingerprint: 'fp-b-original',
+        toFingerprint: 'fp-c-original',
+        fromFamilyKey: 'other-family-b',
+        toFamilyKey: 'other-family-c',
+        fromConfig: { tpAtrMult: 10.6, slAtrMult: 0.5 },
+        toConfig: { tpAtrMult: 7.6, slAtrMult: 0.5 },
+      },
+    ],
+    policy: {
+      enabled: true,
+      cooldownHours: 0,
+      maxPromotionsPerDay: 10,
+      requireMatrixPromotion: true,
+      lineagePolicy: {
+        enabled: true,
+        lookbackPromotions: 5,
+        numericKeys: ['tpAtrMult', 'slAtrMult'],
+        baseShadowPassCount: 3,
+        directReversalExtraShadowPasses: 1,
+        minExtraAggregateScoreDelta: 5,
+      },
+    },
+    now: '2026-05-03T06:00:00.000Z',
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.equal(result.gates.lineage, false);
+  assert.equal(result.lineage.risk.level, 'numeric-reversal');
+});
+
 test('decideAutoPromotionAction blocks direct ping-pong reversal without extra margin', () => {
   const result = decideAutoPromotionAction({
     latestManifest: {
@@ -5147,6 +5196,22 @@ test('runPromote preserves explicit manifest override when latest pointer is inv
   }
 });
 
+test('buildPromotionHistoryEvent carries configs for lineage reversal checks', () => {
+  const event = autoresearchCli.buildPromotionHistoryEvent({
+    previousChampionState: { configId: 'champion-a', config: { tpAtrMult: 7.6, slAtrMult: 0.5 } },
+    challengerSummary: { configId: 'challenger-b', config: { tpAtrMult: 10.6, slAtrMult: 0.5 } },
+    runId: 'run-1',
+    promotedAt: '2026-05-03T00:00:00.000Z',
+  });
+
+  assert.equal(event.type, 'promote');
+  assert.equal(event.runId, 'run-1');
+  assert.deepEqual(event.fromConfig, { tpAtrMult: 7.6, slAtrMult: 0.5 });
+  assert.deepEqual(event.toConfig, { tpAtrMult: 10.6, slAtrMult: 0.5 });
+  assert.ok(event.fromFingerprint);
+  assert.ok(event.toFingerprint);
+});
+
 test('promotion history event records from/to fingerprints and family keys', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-lineage-promote-'));
   try {
@@ -5192,6 +5257,8 @@ test('promotion history event records from/to fingerprints and family keys', asy
     assert.equal(history.toFingerprint, 'fp-b');
     assert.equal(history.fromFamilyKey, 'family-a');
     assert.equal(history.toFamilyKey, 'family-b');
+    assert.deepEqual(history.fromConfig, { minPredSum: 1.8 });
+    assert.deepEqual(history.toConfig, { minPredSum: 1.6 });
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

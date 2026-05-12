@@ -451,6 +451,21 @@ test('computeConfigSimilarity penalizes extra object keys and array length diffe
   );
 });
 
+test('computeConfigSimilarity weights high-impact config changes above cosmetic low-weight changes', () => {
+  const champion = { tpAtrMult: 7.6, divPivotLeft: 3, useFusionV4: true };
+
+  const cosmeticSimilarity = computeConfigSimilarity({
+    left: champion,
+    right: { ...champion, divPivotLeft: 5 },
+  });
+  const materialSimilarity = computeConfigSimilarity({
+    left: champion,
+    right: { ...champion, tpAtrMult: 10.6 },
+  });
+
+  assert.ok(cosmeticSimilarity > materialSimilarity);
+});
+
 test('summarizeTopCandidateSimilarity reports the closest candidate to the champion', () => {
   const summary = summarizeTopCandidateSimilarity({
     championConfig: { a: 1, nested: { b: true, c: 'x' }, extra: 9 },

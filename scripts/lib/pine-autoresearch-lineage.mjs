@@ -59,6 +59,8 @@ export function summarizePromotionLineage({ historyEvents = [], limit = 12 } = {
       fromConfigId: event.fromConfigId ?? null,
       toConfigId: event.toConfigId ?? event.championConfigId ?? null,
       sourceRunId: event.runId ?? event.sourceRunId ?? null,
+      fromConfig: event.fromConfig ?? null,
+      toConfig: event.toConfig ?? null,
     }))
     .sort((left, right) => String(right.timestamp).localeCompare(String(left.timestamp)))
     .slice(0, Math.max(1, Number(limit) || 12));
@@ -72,11 +74,27 @@ export function summarizePromotionLineage({ historyEvents = [], limit = 12 } = {
   };
 }
 
+function numericKeysMatch(left, right, numericKeys = []) {
+  if (!isPlainObject(left) || !isPlainObject(right) || !Array.isArray(numericKeys) || numericKeys.length === 0) return false;
+  for (const key of numericKeys) {
+    const leftValue = left?.[key];
+    const rightValue = right?.[key];
+    if (leftValue === undefined || rightValue === undefined) return false;
+    const leftNumber = Number(leftValue);
+    const rightNumber = Number(rightValue);
+    if (!Number.isFinite(leftNumber) || !Number.isFinite(rightNumber)) return false;
+    if (!Object.is(leftNumber, rightNumber)) return false;
+  }
+  return true;
+}
+
 export function detectPingPongRisk({
   candidateFingerprint,
   candidateFamilyKey,
   currentChampionFingerprint,
   currentChampionFamilyKey,
+  candidateConfig,
+  currentChampionConfig,
   lineage = summarizePromotionLineage(),
   policy = {},
 } = {}) {
@@ -84,6 +102,26 @@ export function detectPingPongRisk({
   const transitions = Array.isArray(lineage.recentTransitions)
     ? lineage.recentTransitions.slice(0, lookback)
     : [];
+
+  const numericKeys = Array.isArray(policy.numericKeys) && policy.numericKeys.length > 0
+    ? policy.numericKeys
+    : ['tpAtrMult', 'slAtrMult', 'trailAtrMult', 'minPredSum'];
+  const numericReversal = transitions.find((event) => (
+    event.fromConfig
+    && event.toConfig
+    && candidateConfig
+    && currentChampionConfig
+    && numericKeysMatch(event.fromConfig, candidateConfig, numericKeys)
+    && numericKeysMatch(event.toConfig, currentChampionConfig, numericKeys)
+  ));
+  if (numericReversal) {
+    return {
+      blocked: true,
+      level: 'numeric-reversal',
+      reason: 'candidate numerics were recently demoted by the current champion numerics',
+      matchedTransition: numericReversal,
+    };
+  }
 
   const directReversal = transitions.find((event) => (
     event.fromFingerprint
@@ -141,6 +179,8 @@ export function decideLineagePromotionGate({
   candidateFamilyKey,
   currentChampionFingerprint,
   currentChampionFamilyKey,
+  candidateConfig,
+  currentChampionConfig,
   lineage = summarizePromotionLineage(),
   matrixDecision = {},
   robustness = {},
@@ -156,6 +196,8 @@ export function decideLineagePromotionGate({
     candidateFamilyKey,
     currentChampionFingerprint,
     currentChampionFamilyKey,
+    candidateConfig,
+    currentChampionConfig,
     lineage,
     policy,
   });

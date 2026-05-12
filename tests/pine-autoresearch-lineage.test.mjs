@@ -95,6 +95,66 @@ test('detectPingPongRisk catches direct reversal to recently demoted champion', 
   assert.match(risk.reason, /recently demoted/);
 });
 
+test('summarizePromotionLineage preserves configs for numeric reversal checks', () => {
+  const fromConfig = { tpAtrMult: 10.6, slAtrMult: 0.5 };
+  const toConfig = { tpAtrMult: 7.6, slAtrMult: 0.5 };
+  const summary = summarizePromotionLineage({
+    historyEvents: [{ type: 'promote', timestamp: '2026-05-02T00:00:00.000Z', fromFingerprint: 'a', toFingerprint: 'b', fromConfig, toConfig }],
+  });
+
+  assert.deepEqual(summary.recentTransitions[0].fromConfig, fromConfig);
+  assert.deepEqual(summary.recentTransitions[0].toConfig, toConfig);
+});
+
+test('detectPingPongRisk catches numeric return to recently demoted values', () => {
+  const risk = detectPingPongRisk({
+    candidateFingerprint: 'cand-10.6',
+    candidateFamilyKey: '{"useFusionV4":true}',
+    currentChampionFingerprint: 'champ-7.6',
+    currentChampionFamilyKey: '{"useFusionV4":true}',
+    candidateConfig: { tpAtrMult: 10.6, slAtrMult: 0.5 },
+    currentChampionConfig: { tpAtrMult: 7.6, slAtrMult: 0.5 },
+    lineage: {
+      recentTransitions: [
+        {
+          fromFingerprint: 'cand-10.6',
+          toFingerprint: 'champ-7.6',
+          fromFamilyKey: '{"useFusionV4":true}',
+          toFamilyKey: '{"useFusionV4":true}',
+          fromConfig: { tpAtrMult: 10.6, slAtrMult: 0.5 },
+          toConfig: { tpAtrMult: 7.6, slAtrMult: 0.5 },
+        },
+      ],
+    },
+    policy: {
+      lookbackPromotions: 6,
+      numericKeys: ['tpAtrMult', 'slAtrMult'],
+    },
+  });
+
+  assert.equal(risk.blocked, true);
+  assert.equal(risk.level, 'numeric-reversal');
+});
+
+test('detectPingPongRisk does not match numeric reversal when configured keys are missing', () => {
+  const risk = detectPingPongRisk({
+    candidateConfig: { tpAtrMult: 10.6 },
+    currentChampionConfig: { tpAtrMult: 7.6 },
+    lineage: {
+      recentTransitions: [
+        {
+          fromConfig: { tpAtrMult: 10.6 },
+          toConfig: { tpAtrMult: 7.6 },
+        },
+      ],
+    },
+    policy: { numericKeys: ['tpAtrMult', 'slAtrMult'] },
+  });
+
+  assert.equal(risk.blocked, false);
+  assert.equal(risk.level, 'none');
+});
+
 test('decideLineagePromotionGate allows risky reversal only with configured extra proof margin', () => {
   const lineage = summarizePromotionLineage({
     historyEvents: [

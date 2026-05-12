@@ -2408,6 +2408,47 @@ async function writeCurrentDigest(config, latestManifest, championState, previou
   return latestDigestPath(config);
 }
 
+export function buildPromotionHistoryEvent({
+  previousChampionState = null,
+  challengerSummary = null,
+  runId = null,
+  mode = 'manual',
+  promotedAt = isoNow(),
+  manifest = null,
+  config = {},
+  notePath = null,
+} = {}) {
+  const previousConfig = previousChampionState?.config ?? null;
+  const challengerConfig = challengerSummary?.config ?? null;
+  const lineagePolicy = config?.autoPromotion?.lineagePolicy ?? {};
+  const fromFingerprint = manifest?.championFingerprint
+    ?? (previousConfig ? buildCanonicalConfigFingerprint(previousConfig) : previousChampionState?.configFingerprint ?? configFingerprint({}));
+  const toFingerprint = manifest?.candidateFingerprint
+    ?? challengerSummary?.candidateFingerprint
+    ?? (challengerConfig ? buildCanonicalConfigFingerprint(challengerConfig) : configFingerprint({}));
+  const fromFamilyKey = manifest?.championFamilyKey ?? buildCandidateFamilyKey({ config: previousConfig ?? {}, familyKeys: lineagePolicy.familyKeys });
+  const toFamilyKey = manifest?.candidateFamilyKey ?? buildCandidateFamilyKey({ config: challengerConfig ?? {}, familyKeys: lineagePolicy.familyKeys });
+
+  return {
+    timestamp: promotedAt,
+    type: mode === 'auto' ? 'autopromote' : 'promote',
+    runId,
+    fromConfigId: previousChampionState?.configId ?? null,
+    toConfigId: challengerSummary?.configId ?? null,
+    fromConfig: previousConfig ? clone(previousConfig) : null,
+    toConfig: challengerConfig ? clone(challengerConfig) : null,
+    fromFingerprint,
+    toFingerprint,
+    fromFamilyKey,
+    toFamilyKey,
+    championConfigId: challengerSummary?.configId ?? null,
+    challengerConfigId: challengerSummary?.configId ?? null,
+    recommendation: 'promote',
+    summary: `Promoted ${challengerSummary?.configId ?? 'unknown'} from ${previousChampionState?.configId ?? 'unknown'}`,
+    note: notePath,
+  };
+}
+
 export function buildCycleHistoryEvent(manifest = {}) {
   const entryInvarianceCycle = entryInvarianceCycleFromManifest(manifest);
   return {
@@ -3465,29 +3506,16 @@ export async function runPromote(config, args, mode = 'manual', manifestOverride
   await writeJson(championPath(config), nextChampion);
 
   const notePath = await writePromotionNote(config, latest, mode);
-  const fromFingerprint = latest.championFingerprint
-    ?? (championState.config ? buildCanonicalConfigFingerprint(championState.config) : championState.configFingerprint ?? configFingerprint({}));
-  const toFingerprint = latest.candidateFingerprint
-    ?? latest.challenger?.candidateFingerprint
-    ?? buildCanonicalConfigFingerprint(latest.challenger?.config || {});
-  const fromFamilyKey = latest.championFamilyKey ?? buildCandidateFamilyKey({ config: championState.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys });
-  const toFamilyKey = latest.candidateFamilyKey ?? buildCandidateFamilyKey({ config: latest.challenger?.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys });
-  await appendJsonl(historyPath(config), {
-    timestamp: promotedAt,
-    type: mode === 'auto' ? 'autopromote' : 'promote',
+  await appendJsonl(historyPath(config), buildPromotionHistoryEvent({
+    previousChampionState: championState,
+    challengerSummary: latest.challenger,
     runId: latest.runId,
-    fromConfigId: championState.configId,
-    toConfigId: latest.challenger.configId,
-    fromFingerprint,
-    toFingerprint,
-    fromFamilyKey,
-    toFamilyKey,
-    championConfigId: latest.challenger.configId,
-    challengerConfigId: latest.challenger.configId,
-    recommendation: 'promote',
-    summary: `Promoted ${latest.challenger.configId} from ${championState.configId}`,
-    note: notePath,
-  });
+    mode,
+    promotedAt,
+    manifest: latest,
+    config,
+    notePath,
+  }));
   const updatedHistoryEvents = await rebuildHistoryArtifacts(config, nextChampion);
   const latestName = path.basename(latest.manifestPath || '');
   const previousManifest = await readPreviousManifest(config, latestName);

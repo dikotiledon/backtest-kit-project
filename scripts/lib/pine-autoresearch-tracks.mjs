@@ -180,16 +180,38 @@ function stableValue(value) {
   return value;
 }
 
+const DEFAULT_KEY_WEIGHTS = new Map([
+  ['tpAtrMult', 3],
+  ['slAtrMult', 3],
+  ['trailAtrMult', 2],
+  ['trailActivateR', 2],
+  ['minPredSum', 3],
+  ['adxThreshold', 2],
+  ['useFusionV4', 2],
+  ['useSignalFusion', 2],
+  ['useSupertrendFilter', 2],
+  ['divPivotLeft', 1],
+  ['divPivotRight', 1],
+  ['divFreshBars', 1],
+]);
+
 function similarityRatio(left, right) {
   if (isPlainObject(left) && isPlainObject(right)) {
     const comparableKeys = [...new Set([...Object.keys(left), ...Object.keys(right)])].sort();
     if (comparableKeys.length === 0) return 1;
-    const score = comparableKeys.reduce((sum, key) => (
-      sum + (Object.prototype.hasOwnProperty.call(left, key) && Object.prototype.hasOwnProperty.call(right, key)
+    let weightedScore = 0;
+    let weightedTotal = 0;
+
+    for (const key of comparableKeys) {
+      const weight = DEFAULT_KEY_WEIGHTS.get(key) ?? 1;
+      const childScore = Object.prototype.hasOwnProperty.call(left, key) && Object.prototype.hasOwnProperty.call(right, key)
         ? similarityRatio(left[key], right[key])
-        : 0)
-    ), 0);
-    return Number((score / comparableKeys.length).toFixed(3));
+        : 0;
+      weightedScore += childScore * weight;
+      weightedTotal += weight;
+    }
+
+    return Number((weightedScore / weightedTotal).toFixed(3));
   }
 
   if (Array.isArray(left) && Array.isArray(right)) {

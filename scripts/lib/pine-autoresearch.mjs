@@ -3,6 +3,7 @@ import path from 'node:path';
 import { computeExpectancy, evaluateExpectancyGuard } from './pine-expectancy.mjs';
 import { decideLineagePromotionGate, summarizePromotionLineage } from './pine-autoresearch-lineage.mjs';
 import { decideSignificanceGate } from './pine-significance-gate.mjs';
+import { buildCanonicalConfigFingerprint } from './pine-global-search.mjs';
 
 function round(value, digits = 2) {
   if (!Number.isFinite(value)) return 0;
@@ -310,15 +311,36 @@ function dominates(left, right) {
   return betterOrEqual && strictlyBetter;
 }
 
+function shortlistConfigFingerprint(item) {
+  if (item?.config && typeof item.config === 'object' && !Array.isArray(item.config)) {
+    return buildCanonicalConfigFingerprint(item.config);
+  }
+
+  return typeof item?.configFingerprint === 'string' && item.configFingerprint.length > 0
+    ? item.configFingerprint
+    : null;
+}
+
+function shortlistIdentityKey(item) {
+  const fingerprint = shortlistConfigFingerprint(item);
+  if (fingerprint) return `config:${fingerprint}`;
+  if (item?.configId) return `id:${item.configId}`;
+  return `fallback:${JSON.stringify(stableValue(item?.config || item || {}))}`;
+}
+
+function sameShortlistConfig(left, right) {
+  const leftFingerprint = shortlistConfigFingerprint(left);
+  const rightFingerprint = shortlistConfigFingerprint(right);
+  return Boolean(leftFingerprint && rightFingerprint && leftFingerprint === rightFingerprint);
+}
+
 export function buildParetoShortlist({ champion, rankedResults = [], limit = 4, includeChampion = true }) {
   const sourceResults = Array.isArray(rankedResults) ? rankedResults : [];
   const shortlistResults = includeChampion
     ? sourceResults
     : sourceResults.filter((candidate) => {
       if (!candidate || !champion) return Boolean(candidate);
-      if (champion.configId && candidate.configId && champion.configId === candidate.configId) return false;
-      if (champion.config && candidate.config && sameConfig(champion.config, candidate.config)) return false;
-      return true;
+      return !sameShortlistConfig(champion, candidate);
     });
   const pool = [includeChampion ? champion : null, ...shortlistResults].filter(Boolean);
   const frontier = pool.filter((candidate, index) => {
@@ -328,19 +350,24 @@ export function buildParetoShortlist({ champion, rankedResults = [], limit = 4, 
   const unique = [];
   const seen = new Set();
   for (const item of frontier) {
-    const key = item.configId || JSON.stringify(item.config || item);
+    const key = shortlistIdentityKey(item);
     if (seen.has(key)) continue;
     seen.add(key);
     unique.push(item);
   }
 
-  if (includeChampion && champion && !unique.some((item) => item.configId === champion.configId)) {
+  if (includeChampion && champion) {
+    const championKey = shortlistIdentityKey(champion);
+    const championIndex = unique.findIndex((item) => item === champion || shortlistIdentityKey(item) === championKey);
+    if (championIndex >= 0) {
+      unique.splice(championIndex, 1);
+    }
     unique.unshift(champion);
   }
 
   if (!includeChampion && unique.length < limit) {
     for (const item of shortlistResults) {
-      const key = item.configId || JSON.stringify(item.config || item);
+      const key = shortlistIdentityKey(item);
       if (seen.has(key)) continue;
       seen.add(key);
       unique.push(item);

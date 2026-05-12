@@ -2963,6 +2963,56 @@ test('buildParetoShortlist can reserve all shortlist slots for challengers', () 
   assert.deepEqual(shortlist.map((item) => item.configId), ['cand-1', 'cand-2']);
 });
 
+test('buildParetoShortlist keeps challenger with champion configId but changed semantic config', () => {
+  const champion = { configId: 'champ', score: 10, roiPct: 10, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 2, config: { a: 1 } };
+  const rankedResults = [
+    { configId: 'champ', score: 11, roiPct: 12, profitFactor: 1.5, tradeCount: 100, maxDrawdownPct: 2, config: { a: 2 } },
+  ];
+  const shortlist = buildParetoShortlist({ champion, rankedResults, limit: 1, includeChampion: false });
+
+  assert.deepEqual(shortlist.map((item) => item.configId), ['champ']);
+  assert.deepEqual(shortlist[0].config, { a: 2 });
+});
+
+test('buildParetoShortlist excludes canonical champion-equivalent challenger with different identity fields', () => {
+  const champion = { configId: 'champ', score: 10, roiPct: 10, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 2, config: { a: 1, nested: { enabled: true } } };
+  const rankedResults = [
+    {
+      configId: 'champ-copy',
+      score: 12,
+      roiPct: 13,
+      profitFactor: 1.6,
+      tradeCount: 110,
+      maxDrawdownPct: 1.8,
+      config: {
+        a: 1,
+        nested: { enabled: true },
+        configId: 'identity-only-copy',
+        label: 'champion clone',
+        sourceRunId: 'run-identity',
+        promotedAt: '2026-05-12T00:00:00.000Z',
+        configFingerprint: 'stale-identity-fp',
+      },
+    },
+    { configId: 'distinct', score: 9, roiPct: 9, profitFactor: 1.3, tradeCount: 90, maxDrawdownPct: 2.2, config: { a: 2, nested: { enabled: true } } },
+  ];
+  const shortlist = buildParetoShortlist({ champion, rankedResults, limit: 2, includeChampion: false });
+
+  assert.deepEqual(shortlist.map((item) => item.configId), ['distinct']);
+});
+
+test('buildParetoShortlist deduplicates semantic challenger configs before backfill', () => {
+  const champion = { configId: 'champ', score: 10, roiPct: 10, profitFactor: 1.4, tradeCount: 100, maxDrawdownPct: 2, config: { a: 1 } };
+  const rankedResults = [
+    { configId: 'dup-score', score: 20, roiPct: 5, profitFactor: 1.6, tradeCount: 100, maxDrawdownPct: 2, config: { a: 2 } },
+    { configId: 'dup-roi', score: 19, roiPct: 6, profitFactor: 1.6, tradeCount: 100, maxDrawdownPct: 2, config: { a: 2, label: 'same semantic challenger' } },
+    { configId: 'distinct', score: 10, roiPct: 4, profitFactor: 1.2, tradeCount: 80, maxDrawdownPct: 3, config: { a: 3 } },
+  ];
+  const shortlist = buildParetoShortlist({ champion, rankedResults, limit: 2, includeChampion: false });
+
+  assert.deepEqual(shortlist.map((item) => item.configId), ['dup-score', 'distinct']);
+});
+
 test('selectRobustMatrixCandidate prefers multi-window strength over single primary peak', () => {
   const selected = selectRobustMatrixCandidate({
     candidates: [

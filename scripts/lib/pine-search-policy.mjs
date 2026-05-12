@@ -314,7 +314,10 @@ function freezeArchitecture(config, policy = {}) {
 }
 
 export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents = [], policy = {}, schedulerState = {} }) {
-  const base = policy.freezeArchitecture === false ? clone(incumbent) : freezeArchitecture(incumbent, policy);
+  const normalizedIncumbent = incumbent && typeof incumbent === 'object' && !Array.isArray(incumbent) && incumbent.config && typeof incumbent.config === 'object' && !Array.isArray(incumbent.config)
+    ? incumbent.config
+    : incumbent;
+  const base = policy.freezeArchitecture === false ? clone(normalizedIncumbent) : freezeArchitecture(normalizedIncumbent, policy);
   const { exploit, explore } = allocateLaneBudget(maxConfigs, policy.exploitRatio ?? 0.8);
   const exploitFamilies = policy.exploitFamilies?.length ? policy.exploitFamilies : ['signal', 'risk'];
   const exploreFamilies = policy.exploreFamilies?.length ? policy.exploreFamilies : ['signal'];

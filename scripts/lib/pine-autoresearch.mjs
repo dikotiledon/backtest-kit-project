@@ -1019,19 +1019,6 @@ export function renderScoutMarkdown({ config, manifest }) {
     lines.push('', '## Lab matrix', '', renderLabRowTable(manifest.labResults));
   }
 
-  if (manifest.searchPlan) {
-    lines.push('', '## Search plan', '');
-    lines.push(`- variantCount: ${manifest.searchPlan.variantCount}`);
-    lines.push(`- exploitRatio: ${manifest.searchPlan.exploitRatio}`);
-  }
-
-  if (manifest.paretoShortlist?.length) {
-    lines.push('', '## Pareto shortlist', '');
-    for (const item of manifest.paretoShortlist) {
-      lines.push(`- ${item.configId}: score ${item.score}, ROI ${item.roiPct}%, PF ${item.profitFactor}, max DD ${item.maxDrawdownPct}%`);
-    }
-  }
-
   if (manifest.primarySweep?.topConfigs?.length) {
     lines.push('', '## Primary sweep top configs', '');
     for (const item of manifest.primarySweep.topConfigs) {

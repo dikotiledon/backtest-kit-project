@@ -16,6 +16,7 @@ import {
   partitionLabs,
   planArtifactPrune,
   renderDigestMarkdown,
+  renderScoutMarkdown,
   configFingerprint,
   sameConfig,
   selectChampionBootstrapSource,
@@ -4836,6 +4837,26 @@ test('promotion history event records from/to fingerprints and family keys', asy
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }
+});
+
+test('renderScoutMarkdown emits Search plan and Pareto shortlist only once', () => {
+  const text = renderScoutMarkdown({
+    config: { matrixId: 'matrix-a', primaryLab: { labId: 'primary' } },
+    manifest: {
+      generatedAt: '2026-05-11T00:00:00.000Z',
+      runId: 'run-1',
+      champion: { configId: 'champ', score: 1, tradeCount: 10, roiPct: 1, profitFactor: 1.2, maxDrawdownPct: 1, config: { a: 1 } },
+      challenger: { configId: 'cand', score: 2, tradeCount: 11, roiPct: 2, profitFactor: 1.3, maxDrawdownPct: 1, config: { a: 2 } },
+      matrixDecision: { recommendation: 'hold', summary: 'hold' },
+      searchPlan: { variantCount: 2, exploitRatio: 0.5, variants: [] },
+      paretoShortlist: [{ configId: 'cand', score: 2, roiPct: 2, profitFactor: 1.3, maxDrawdownPct: 1 }],
+      primarySweep: { topConfigs: [] },
+      researchState: { steadyState: false, noChangeStreak: 0 },
+    },
+  });
+
+  assert.equal((text.match(/^## Search plan$/gm) || []).length, 1);
+  assert.equal((text.match(/^## Pareto shortlist$/gm) || []).length, 1);
 });
 
 test('renderDigestMarkdown includes search-plan, shortlist summary, and rotation diagnostics', () => {

@@ -529,6 +529,7 @@ export function buildGlobalAllParameterExhaustedManifest({
       variantCount: 0,
       variants: [],
     },
+    searchEfficiency: buildSearchEfficiency([]),
     paretoShortlist: [],
     matrixCandidates: [],
     labResults: [],
@@ -601,6 +602,7 @@ export function buildOfflineDataMissingManifest({
       variantCount: 0,
       variants: [],
     },
+    searchEfficiency: buildSearchEfficiency([]),
     paretoShortlist: [],
     matrixCandidates: [],
     labResults: [],
@@ -677,6 +679,7 @@ export function buildNoRegimeResearchLaneManifest({
       variantCount: 0,
       variants: [],
     },
+    searchEfficiency: buildSearchEfficiency([]),
     paretoShortlist: [],
     matrixCandidates: [],
     labResults: [],
@@ -1241,6 +1244,19 @@ export function selectChangedMatrixCandidate({ candidates = [], championState = 
   return selectRobustMatrixCandidate({ candidates: changed });
 }
 
+function buildSearchEfficiency(searchBatch = []) {
+  const variants = Array.isArray(searchBatch) ? searchBatch : [];
+  const emittedVariants = variants.filter((variant) => Boolean(variant) && !variant?.exhaustedFamily);
+  return {
+    variantCount: variants.length,
+    emittedVariantCount: emittedVariants.length,
+    exhaustedFamilies: variants
+      .filter((variant) => variant?.exhaustedFamily)
+      .map((variant) => variant.exhaustedFamily),
+    allCandidatesTabu: emittedVariants.length === 0,
+  };
+}
+
 export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {}, regimeExitState = DEFAULT_REGIME_EXIT_STATE, entryInvariance = null }) {
 
   const championSummary = summarizeResult(championState);
@@ -1390,6 +1406,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
           config: variant?.config,
         })),
       },
+      searchEfficiency: buildSearchEfficiency(searchBatch),
       paretoShortlist,
       matrixCandidates: matrixCandidates.map((item) => ({
         challenger: item.challenger,
@@ -2286,7 +2303,7 @@ async function writeCurrentDigest(config, latestManifest, championState, previou
   return latestDigestPath(config);
 }
 
-function buildCycleHistoryEvent(manifest = {}) {
+export function buildCycleHistoryEvent(manifest = {}) {
   const entryInvarianceCycle = entryInvarianceCycleFromManifest(manifest);
   return {
     timestamp: manifest.generatedAt,
@@ -2321,6 +2338,8 @@ function buildCycleHistoryEvent(manifest = {}) {
     globalNoveltyGuardVersion: manifest.globalNoveltyGuardVersion ?? null,
     noLaneReason: manifest.shadowRegimeScoreboard?.noLaneReason ?? null,
     offlineDataSummary: manifest.offlineDataSummary ?? null,
+    searchEfficiency: manifest.searchEfficiency ?? null,
+    durationMs: manifest.durationMs ?? null,
   };
 }
 
@@ -2609,6 +2628,8 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
 }
 
 export async function runScout(config, dependencies = {}) {
+  const startedAtMs = Date.now();
+  const withDuration = (manifest) => ({ ...manifest, durationMs: Date.now() - startedAtMs });
   const runPrimarySweepFn = dependencies.runPrimarySweep || runPrimarySweep;
   await ensureDirs(config);
   const queue = await readPromotionQueue(promotionQueueFilePath(config));
@@ -2656,20 +2677,21 @@ export async function runScout(config, dependencies = {}) {
         offlineDataSummary,
         entryInvariance,
       });
+      const finalOfflineManifest = withDuration(offlineManifest);
       const finalizedArtifact = await finalizeAutoresearchManifest({
         root: trackedConfig.researchRoot,
-        manifest: offlineManifest,
+        manifest: finalOfflineManifest,
       });
       manifestFinalized = true;
       const artifactPaths = await writeScoutCycleArtifacts({
         config: trackedConfig,
         championState,
-        manifest: offlineManifest,
+        manifest: finalOfflineManifest,
         manifestPath: finalizedArtifact.manifestPath,
       });
       return {
         ...buildOfflineDataMissingSkipResult({ offlineDataSummary }),
-        manifest: offlineManifest,
+        manifest: finalOfflineManifest,
         manifestPath: finalizedArtifact.manifestPath,
         ...artifactPaths,
       };
@@ -2845,7 +2867,7 @@ export async function runScout(config, dependencies = {}) {
       }),
     });
     await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
-    const finalNoLaneManifest = applySchedulerStateToManifest(noLaneManifest, updatedSchedulerState);
+    const finalNoLaneManifest = applySchedulerStateToManifest(withDuration(noLaneManifest), updatedSchedulerState);
     const finalizedArtifact = await finalizeAutoresearchManifest({
       root: trackedConfig.researchRoot,
       manifest: finalNoLaneManifest,
@@ -2916,7 +2938,7 @@ export async function runScout(config, dependencies = {}) {
       lanesEnabled: resolveRegimeLaneEnabled(trackedConfig.regimeExitResearch || {}),
     });
     await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
-    const finalExhaustedManifest = applySchedulerStateToManifest(exhaustedManifest, updatedSchedulerState);
+    const finalExhaustedManifest = applySchedulerStateToManifest(withDuration(exhaustedManifest), updatedSchedulerState);
     const finalizedArtifact = await finalizeAutoresearchManifest({
       root: trackedConfig.researchRoot,
       manifest: finalExhaustedManifest,
@@ -3065,7 +3087,7 @@ export async function runScout(config, dependencies = {}) {
   };
   await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
 
-  const finalManifest = applySchedulerStateToManifest(manifest, updatedSchedulerState);
+  const finalManifest = applySchedulerStateToManifest(withDuration(manifest), updatedSchedulerState);
 
   const finalizedArtifact = await finalizeAutoresearchManifest({
     root: trackedConfig.researchRoot,

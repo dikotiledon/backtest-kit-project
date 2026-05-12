@@ -3550,6 +3550,111 @@ test('buildScoutOrchestrationState exposes lane budget debt in manifest debug st
   assert.deepEqual(result.manifest.laneBudgetDebt, { exploit: 2, exitRegime: -5, globalAllParameter: 2, robustness: 1 });
 });
 
+test('buildScoutOrchestrationState exposes search efficiency metadata in manifest', () => {
+  const championConfig = { minPredSum: 2, adxThreshold: 20 };
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch-search-efficiency',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+      },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-search-efficiency',
+    championState: { configId: 'champion', score: 70, config: championConfig },
+    historyEventsBefore: [],
+    searchBatch: [
+      { variantId: 'v1', lane: 'exploit', family: 'signal', patch: { adxThreshold: 22 }, config: { ...championConfig, adxThreshold: 22 } },
+      null,
+      { exhaustedFamily: 'signal' },
+    ],
+    primarySweep: { topConfigs: [] },
+    matrixCandidates: [],
+  });
+
+  assert.deepEqual(result.manifest.searchEfficiency, {
+    variantCount: 3,
+    emittedVariantCount: 1,
+    exhaustedFamilies: ['signal'],
+    allCandidatesTabu: false,
+  });
+});
+
+test('buildScoutOrchestrationState marks empty search batch as all candidates tabu', () => {
+  const championConfig = { minPredSum: 2, adxThreshold: 20 };
+  const result = buildScoutOrchestrationState({
+    config: {
+      matrixId: 'pine-autoresearch-empty-search-efficiency',
+      selectedProfile: 'full',
+      researchRoot: '/tmp/research',
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 1,
+      },
+      matrixPolicy: { requireCandidateChange: true },
+      primaryLab: { labId: 'primary' },
+      shadowLabs: [],
+      pinnedData: { enabled: false },
+    },
+    runId: 'pine-autoresearch-empty-search-efficiency',
+    championState: { configId: 'champion', score: 70, config: championConfig },
+    historyEventsBefore: [],
+    searchBatch: [],
+    primarySweep: { topConfigs: [] },
+    matrixCandidates: [],
+  });
+
+  assert.deepEqual(result.manifest.searchEfficiency, {
+    variantCount: 0,
+    emittedVariantCount: 0,
+    exhaustedFamilies: [],
+    allCandidatesTabu: true,
+  });
+});
+
+test('build cycle history event retains efficiency metadata', () => {
+  const manifest = {
+    generatedAt: '2026-05-11T00:00:00.000Z',
+    runId: 'run-1',
+    champion: { configId: 'champ' },
+    challenger: { configId: 'cand' },
+    matrixDecision: { recommendation: 'hold', summary: 'hold' },
+    researchState: { steadyState: false, noChangeStreak: 0 },
+    searchEfficiency: {
+      variantCount: 8,
+      emittedVariantCount: 5,
+      exhaustedFamilies: ['signal'],
+      allCandidatesTabu: false,
+    },
+  };
+  const event = autoresearchCli.buildCycleHistoryEvent(manifest);
+  assert.deepEqual(event.searchEfficiency, manifest.searchEfficiency);
+});
+
+test('build cycle history event retains duration metadata', () => {
+  const manifest = {
+    generatedAt: '2026-05-11T00:00:00.000Z',
+    runId: 'run-duration',
+    champion: { configId: 'champ' },
+    challenger: { configId: 'cand' },
+    matrixDecision: { recommendation: 'hold', summary: 'hold' },
+    researchState: { steadyState: false, noChangeStreak: 0 },
+    durationMs: 1234,
+  };
+  const event = autoresearchCli.buildCycleHistoryEvent(manifest);
+  assert.equal(event.durationMs, 1234);
+});
+
 test('resolveConsumedBudgetLane pays down only a lane present in final variants', () => {
   assert.equal(resolveConsumedBudgetLane({
     selectedLane: 'robustness',
@@ -5848,6 +5953,18 @@ test('runScout does not pay down selected robustness debt when active track vari
     assert.equal(sweepVariants.every((variant) => variant.lane === 'track'), true);
     assert.deepEqual(schedulerState.budgetDebt, initialBudgetDebt);
     assert.deepEqual(result.manifest.laneBudgetDebt, initialBudgetDebt);
+    assert.equal(Number.isInteger(result.manifest.durationMs), true);
+    assert.ok(result.manifest.durationMs >= 0);
+    assert.deepEqual(result.manifest.searchEfficiency, {
+      variantCount: sweepVariants.length,
+      emittedVariantCount: sweepVariants.length,
+      exhaustedFamilies: [],
+      allCandidatesTabu: false,
+    });
+
+    const persistedManifest = JSON.parse(await fs.readFile(result.manifestPath, 'utf8'));
+    assert.equal(persistedManifest.durationMs, result.manifest.durationMs);
+    assert.deepEqual(persistedManifest.searchEfficiency, result.manifest.searchEfficiency);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });
   }

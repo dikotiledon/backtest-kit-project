@@ -122,6 +122,95 @@ test('buildIncumbentSearchBatch skips previously tested candidate fingerprints',
   assert.equal(secondBatch[0].patch.neighborsCount, 40);
 });
 
+const allExploitFingerprints = [...signalFingerprints, ...riskFingerprints];
+
+test('buildIncumbentSearchBatch fails closed when every exploit-family candidate is tested or tabu', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent,
+    maxConfigs: 4,
+    historyEvents: [],
+    policy: {
+      exploitRatio: 1,
+      exploitFamilies: ['signal', 'risk'],
+      testedCandidateFingerprints: allExploitFingerprints.slice(0, signalFingerprints.length),
+    },
+    schedulerState: {
+      tabuRejectedFingerprints: allExploitFingerprints.slice(signalFingerprints.length),
+    },
+  });
+
+  assert.deepEqual(batch, []);
+});
+
+const hotAnnealingPolicy = {
+  exploitFamilies: ['signal', 'risk'],
+  exploreFamilies: ['signal'],
+  annealing: {
+    enabled: true,
+    baseTemperature: 0.5,
+    growthFactor: 2,
+    maxTemperature: 4,
+  },
+};
+
+test('buildIncumbentSearchBatch uses hot annealing for bounded diverse patches', () => {
+  const batch = buildIncumbentSearchBatch({
+    incumbent: {
+      ...incumbent,
+      slAtrMult: 1,
+      tpAtrMult: 2.5,
+      trailAtrMult: 1,
+      trailActivateR: 0.5,
+      riskAtrLen: 14,
+    },
+    maxConfigs: 4,
+    historyEvents: [],
+    policy: hotAnnealingPolicy,
+    schedulerState: { noChangeStreak: 4 },
+  });
+
+  assert.equal(batch.length, 4);
+  assert.ok(batch.some((variant) => Object.keys(variant.patch).length > 1));
+  for (const variant of batch) {
+    if (Object.hasOwn(variant.patch, 'adxThreshold')) {
+      assert.ok(variant.patch.adxThreshold <= 30, `adxThreshold was ${variant.patch.adxThreshold}`);
+    }
+  }
+});
+
+test('buildIncumbentSearchBatch freezes architecture from champion values instead of defaults', () => {
+  const champion = {
+    ...incumbent,
+    useSignalFusion: false,
+    useFusionV2: true,
+    useFusionV3: true,
+    useFusionV4: false,
+    useSupertrendFilter: false,
+    useTrailingStop: false,
+    useStopsTP: false,
+  };
+
+  const [variant] = buildIncumbentSearchBatch({
+    incumbent: champion,
+    maxConfigs: 1,
+    historyEvents: [],
+    policy: { exploitFamilies: ['signal'] },
+    schedulerState: {},
+  });
+
+  for (const key of [
+    'useSignalFusion',
+    'useFusionV2',
+    'useFusionV3',
+    'useFusionV4',
+    'useSupertrendFilter',
+    'useTrailingStop',
+    'useStopsTP',
+  ]) {
+    assert.equal(variant.config[key], champion[key], key);
+  }
+});
+
 test('buildIncumbentSearchBatch fails closed when all signal candidates are tested entries', () => {
   const batch = buildIncumbentSearchBatch({
     incumbent,

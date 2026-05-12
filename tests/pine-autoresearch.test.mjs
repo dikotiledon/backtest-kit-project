@@ -3088,6 +3088,15 @@ test('selectChangedMatrixCandidate returns null when only champion is available'
   assert.equal(selected, null);
 });
 
+test('selectChangedMatrixCandidate returns null for an exhausted empty candidate batch', () => {
+  const selected = selectChangedMatrixCandidate({
+    championState: { config: { a: 1 } },
+    candidates: [],
+  });
+
+  assert.equal(selected, null);
+});
+
 test('selectChangedMatrixCandidate skips malformed candidates without challenger config', () => {
   const selected = selectChangedMatrixCandidate({
     championState: { config: { a: 1 } },

@@ -8,6 +8,38 @@ function configFingerprint(config) {
   return buildCanonicalConfigFingerprint(config || {});
 }
 
+const LEGACY_ARCHITECTURE_DEFAULTS = {
+  useSignalFusion: true,
+  useFusionV2: false,
+  useFusionV3: false,
+  useFusionV4: true,
+  useSupertrendFilter: true,
+  useTrailingStop: true,
+  useStopsTP: true,
+};
+
+const DEFAULT_FROZEN_ARCHITECTURE_KEYS = Object.keys(LEGACY_ARCHITECTURE_DEFAULTS);
+
+const DEFAULT_PATCH_BOUNDS = {
+  neighborsCount: [1, 128],
+  adxThreshold: [0, 30],
+  minPredSum: [0, 10],
+  minBarsBetween: [0, 50],
+  h: [1, 128],
+  r: [1, 128],
+  x: [1, 128],
+  slAtrMult: [0.25, 10],
+  tpAtrMult: [0.25, 20],
+  trailAtrMult: [0.25, 10],
+  trailActivateR: [0, 5],
+  riskAtrLen: [1, 200],
+};
+
+const CORRELATED_MUTATION_KEYS = {
+  slAtrMult: 'tpAtrMult',
+  tpAtrMult: 'slAtrMult',
+};
+
 export function allocateLaneBudget(maxConfigs, exploitRatio = 0.8) {
   const total = Math.max(0, Number(maxConfigs) || 0);
   if (total <= 1) return { exploit: total, explore: 0 };
@@ -47,15 +79,77 @@ function withPatch(base, patch, meta) {
   };
 }
 
-function scalePatch(base, patch, temperature) {
+function normalizeBound(bound) {
+  if (Array.isArray(bound) && bound.length >= 2) {
+    const min = Number(bound[0]);
+    const max = Number(bound[1]);
+    return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
+  }
+  if (bound && typeof bound === 'object') {
+    const min = Number(bound.min);
+    const max = Number(bound.max);
+    return Number.isFinite(min) && Number.isFinite(max) ? { min, max } : null;
+  }
+  return null;
+}
+
+function clampPatchValue(key, value, patchBounds = {}) {
+  const bound = normalizeBound(patchBounds[key]) || normalizeBound(DEFAULT_PATCH_BOUNDS[key]);
+  if (!bound) return value;
+  const min = Math.min(bound.min, bound.max);
+  const max = Math.max(bound.min, bound.max);
+  return Math.min(max, Math.max(min, value));
+}
+
+function scalePatch(base, patch, temperature, patchBounds = {}, diversityScale = 1) {
   return Object.fromEntries(Object.entries(patch).map(([key, value]) => {
     const baseValue = Number(base[key]);
     if (typeof value !== 'number' || !Number.isFinite(baseValue)) return [key, value];
     const minValue = key.toLowerCase().includes('len') || key.toLowerCase().includes('bars') || key === 'neighborsCount' ? 1 : 0;
-    const scaled = Math.max(minValue, baseValue + ((value - baseValue) * temperature));
+    const scaled = clampPatchValue(
+      key,
+      Math.max(minValue, baseValue + ((value - baseValue) * temperature * diversityScale)),
+      patchBounds,
+    );
     const integerLike = Number.isInteger(baseValue) && Number.isInteger(value);
     return [key, integerLike ? Math.round(scaled) : Number(scaled.toFixed(4))];
   }));
+}
+
+function patchDirection(base, key, targetValue) {
+  const baseValue = Number(base[key]);
+  if (!Number.isFinite(baseValue) || typeof targetValue !== 'number') return 0;
+  return Math.sign(targetValue - baseValue);
+}
+
+function findCorrelatedPatch(base, rawPatch, pool = []) {
+  const entries = Object.entries(rawPatch || {});
+  if (entries.length !== 1) return null;
+  const [sourceKey, sourceTarget] = entries[0];
+  const pairedKey = CORRELATED_MUTATION_KEYS[sourceKey];
+  if (!pairedKey) return null;
+  const sourceDirection = patchDirection(base, sourceKey, sourceTarget);
+  if (!sourceDirection) return null;
+  return pool.find((candidate) => {
+    const candidateKeys = Object.keys(candidate || {});
+    return candidateKeys.length === 1
+      && candidateKeys[0] === pairedKey
+      && patchDirection(base, pairedKey, candidate[pairedKey]) === sourceDirection;
+  }) || null;
+}
+
+function buildDiversePatch({ base, rawPatch, pool, temperature, batchIndex, patchBounds }) {
+  const hot = Number(temperature) > 1.5;
+  const diversityScale = hot ? 1 + ((Math.max(0, Number(batchIndex) || 0) % 3) * 0.2) : 1;
+  const patch = scalePatch(base, rawPatch, temperature, patchBounds, diversityScale);
+  if (!hot || Object.keys(rawPatch || {}).length !== 1) return patch;
+
+  const correlatedPatch = findCorrelatedPatch(base, rawPatch, pool);
+  if (!correlatedPatch) return patch;
+  return {
+    ...patch,
+    ...scalePatch(base, correlatedPatch, temperature, patchBounds, Math.max(0.75, diversityScale * 0.85)),
+  };
 }
 
 function normalizeFingerprintEntry(entry) {
@@ -94,6 +188,7 @@ function pickNonTabuVariant({
   temperature,
   requiredTouchedKeys,
   enforcementBatchIndex = batchIndex,
+  patchBounds = {},
 }) {
   if (!Array.isArray(pool) || !pool.length) {
     return { variant: null, nextIndex: startIndex, tabuSkipped: 0, exhausted: true };
@@ -103,7 +198,14 @@ function pickNonTabuVariant({
   let tabuSkipped = 0;
   for (let probe = 0; probe < pool.length; probe++) {
     const rawPatch = pool[(startIndex + probe) % pool.length];
-    const patch = scalePatch(base, rawPatch, temperature);
+    const patch = buildDiversePatch({
+      base,
+      rawPatch,
+      pool,
+      temperature,
+      batchIndex: enforcementBatchIndex,
+      patchBounds,
+    });
     const candidate = { ...clone(base), ...patch };
     if (!enforceRequiredKeys && tabuSet.has(configFingerprint(candidate))) {
       tabuSkipped += 1;
@@ -117,6 +219,7 @@ function pickNonTabuVariant({
       requiredTouchedKeys,
       batchIndex: enforcementBatchIndex,
       temperature,
+      patchBounds,
     });
 
     if (!tabuSet.has(configFingerprint(enforcedVariant.config))) {
@@ -171,7 +274,7 @@ function forcedEntryPatches(base, requiredKeys = []) {
   return signalPatches(base).filter((patch) => Object.keys(patch).some((key) => required.has(key)));
 }
 
-function enforceRequiredTouchedKeys({ base, variant, requiredTouchedKeys = [], batchIndex = 0, temperature = 1 }) {
+function enforceRequiredTouchedKeys({ base, variant, requiredTouchedKeys = [], batchIndex = 0, temperature = 1, patchBounds = {} }) {
   const required = normalizeStringList(requiredTouchedKeys);
   if (!required.length) return variant;
   const patchKeys = Object.keys(variant?.patch || {});
@@ -179,7 +282,7 @@ function enforceRequiredTouchedKeys({ base, variant, requiredTouchedKeys = [], b
 
   const pool = forcedEntryPatches(base, required);
   if (!pool.length) return variant;
-  const entryPatch = scalePatch(base, pool[batchIndex % pool.length], temperature);
+  const entryPatch = scalePatch(base, pool[batchIndex % pool.length], temperature, patchBounds);
   const mergedPatch = { ...(variant.patch || {}), ...entryPatch };
   return {
     ...variant,
@@ -195,21 +298,23 @@ function enforceRequiredTouchedKeys({ base, variant, requiredTouchedKeys = [], b
   };
 }
 
-function freezeArchitecture(config) {
-  return {
-    ...config,
-    useSignalFusion: true,
-    useFusionV2: false,
-    useFusionV3: false,
-    useFusionV4: true,
-    useSupertrendFilter: true,
-    useTrailingStop: true,
-    useStopsTP: true,
-  };
+function freezeArchitecture(config, policy = {}) {
+  const base = clone(config || {});
+  const overrideKeys = normalizeStringList(policy.frozenArchitectureKeys);
+  const frozenKeys = overrideKeys.length ? overrideKeys : DEFAULT_FROZEN_ARCHITECTURE_KEYS;
+  const frozen = { ...base };
+  for (const key of frozenKeys) {
+    if (Object.hasOwn(base, key)) {
+      frozen[key] = base[key];
+    } else if (!overrideKeys.length && Object.hasOwn(LEGACY_ARCHITECTURE_DEFAULTS, key)) {
+      frozen[key] = LEGACY_ARCHITECTURE_DEFAULTS[key];
+    }
+  }
+  return frozen;
 }
 
 export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents = [], policy = {}, schedulerState = {} }) {
-  const base = policy.freezeArchitecture === false ? clone(incumbent) : freezeArchitecture(incumbent);
+  const base = policy.freezeArchitecture === false ? clone(incumbent) : freezeArchitecture(incumbent, policy);
   const { exploit, explore } = allocateLaneBudget(maxConfigs, policy.exploitRatio ?? 0.8);
   const exploitFamilies = policy.exploitFamilies?.length ? policy.exploitFamilies : ['signal', 'risk'];
   const exploreFamilies = policy.exploreFamilies?.length ? policy.exploreFamilies : ['signal'];
@@ -244,6 +349,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       temperature,
       requiredTouchedKeys: policy.requiredTouchedKeys,
       enforcementBatchIndex: batch.length,
+      patchBounds: policy.patchBounds,
     });
     index = picked.nextIndex;
     if (!picked.variant) continue;
@@ -264,6 +370,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       temperature,
       requiredTouchedKeys: policy.requiredTouchedKeys,
       enforcementBatchIndex: batch.length,
+      patchBounds: policy.patchBounds,
     });
     if (!picked.variant) continue;
     batch.push(picked.variant);

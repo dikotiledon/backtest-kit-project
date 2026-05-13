@@ -839,6 +839,10 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
 }
 
 export function partitionLabs({ primaryLab, shadowLabs = [], blindHoldoutLabs = [] } = {}) {
+  const hasShadows = Array.isArray(shadowLabs) && shadowLabs.length > 0;
+  if (!primaryLab && hasShadows) {
+    throw new Error('primaryLab is required when shadowLabs are configured');
+  }
   return {
     trainingLabs: [primaryLab].filter(Boolean),
     selectionLabs: [primaryLab, ...shadowLabs].filter(Boolean),

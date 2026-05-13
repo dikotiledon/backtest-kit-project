@@ -7503,4 +7503,17 @@ test('partitionLabs keeps blind holdout out of selection labs', () => {
   assert.deepEqual(tiers.blindHoldoutLabs.map((lab) => lab.labId), ['november-blind']);
 });
 
+test('partitionLabs throws when primaryLab is missing but shadowLabs exist', () => {
+  assert.throws(
+    () => partitionLabs({ primaryLab: null, shadowLabs: [{ labId: 's1' }] }),
+    { message: /primaryLab is required/ },
+  );
+});
+
+test('partitionLabs returns empty arrays when both are empty', () => {
+  const result = partitionLabs({ primaryLab: null, shadowLabs: [] });
+  assert.deepEqual(result.trainingLabs, []);
+  assert.deepEqual(result.selectionLabs, []);
+});
+
 

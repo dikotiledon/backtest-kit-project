@@ -84,6 +84,8 @@
     "noChangeStreakRotateAfter": 32,
     "noNoveltyRotateAfter": 1,
     "maxCyclesPerTrack": 63,
+    "similarityRotateAbove": 0.98,
+    "similarityRotateMinEmitted": 4,
     "preferCurrentChampionUntil": 2,
     "cooldownCyclesAfterPromote": 1,
     "tabuLimit": 1000,

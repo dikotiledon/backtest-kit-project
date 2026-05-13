@@ -354,7 +354,7 @@ export function selectActiveTrack({ tracks = [], state = defaultSchedulerState()
   return enabledTracks[rotationIndex];
 }
 
-function resolveRotationTrigger({ state = defaultSchedulerState(), policy = {}, manifest = {} } = {}) {
+export function detectRotationTrigger({ state = defaultSchedulerState(), policy = {}, manifest = {} } = {}) {
   if (manifest.rotationTrigger) {
     return manifest.rotationTrigger;
   }
@@ -369,9 +369,9 @@ function resolveRotationTrigger({ state = defaultSchedulerState(), policy = {}, 
   const noChangeStreakRotateAfter = Number.isFinite(policy.noChangeStreakRotateAfter)
     ? policy.noChangeStreakRotateAfter
     : 3;
-  const similarityRotateAbove = Number.isFinite(policy.similarityRotateAbove)
-    ? policy.similarityRotateAbove
-    : 0.85;
+  const similarityRotateAbove = Number.isFinite(Number(policy?.similarityRotateAbove))
+    ? Number(policy.similarityRotateAbove)
+    : 0.98;
   const maxCyclesPerTrack = Number.isFinite(policy.maxCyclesPerTrack)
     ? policy.maxCyclesPerTrack
     : 8;
@@ -380,7 +380,16 @@ function resolveRotationTrigger({ state = defaultSchedulerState(), policy = {}, 
     return 'noChangeStreak';
   }
 
-  if (Number.isFinite(manifest.topCandidateSimilarity) && manifest.topCandidateSimilarity > similarityRotateAbove) {
+  const similarityRotateMinEmitted = Number.isFinite(Number(policy?.similarityRotateMinEmitted))
+    ? Math.max(0, Math.floor(Number(policy.similarityRotateMinEmitted)))
+    : 4;
+  const emittedCount = Number(manifest?.searchEfficiency?.emittedVariantCount);
+  const emissionBelowGuard = !Number.isFinite(emittedCount) || emittedCount < similarityRotateMinEmitted;
+  if (
+    Number.isFinite(manifest.topCandidateSimilarity)
+    && manifest.topCandidateSimilarity > similarityRotateAbove
+    && emissionBelowGuard
+  ) {
     return 'noveltySimilarity';
   }
 
@@ -389,6 +398,10 @@ function resolveRotationTrigger({ state = defaultSchedulerState(), policy = {}, 
   }
 
   return null;
+}
+
+function resolveRotationTrigger(input = {}) {
+  return detectRotationTrigger(input);
 }
 
 export function nextStagnationState(input = {}) {

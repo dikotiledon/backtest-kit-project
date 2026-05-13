@@ -8,6 +8,7 @@ import {
   buildNoveltySignature,
   computeConfigSimilarity,
   defaultSchedulerState,
+  detectRotationTrigger,
   nextStagnationState,
   nextTrackState,
   normalizeResearchTracks,
@@ -1355,4 +1356,61 @@ test('nextTrackState decays stagnation after promotion-eligible candidate appear
 
   assert.equal(next.stagnationLevel, 0);
   assert.equal(next.stagnationReason, null);
+});
+
+test('detectRotationTrigger does not rotate on high similarity when emission is healthy', () => {
+  const trigger = detectRotationTrigger({
+    manifest: {
+      topCandidateSimilarity: 0.985,
+      searchEfficiency: { emittedVariantCount: 6 },
+    },
+    policy: {
+      similarityRotateAbove: 0.98,
+      similarityRotateMinEmitted: 4,
+    },
+  });
+  assert.equal(trigger, null);
+});
+
+test('detectRotationTrigger rotates on high similarity when emission is low', () => {
+  const trigger = detectRotationTrigger({
+    manifest: {
+      topCandidateSimilarity: 0.985,
+      searchEfficiency: { emittedVariantCount: 2 },
+    },
+    policy: {
+      similarityRotateAbove: 0.98,
+      similarityRotateMinEmitted: 4,
+    },
+  });
+  assert.equal(trigger, 'noveltySimilarity');
+});
+
+test('detectRotationTrigger does not rotate when emittedVariantCount equals similarityRotateMinEmitted boundary', () => {
+  const trigger = detectRotationTrigger({
+    manifest: {
+      topCandidateSimilarity: 0.985,
+      searchEfficiency: { emittedVariantCount: 4 },
+    },
+    policy: {
+      similarityRotateAbove: 0.98,
+      similarityRotateMinEmitted: 4,
+    },
+  });
+  assert.equal(trigger, null);
+});
+
+test('detectRotationTrigger preserves explicit manifest.rotationTrigger regardless of emission', () => {
+  const trigger = detectRotationTrigger({
+    manifest: {
+      rotationTrigger: 'noChangeStreak',
+      topCandidateSimilarity: 0.985,
+      searchEfficiency: { emittedVariantCount: 10 },
+    },
+    policy: {
+      similarityRotateAbove: 0.98,
+      similarityRotateMinEmitted: 4,
+    },
+  });
+  assert.equal(trigger, 'noChangeStreak');
 });

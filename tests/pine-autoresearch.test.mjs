@@ -80,6 +80,63 @@ test('autoresearch exports offline data preflight builder for dataset verificati
   assert.equal(typeof autoresearchCli.buildOfflineDataPreflight, 'function');
 });
 
+test('runPrimarySweep returns empty leaderboard without reading the file when no variants were written', async () => {
+  const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-zero-variant-'));
+  const projectRoot = tmpRoot;
+  const runId = 'pine-test-zero-variants-2026-05-12';
+  const runDir = path.join(projectRoot, 'pine', 'sweeps', runId);
+  const scriptsDir = path.join(projectRoot, 'scripts');
+  const variantFile = path.join(projectRoot, 'variants.json');
+  const sentinelLeaderboard = { sentinel: true };
+
+  try {
+    await fs.mkdir(runDir, { recursive: true });
+    await fs.mkdir(scriptsDir, { recursive: true });
+    await fs.writeFile(path.join(scriptsDir, 'pine-sweep.mjs'), 'process.exit(0);\n', 'utf8');
+    await fs.writeFile(path.join(projectRoot, 'test.pine'), 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(variantFile, '[]', 'utf8');
+    await fs.writeFile(path.join(runDir, 'leaderboard.json'), JSON.stringify(sentinelLeaderboard, null, 2), 'utf8');
+
+    const result = await autoresearchCli.runPrimarySweep(
+      {
+        projectRoot,
+        scriptPath: path.join(projectRoot, 'test.pine'),
+        grid: 'phase3-core',
+        minTrades: 10,
+        primaryLab: { labId: 'xrp', symbol: 'XRPUSDT', timeframe: '15m', limit: 100, when: '2026-04-21T10:30:00Z' },
+      },
+      runId,
+      { variantFilePath: variantFile, sweepOffset: 7 }
+    );
+
+    const runDirStat = await fs.stat(runDir);
+    assert.equal(runDirStat.isDirectory(), true);
+    assert.deepEqual(result, {
+      runDir,
+      gridName: 'phase3-core',
+      totalCombos: 0,
+      sweepOffset: 7,
+      topConfigs: [],
+      best: null,
+      skipped: true,
+      skipReason: 'no-variants-generated',
+    });
+
+    const leaderboard = JSON.parse(await fs.readFile(path.join(runDir, 'leaderboard.json'), 'utf8'));
+    assert.notDeepEqual(leaderboard, sentinelLeaderboard);
+    assert.equal(leaderboard.skipped, true);
+    assert.deepEqual(leaderboard.ranked, []);
+    assert.equal(leaderboard.meta.runId, runId);
+    assert.equal(leaderboard.meta.gridName, 'phase3-core');
+    assert.equal(leaderboard.meta.totalCombos, 0);
+    assert.equal(leaderboard.meta.sweepOffset, 7);
+    assert.equal(leaderboard.meta.resultCount, 0);
+    assert.equal(leaderboard.meta.skipReason, 'no-variants-generated');
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});
+
 test('loadConfig preserves searchPolicy tabu policy from file config', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-autoresearch-config-tabu-'));
   const configPath = path.join(dir, 'autoresearch.json');

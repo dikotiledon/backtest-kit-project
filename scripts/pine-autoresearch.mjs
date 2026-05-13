@@ -2560,7 +2560,7 @@ export async function ensureChampionState(config) {
   }
 }
 
-async function runPrimarySweep(config, runId, { sweepOffset = 0, totalCombos = null, variantFilePath = null } = {}) {
+export async function runPrimarySweep(config, runId, { sweepOffset = 0, totalCombos = null, variantFilePath = null } = {}) {
   const lab = config.primaryLab;
   const effectiveExchange = resolveEffectiveRuntimeExchange({ pinnedData: config.pinnedData, lab });
   await stagePinnedData(config, [lab]);
@@ -2595,9 +2595,33 @@ async function runPrimarySweep(config, runId, { sweepOffset = 0, totalCombos = n
     sweepArgs.push('--no-cache', '--require-cache-complete', '--cache-root', config.pinnedData.cacheRoot, '--cache-exchange', config.pinnedData.exchangeName);
   }
 
+  const runDir = path.resolve(config.projectRoot, 'pine', 'sweeps', runId);
+  await fs.mkdir(runDir, { recursive: true });
+
+  const resolvedVariantCount = await resolveVariantFileCount(variantFilePath);
+  if (variantFilePath && resolvedVariantCount === 0) {
+    await writeEmptyLeaderboard({
+      runDir,
+      runId,
+      reason: 'no-variants-generated',
+      gridName: config.grid,
+      totalCombos: 0,
+      sweepOffset,
+    });
+    return {
+      runDir,
+      gridName: config.grid,
+      totalCombos: 0,
+      sweepOffset,
+      topConfigs: [],
+      best: null,
+      skipped: true,
+      skipReason: 'no-variants-generated',
+    };
+  }
+
   await runNode(sweepArgs, config.projectRoot);
 
-  const runDir = path.resolve(config.projectRoot, 'pine', 'sweeps', runId);
   const leaderboard = await readJson(path.join(runDir, 'leaderboard.json'));
 
   return {
@@ -2608,6 +2632,34 @@ async function runPrimarySweep(config, runId, { sweepOffset = 0, totalCombos = n
     topConfigs: (leaderboard.ranked || []).slice(0, 5).map((item) => summarizeResult(item)),
     best: leaderboard.ranked?.[0] || null,
   };
+}
+
+async function resolveVariantFileCount(variantFilePath) {
+  if (!variantFilePath) return null;
+  try {
+    const raw = await fs.readFile(variantFilePath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.length : null;
+  } catch {
+    return null;
+  }
+}
+
+async function writeEmptyLeaderboard({ runDir, runId, reason, gridName, totalCombos, sweepOffset }) {
+  const payload = {
+    meta: {
+      runId,
+      gridName,
+      totalCombos,
+      sweepOffset,
+      resultCount: 0,
+      skipReason: reason,
+      generatedAt: new Date().toISOString(),
+    },
+    ranked: [],
+    skipped: true,
+  };
+  await fs.writeFile(path.join(runDir, 'leaderboard.json'), JSON.stringify(payload, null, 2), 'utf8');
 }
 
 async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }) {

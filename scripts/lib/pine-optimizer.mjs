@@ -90,27 +90,21 @@ export function simulateTrades(rows, options = {}) {
 
     if (position) {
       const close = row.Close;
+      const high = Number.isFinite(row.High) ? row.High : close;
+      const low = Number.isFinite(row.Low) ? row.Low : close;
+      const open = Number.isFinite(row.Open) ? row.Open : close;
       const heldBars = i - position.entryIndex;
-      const simPos = Number(row?.Feature_SimPos);
       let exitReason = null;
       let exitPrice = null;
 
-      if (position.side === 'long' && simPos === 1) {
-        if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
-        if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
-      }
-      if (position.side === 'short' && simPos === -1) {
-        if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
-        if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
-      }
-
+      // Exit detection uses PREVIOUS bar's SL/TP (already stored in position)
       if (position.side === 'long') {
-        if (Number.isFinite(position.stopLoss) && close <= position.stopLoss) {
+        if (Number.isFinite(position.stopLoss) && low <= position.stopLoss) {
           exitReason = 'stopLoss';
-          exitPrice = position.stopLoss;
-        } else if (Number.isFinite(position.takeProfit) && close >= position.takeProfit) {
+          exitPrice = open < position.stopLoss ? open : position.stopLoss;
+        } else if (Number.isFinite(position.takeProfit) && high >= position.takeProfit) {
           exitReason = 'takeProfit';
-          exitPrice = position.takeProfit;
+          exitPrice = open > position.takeProfit ? open : position.takeProfit;
         } else if (signal === -1) {
           exitReason = 'flip';
           exitPrice = close;
@@ -119,12 +113,12 @@ export function simulateTrades(rows, options = {}) {
           exitPrice = close;
         }
       } else {
-        if (Number.isFinite(position.stopLoss) && close >= position.stopLoss) {
+        if (Number.isFinite(position.stopLoss) && high >= position.stopLoss) {
           exitReason = 'stopLoss';
-          exitPrice = position.stopLoss;
-        } else if (Number.isFinite(position.takeProfit) && close <= position.takeProfit) {
+          exitPrice = open > position.stopLoss ? open : position.stopLoss;
+        } else if (Number.isFinite(position.takeProfit) && low <= position.takeProfit) {
           exitReason = 'takeProfit';
-          exitPrice = position.takeProfit;
+          exitPrice = open < position.takeProfit ? open : position.takeProfit;
         } else if (signal === 1) {
           exitReason = 'flip';
           exitPrice = close;
@@ -137,6 +131,17 @@ export function simulateTrades(rows, options = {}) {
       if (exitReason) {
         trades.push(buildTrade(position, row, exitReason, exitPrice, i));
         position = null;
+      } else {
+        // Update SL/TP AFTER exit check — effective next bar
+        const simPos = Number(row?.Feature_SimPos);
+        if (position.side === 'long' && simPos === 1) {
+          if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
+          if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
+        }
+        if (position.side === 'short' && simPos === -1) {
+          if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
+          if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
+        }
       }
     }
 

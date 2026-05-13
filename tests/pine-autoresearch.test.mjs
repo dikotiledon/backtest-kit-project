@@ -21,6 +21,7 @@ import {
   sameConfig,
   selectChampionBootstrapSource,
   selectRobustMatrixCandidate,
+  shortConfigLabel,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
 import {
@@ -7514,6 +7515,14 @@ test('partitionLabs returns empty arrays when both are empty', () => {
   const result = partitionLabs({ primaryLab: null, shadowLabs: [] });
   assert.deepEqual(result.trainingLabs, []);
   assert.deepEqual(result.selectionLabs, []);
+});
+
+test('shortConfigLabel produces readable short label', () => {
+  const full = '0007__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20';
+  const short = shortConfigLabel(full);
+  assert.ok(short.length < 20, `Expected short label, got: ${short}`);
+  assert.ok(short.startsWith('0007_'));
+  assert.equal(short, shortConfigLabel(full)); // deterministic
 });
 
 

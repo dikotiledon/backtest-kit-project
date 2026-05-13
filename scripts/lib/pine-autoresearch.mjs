@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { computeExpectancy, evaluateExpectancyGuard } from './pine-expectancy.mjs';
 import { decideLineagePromotionGate, summarizePromotionLineage } from './pine-autoresearch-lineage.mjs';
 import { decideSignificanceGate } from './pine-significance-gate.mjs';
@@ -9,6 +10,13 @@ function round(value, digits = 2) {
   if (!Number.isFinite(value)) return 0;
   const factor = 10 ** digits;
   return Math.round(value * factor) / factor;
+}
+
+export function shortConfigLabel(configId) {
+  if (!configId || typeof configId !== 'string') return 'unknown';
+  const prefix = configId.slice(0, 4);
+  const hash = createHash('sha256').update(configId).digest('hex').slice(0, 8);
+  return `${prefix}_${hash}`;
 }
 
 function finiteNumberOrNull(value) {
@@ -1072,6 +1080,14 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
   const noChangeStreak = latestManifest?.researchState?.noChangeStreak || 0;
   const bestAlternative = findBestAlternative(latestManifest?.primarySweep, champion);
 
+  const labelLegend = new Map();
+  const sl = (id) => {
+    if (!id || typeof id !== 'string') return 'unknown';
+    const short = shortConfigLabel(id);
+    labelLegend.set(short, id);
+    return short;
+  };
+
   const lines = [
     `# Pine Autoresearch Digest - ${config.matrixId}`,
     '',
@@ -1082,10 +1098,10 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
     '',
     '## Current state',
     '',
-    champion ? `- Champion: ${champion.configId} (score ${champion.score ?? 'n/a'}, ROI ${champion.roiPct ?? 'n/a'}%)` : '- Champion: n/a',
+    champion ? `- Champion: ${sl(champion.configId)} (score ${champion.score ?? 'n/a'}, ROI ${champion.roiPct ?? 'n/a'}%)` : '- Champion: n/a',
     steadyState
       ? '- Latest challenger: no new candidate, latest scout matched the current champion'
-      : challenger ? `- Latest challenger: ${challenger.configId} (score ${challenger.score}, ROI ${challenger.roiPct}%)` : '- Latest challenger: none',
+      : challenger ? `- Latest challenger: ${sl(challenger.configId)} (score ${challenger.score}, ROI ${challenger.roiPct}%)` : '- Latest challenger: none',
     decision ? `- Matrix recommendation: **${decision.recommendation.toUpperCase()}**` : '- Matrix recommendation: n/a',
   ];
 
@@ -1095,7 +1111,7 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
       lines.push(`- No new candidate streak: ${noChangeStreak} cycle(s)`);
     }
     if (bestAlternative) {
-      lines.push(`- Best alternate tested this cycle: ${bestAlternative.configId} (score ${bestAlternative.score}, ROI ${bestAlternative.roiPct}%)`);
+      lines.push(`- Best alternate tested this cycle: ${sl(bestAlternative.configId)} (score ${bestAlternative.score}, ROI ${bestAlternative.roiPct}%)`);
       lines.push(`- Alternate delta vs champion: score ${round(bestAlternative.score - (champion?.score ?? 0), 2)}, ROI ${round(bestAlternative.roiPct - (champion?.roiPct ?? 0), 2)}%`);
     }
   }
@@ -1122,7 +1138,7 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
   if (latestManifest?.paretoShortlist?.length) {
     lines.push('', '## Pareto shortlist', '');
     for (const item of latestManifest.paretoShortlist) {
-      lines.push(`- ${item.configId}: score ${item.score}, ROI ${item.roiPct}%, PF ${item.profitFactor}, max DD ${item.maxDrawdownPct}%`);
+      lines.push(`- ${sl(item.configId)}: score ${item.score}, ROI ${item.roiPct}%, PF ${item.profitFactor}, max DD ${item.maxDrawdownPct}%`);
     }
   }
 
@@ -1132,8 +1148,8 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
 
   if (challenger && previous && (!steadyState || !sameConfig(previous?.config, challenger?.config))) {
     lines.push('', '## Change since previous scout', '');
-    lines.push(`- previous challenger: ${previous.configId} (score ${previous.score}, ROI ${previous.roiPct}%)`);
-    lines.push(`- latest challenger: ${challenger.configId} (score ${challenger.score}, ROI ${challenger.roiPct}%)`);
+    lines.push(`- previous challenger: ${sl(previous.configId)} (score ${previous.score}, ROI ${previous.roiPct}%)`);
+    lines.push(`- latest challenger: ${sl(challenger.configId)} (score ${challenger.score}, ROI ${challenger.roiPct}%)`);
     lines.push(`- challenger score delta: ${round(challenger.score - previous.score, 2)}`);
     lines.push(`- challenger ROI delta: ${round(challenger.roiPct - previous.roiPct, 2)}%`);
   } else if (steadyState) {
@@ -1145,20 +1161,37 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
     lines.push('| ts | type | detail |');
     lines.push('| --- | --- | --- |');
     for (const event of recentEvents) {
-      lines.push(`| ${event.timestamp} | ${event.type} | ${event.summary || event.toConfigId || event.challengerConfigId || 'n/a'} |`);
+      lines.push(`| ${event.timestamp} | ${event.type} | ${event.summary || sl(event.toConfigId || event.challengerConfigId || '') || 'n/a'} |`);
     }
   }
 
   lines.push('', '## Recommendation', '', decision?.summary || 'No decision available.', '');
+
+  if (labelLegend.size > 0) {
+    lines.push('## Label Legend', '');
+    for (const [short, full] of labelLegend) {
+      lines.push(`- ${short}: ${full}`);
+    }
+    lines.push('');
+  }
+
   return `${lines.join('\n')}\n`;
 }
 
 export function renderHistoryMarkdown({ config, championState, historyEvents = [] }) {
   const recent = historyEvents.slice(-20).reverse();
+  const labelLegend = new Map();
+  const sl = (id) => {
+    if (!id || typeof id !== 'string') return 'n/a';
+    const short = shortConfigLabel(id);
+    labelLegend.set(short, id);
+    return short;
+  };
+
   const lines = [
     `# Pine Autoresearch History - ${config.matrixId}`,
     '',
-    championState ? `- Champion: ${championState.configId}` : '- Champion: n/a',
+    championState ? `- Champion: ${sl(championState.configId)}` : '- Champion: n/a',
     championState?.promotedAt ? `- Promoted at: ${championState.promotedAt}` : '- Promoted at: n/a',
     '',
     '| ts | type | champion | challenger | recommendation | note |',
@@ -1166,7 +1199,15 @@ export function renderHistoryMarkdown({ config, championState, historyEvents = [
   ];
 
   for (const event of recent) {
-    lines.push(`| ${event.timestamp} | ${event.type} | ${event.championConfigId || event.fromConfigId || 'n/a'} | ${event.challengerConfigId || event.toConfigId || 'n/a'} | ${event.recommendation || 'n/a'} | ${event.summary || event.note || 'n/a'} |`);
+    lines.push(`| ${event.timestamp} | ${event.type} | ${sl(event.championConfigId || event.fromConfigId || '')} | ${sl(event.challengerConfigId || event.toConfigId || '')} | ${event.recommendation || 'n/a'} | ${event.summary || event.note || 'n/a'} |`);
+  }
+
+  if (labelLegend.size > 0) {
+    lines.push('', '## Label Legend', '');
+    for (const [short, full] of labelLegend) {
+      lines.push(`- ${short}: ${full}`);
+    }
+    lines.push('');
   }
 
   return `${lines.join('\n')}\n`;

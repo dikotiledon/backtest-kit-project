@@ -6560,6 +6560,101 @@ test('runScout records next non-global lane after exhausted globalAllParameter h
   }
 });
 
+
+test('runScout exhaustion marker never reaches sweep executable pipeline', async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-incumbent-exhaustion-marker-'));
+  try {
+    const scriptPath = path.join(dir, 'strategy.pine');
+    const configPath = path.join(dir, 'config.json');
+    const researchRoot = path.join(dir, 'research');
+    const digestRoot = path.join(dir, 'digest');
+    await fs.writeFile(scriptPath, 'x = input.float(1.8, "minPredSum")\n', 'utf8');
+    await fs.writeFile(configPath, JSON.stringify({
+      matrixId: 'incumbent-exhaustion-marker-runscout-test',
+      scriptPath,
+      outputs: { researchRoot, digestRoot },
+      maxConfigs: 4,
+      minTrades: 1,
+      researchTracks: [{ trackId: 'disabled-track', enabled: false }],
+      searchPolicy: {
+        mode: 'incumbent-local',
+        exploitRatio: 0.8,
+        paretoShortlistSize: 2,
+        matrixCandidateLimit: 0,
+      },
+      primaryLab: {
+        labId: 'primary',
+        symbol: 'XRPUSDT',
+        timeframe: '15m',
+        limit: 12,
+        when: '2026-05-01T03:00:00.000Z',
+        exchange: 'ccxt-exchange',
+      },
+      shadowLabs: [],
+      blindHoldoutLabs: [],
+      pinnedData: { enabled: false },
+      regimeExitResearch: { enabled: false },
+      retention: { pruneSweepRuns: false, pruneEvaluationRuns: false, prunePartialRuns: false },
+    }), 'utf8');
+
+    const config = await autoresearchCli.loadConfig(dir, configPath, {});
+    const champion = {
+      configId: 'champ-runscout-incumbent-exhaustion-marker',
+      score: 10,
+      tradeCount: 10,
+      winRatePct: 50,
+      roiPct: 1,
+      profitFactor: 1.1,
+      maxDrawdownPct: 2,
+      config: { minPredSum: 1.8, adxThreshold: 20 },
+    };
+    await fs.mkdir(autoresearchCli.manifestsDir(config), { recursive: true });
+    await fs.mkdir(path.join(config.researchRoot, 'state', 'scheduler'), { recursive: true });
+    await fs.writeFile(path.join(config.researchRoot, 'champion.json'), JSON.stringify({
+      ...champion,
+      configFingerprint: 'champ-runscout-incumbent-exhaustion-marker-fp',
+    }), 'utf8');
+    const invariantCycles = Array.from({ length: 5 }, (_, index) => JSON.stringify({
+      type: 'cycle',
+      runId: `entry-invariant-${index + 1}`,
+      challenger: { tradeCount: 10, winRatePct: 50 },
+      searchPlan: { variants: [{ patch: { slAtrMult: 1 + index * 0.1 } }] },
+    })).join('\n');
+    await fs.writeFile(path.join(config.researchRoot, 'history.jsonl'), `${invariantCycles}\n`, 'utf8');
+
+    const marker = {
+      metadata: {
+        allCandidatesTabu: true,
+        poolExhaustionRatio: 0.75,
+        exhaustedFamilies: ['signal', 'risk'],
+      },
+      allCandidatesTabu: true,
+      lane: 'exhaustion',
+      family: 'incumbent-search',
+    };
+    const sweepCalls = [];
+    const result = await autoresearchCli.runScout(config, {
+      buildIncumbentSearchBatch: () => [marker],
+      runPrimarySweep: async (...args) => {
+        sweepCalls.push(args);
+        throw new Error('primary sweep must not receive exhaustion marker');
+      },
+    });
+
+    assert.deepEqual(sweepCalls, []);
+    const variantFilePath = path.join(config.researchRoot, `${result.manifest.runId}-variants.json`);
+    const variantFile = await readIfExists(variantFilePath);
+    assert.notEqual(variantFile, null);
+    const variants = JSON.parse(variantFile);
+    assert.deepEqual(variants, []);
+    assert.equal(variants.some((variant) => variant?.lane === 'exhaustion' || variant?.metadata?.exhaustedFamilies), false);
+    assert.equal(result.manifest.searchEfficiency.allCandidatesTabu, true);
+    assert.deepEqual(result.manifest.searchEfficiency.exhaustedFamilies, ['signal', 'risk']);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('runScout skips primary sweep and records selected exitRegime exhaustion without fallback variants', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-runscout-exit-exhausted-'));
   try {

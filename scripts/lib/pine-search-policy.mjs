@@ -244,7 +244,7 @@ function pickNonTabuVariant({
   };
 }
 
-function signalPatches(base) {
+export function signalPatches(base) {
   return [
     { neighborsCount: Math.max(12, (base.neighborsCount || 32) - 8) },
     { neighborsCount: (base.neighborsCount || 32) + 8 },
@@ -261,7 +261,7 @@ function signalPatches(base) {
   ];
 }
 
-function riskPatches(base) {
+export function riskPatches(base) {
   return [
     { slAtrMult: Math.max(0.75, (base.slAtrMult || 1) - 0.25) },
     { slAtrMult: (base.slAtrMult || 1) + 0.25 },
@@ -414,12 +414,10 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
   if (exhaustedFamilies.length > 0) {
     batch.push({
       metadata: {
-        exhaustedFamily: exhaustedFamilies.length === 2 ? 'signal' : exhaustedFamilies[0],
         allCandidatesTabu: batch.length === 0,
         poolExhaustionRatio,
         exhaustedFamilies,
       },
-      exhaustedFamily: exhaustedFamilies.length === 2 ? 'signal' : exhaustedFamilies[0],
       allCandidatesTabu: batch.length === 0,
       lane: 'exhaustion',
       family: 'incumbent-search',

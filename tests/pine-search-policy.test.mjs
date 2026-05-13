@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildIncumbentSearchBatch } from '../scripts/lib/pine-search-policy.mjs';
+import { buildIncumbentSearchBatch, riskPatches, signalPatches } from '../scripts/lib/pine-search-policy.mjs';
 import { buildCanonicalConfigFingerprint } from '../scripts/lib/pine-global-search.mjs';
 import { buildSearchEfficiency } from '../scripts/pine-autoresearch.mjs';
 
@@ -38,37 +38,6 @@ function buildBaselineConfig() {
   };
 }
 
-function signalPatchCandidatesForTest(base) {
-  return [
-    { neighborsCount: Math.max(12, (base.neighborsCount || 32) - 8) },
-    { neighborsCount: (base.neighborsCount || 32) + 8 },
-    { adxThreshold: Math.max(10, (base.adxThreshold || 20) - 5) },
-    { adxThreshold: (base.adxThreshold || 20) + 5 },
-    { minPredSum: Math.max(1, (base.minPredSum || 2) - 0.5) },
-    { minPredSum: (base.minPredSum || 2) + 0.5 },
-    { minBarsBetween: Math.max(0, (base.minBarsBetween || 2) - 1) },
-    { minBarsBetween: (base.minBarsBetween || 2) + 2 },
-    { h: Math.max(4, (base.h || 8) - 2) },
-    { h: (base.h || 8) + 2 },
-    { r: Math.max(2, (base.r || 8) / 2) },
-    { x: Math.max(15, (base.x || 25) - 5) },
-  ];
-}
-
-function riskPatchCandidatesForTest(base) {
-  return [
-    { slAtrMult: Math.max(0.75, (base.slAtrMult || 1) - 0.25) },
-    { slAtrMult: (base.slAtrMult || 1) + 0.25 },
-    { tpAtrMult: Math.max(1.5, (base.tpAtrMult || 2.5) - 0.5) },
-    { tpAtrMult: (base.tpAtrMult || 2.5) + 0.5 },
-    { trailAtrMult: Math.max(0.75, (base.trailAtrMult || 1) - 0.25) },
-    { trailAtrMult: (base.trailAtrMult || 1) + 0.25 },
-    { trailActivateR: Math.max(0, (base.trailActivateR || 0.5) - 0.5) },
-    { trailActivateR: (base.trailActivateR || 0.5) + 0.5 },
-    { riskAtrLen: Math.max(7, (base.riskAtrLen || 14) - 7) },
-    { riskAtrLen: (base.riskAtrLen || 14) + 7 },
-  ];
-}
 
 function frozenIncumbent(config) {
   return {
@@ -93,47 +62,23 @@ const incumbent = {
   x: 25,
 };
 
-const signalPatches = [
-  { neighborsCount: 24 },
-  { neighborsCount: 40 },
-  { adxThreshold: 15 },
-  { adxThreshold: 25 },
-  { minPredSum: 1.5 },
-  { minPredSum: 2.5 },
-  { minBarsBetween: 1 },
-  { minBarsBetween: 4 },
-  { h: 6 },
-  { h: 10 },
-  { r: 4 },
-  { x: 20 },
-];
+const incumbentSignalPatches = signalPatches(incumbent);
 
-const signalFingerprints = signalPatches.map((patch) => fingerprint({
+const signalFingerprints = incumbentSignalPatches.map((patch) => fingerprint({
   ...frozenIncumbent(incumbent),
   ...patch,
 }));
 
-const riskPatches = [
-  { slAtrMult: 0.75 },
-  { slAtrMult: 1.25 },
-  { tpAtrMult: 2 },
-  { tpAtrMult: 3 },
-  { trailAtrMult: 0.75 },
-  { trailAtrMult: 1.25 },
-  { trailActivateR: 0 },
-  { trailActivateR: 1 },
-  { riskAtrLen: 7 },
-  { riskAtrLen: 21 },
-];
+const incumbentRiskPatches = riskPatches(incumbent);
 
 const requiredMinPredSumPatch = { minPredSum: 1.5 };
 
-const riskFingerprints = riskPatches.map((patch) => fingerprint({
+const riskFingerprints = incumbentRiskPatches.map((patch) => fingerprint({
   ...frozenIncumbent(incumbent),
   ...patch,
 }));
 
-const enforcedRiskFingerprints = riskPatches.map((patch) => fingerprint({
+const enforcedRiskFingerprints = incumbentRiskPatches.map((patch) => fingerprint({
   ...frozenIncumbent(incumbent),
   ...patch,
   ...requiredMinPredSumPatch,
@@ -460,8 +405,8 @@ test('buildIncumbentSearchBatch rejects object-shaped tabu entries for enforced 
 test('buildIncumbentSearchBatch reports tabu exhaustion when >75% of pool is rejected', () => {
   const base = buildBaselineConfig();
   const poolSample = [
-    ...signalPatchCandidatesForTest(base),
-    ...riskPatchCandidatesForTest(base),
+    ...signalPatches(base),
+    ...riskPatches(base),
   ];
   const tabuFingerprints = poolSample
     .slice(0, Math.ceil(poolSample.length * 0.9))
@@ -479,7 +424,6 @@ test('buildIncumbentSearchBatch reports tabu exhaustion when >75% of pool is rej
   assert.ok(markers.length > 0, 'at least one exhaustion marker should be emitted');
   for (const marker of markers) {
     assert.equal(marker.family, 'incumbent-search');
-    assert.ok(marker.exhaustedFamily === 'signal' || marker.exhaustedFamily === 'risk', 'exhaustedFamily must be signal or risk');
     assert.ok(Array.isArray(marker.metadata?.exhaustedFamilies), 'metadata.exhaustedFamilies must be an array');
     assert.ok(marker.metadata.exhaustedFamilies.length > 0, 'metadata.exhaustedFamilies must be non-empty');
     assert.equal(typeof marker.metadata?.allCandidatesTabu, 'boolean');

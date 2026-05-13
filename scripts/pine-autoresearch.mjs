@@ -1271,16 +1271,25 @@ function uniqueStrings(values = []) {
     .filter(Boolean))];
 }
 
+function isExhaustionMarkerVariant(variant) {
+  return Boolean(variant)
+    && (variant?.lane === 'exhaustion'
+      || Boolean(variant?.exhaustedFamily)
+      || Array.isArray(variant?.metadata?.exhaustedFamilies));
+}
+
+function isExecutableSearchVariant(variant) {
+  return Boolean(variant) && !isExhaustionMarkerVariant(variant);
+}
+
 export function buildSearchEfficiency(searchBatch = [], options = {}) {
   const variants = Array.isArray(searchBatch) ? searchBatch : [];
-  const emittedVariants = variants.filter((variant) => Boolean(variant) && !variant?.exhaustedFamily && variant?.lane !== 'exhaustion');
-  const familyExhaustion = variants
-    .filter((variant) => variant?.exhaustedFamily || variant?.metadata?.exhaustedFamily)
-    .flatMap((variant) => {
-      const list = Array.isArray(variant?.metadata?.exhaustedFamilies) ? variant.metadata.exhaustedFamilies : null;
-      if (list && list.length) return list;
-      return [variant.exhaustedFamily || variant.metadata?.exhaustedFamily].filter(Boolean);
-    });
+  const emittedVariants = variants.filter(isExecutableSearchVariant);
+  const familyExhaustion = variants.flatMap((variant) => {
+    const list = Array.isArray(variant?.metadata?.exhaustedFamilies) ? variant.metadata.exhaustedFamilies : null;
+    if (list && list.length) return list;
+    return [variant?.exhaustedFamily || variant?.metadata?.exhaustedFamily].filter(Boolean);
+  });
   const exhaustedFamilies = uniqueStrings([
     ...familyExhaustion,
     ...(Array.isArray(options.exhaustedFamilies) ? options.exhaustedFamilies : []),
@@ -2836,6 +2845,7 @@ export async function runScout(config, dependencies = {}) {
   const startedAtMs = Date.now();
   const withDuration = (manifest) => ({ ...manifest, durationMs: Math.max(0, Date.now() - startedAtMs) });
   const runPrimarySweepFn = dependencies.runPrimarySweep || runPrimarySweep;
+  const buildIncumbentSearchBatchFn = dependencies.buildIncumbentSearchBatch || buildIncumbentSearchBatch;
   await ensureDirs(config);
   const queue = await readPromotionQueue(promotionQueueFilePath(config));
   const pendingPromotion = selectNextPendingPromotion(queue);
@@ -2970,7 +2980,7 @@ export async function runScout(config, dependencies = {}) {
   });
 
   const fallbackSearchBatch = entryInvariance.flagged
-    ? buildIncumbentSearchBatch({
+    ? buildIncumbentSearchBatchFn({
         incumbent: championState.config,
         maxConfigs: trackedConfig.maxConfigs,
         historyEvents: historyEventsBefore,
@@ -2986,7 +2996,7 @@ export async function runScout(config, dependencies = {}) {
           budgetPolicy: searchPolicyWithNovelty,
           schedulerState,
         })
-      : buildIncumbentSearchBatch({
+      : buildIncumbentSearchBatchFn({
           incumbent: championState.config,
           maxConfigs: trackedConfig.maxConfigs,
           historyEvents: historyEventsBefore,
@@ -3026,15 +3036,20 @@ export async function runScout(config, dependencies = {}) {
     : fallbackSearchBatch.length > 0
       ? fallbackSearchBatch
       : regimeAwareSearchBatch;
-  const searchVariants = enforceEntryInvarianceOnSearchBatch({
-    searchBatch: selectedSearchBatch,
+  const executableBatch = selectedSearchBatch.filter(isExecutableSearchVariant);
+  const executableVariants = enforceEntryInvarianceOnSearchBatch({
+    searchBatch: executableBatch,
     championConfig: championState.config,
     historyEvents: historyEventsBefore,
     policy: searchPolicyWithNovelty,
     schedulerState,
     entryInvariance,
   });
-  const totalCombos = searchVariants.length;
+  const exhaustionMarkers = selectedSearchBatch.filter(isExhaustionMarkerVariant);
+  const searchVariants = exhaustionMarkers.length
+    ? [...executableVariants, ...exhaustionMarkers]
+    : executableVariants;
+  const totalCombos = executableVariants.length;
   const sweepOffset = computeSweepOffset({
     historyEvents: historyEventsBefore,
     maxConfigs: trackedConfig.maxConfigs,
@@ -3174,8 +3189,32 @@ export async function runScout(config, dependencies = {}) {
     };
   }
 
-  await writeJson(variantFilePath, searchVariants);
-  const primarySweep = await runPrimarySweepFn(trackedConfig, runId, { sweepOffset, totalCombos, variantFilePath });
+  await writeJson(variantFilePath, executableVariants);
+  let primarySweep;
+  if (executableVariants.length === 0) {
+    const runDir = path.resolve(trackedConfig.projectRoot, 'pine', 'sweeps', runId);
+    await fs.mkdir(runDir, { recursive: true });
+    await writeEmptyLeaderboard({
+      runDir,
+      runId,
+      reason: 'no-variants-generated',
+      gridName: trackedConfig.grid,
+      totalCombos: 0,
+      sweepOffset,
+    });
+    primarySweep = {
+      runDir,
+      gridName: trackedConfig.grid,
+      totalCombos: 0,
+      sweepOffset,
+      topConfigs: [],
+      best: null,
+      skipped: true,
+      skipReason: 'no-variants-generated',
+    };
+  } else {
+    primarySweep = await runPrimarySweepFn(trackedConfig, runId, { sweepOffset, totalCombos, variantFilePath });
+  }
   const paretoShortlist = buildParetoShortlist({
     champion: summarizeResult(championState),
     rankedResults: primarySweep.topConfigs,

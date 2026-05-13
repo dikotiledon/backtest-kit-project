@@ -1,16 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { buildIncumbentSearchBatch, riskPatches, signalPatches } from '../scripts/lib/pine-search-policy.mjs';
-import { buildCanonicalConfigFingerprint } from '../scripts/lib/pine-global-search.mjs';
+import { buildIncumbentSearchBatch, configFingerprint, riskPatches, signalPatches } from '../scripts/lib/pine-search-policy.mjs';
 import { buildSearchEfficiency } from '../scripts/pine-autoresearch.mjs';
 
 function fingerprint(config) {
-  return buildCanonicalConfigFingerprint(config || {});
-}
-
-function configFingerprint(config) {
-  return fingerprint(config);
+  return configFingerprint(config);
 }
 
 function buildBaselineConfig() {
@@ -196,7 +191,7 @@ test('buildIncumbentSearchBatch does not replay duplicate final configs within o
   const emittedBatch = batch.filter((variant) => variant?.lane !== 'exhaustion');
   const fingerprints = emittedBatch.map((variant) => fingerprint(variant.config));
 
-  assert.equal(emittedBatch.length, 12);
+  assert.equal(emittedBatch.length, Math.min(20, signalPatches(incumbent).length));
   assert.equal(new Set(fingerprints).size, fingerprints.length);
 });
 
@@ -510,4 +505,37 @@ test('buildIncumbentSearchBatch does not report exhaustion from batch de-dupe al
   assert.equal(efficiency.allCandidatesTabu, false, 'allCandidatesTabu must be false without external tabu pressure');
   assert.equal(efficiency.exhaustedFamilies.length, 0, 'batch de-dupe must not mark families exhausted');
   assert.ok(efficiency.emittedVariantCount > 0, 'healthy pool should emit non-marker variants');
+});
+
+test('signalPatches returns at least 18 distinct candidates at baseline temperature', () => {
+  const base = buildBaselineConfig();
+  const patches = signalPatches(base, { temperature: 1 });
+  assert.ok(patches.length >= 18, `expected >=18, got ${patches.length}`);
+  const fingerprints = new Set(patches.map((patch) => configFingerprint({ ...base, ...patch })));
+  assert.equal(fingerprints.size, patches.length, 'patches must be distinct under configFingerprint');
+});
+
+test('signalPatches scales candidate count with temperature', () => {
+  const base = buildBaselineConfig();
+  const patches = signalPatches(base, { temperature: 4 });
+  assert.ok(patches.length >= 24, `expected >=24 at temperature 4, got ${patches.length}`);
+});
+
+test('riskPatches returns at least 15 distinct candidates at baseline temperature', () => {
+  const base = buildBaselineConfig();
+  const patches = riskPatches(base, { temperature: 1 });
+  assert.ok(patches.length >= 15, `expected >=15, got ${patches.length}`);
+  const fingerprints = new Set(patches.map((patch) => configFingerprint({ ...base, ...patch })));
+  assert.equal(fingerprints.size, patches.length);
+});
+
+test('riskPatches never produces invalid knob values', () => {
+  const base = { ...buildBaselineConfig(), slAtrMult: 0.25, tpAtrMult: 1.5, riskAtrLen: 7, trailActivateR: 0 };
+  const patches = riskPatches(base, { temperature: 4 });
+  for (const patch of patches) {
+    if ('slAtrMult' in patch) assert.ok(patch.slAtrMult >= 0.125, `slAtrMult ${patch.slAtrMult} below lower bound`);
+    if ('tpAtrMult' in patch) assert.ok(patch.tpAtrMult >= 1.0, `tpAtrMult ${patch.tpAtrMult} below lower bound`);
+    if ('riskAtrLen' in patch) assert.ok(patch.riskAtrLen >= 5, `riskAtrLen ${patch.riskAtrLen} below lower bound`);
+    if ('trailActivateR' in patch) assert.ok(patch.trailActivateR >= 0, `trailActivateR negative`);
+  }
 });

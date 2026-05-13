@@ -4,7 +4,7 @@ function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
 
-function configFingerprint(config) {
+export function configFingerprint(config) {
   return buildCanonicalConfigFingerprint(config || {});
 }
 
@@ -28,11 +28,11 @@ const DEFAULT_PATCH_BOUNDS = {
   h: [4, 128],
   r: [2, 128],
   x: [15, 128],
-  slAtrMult: [0.25, 10],
-  tpAtrMult: [0.25, 20],
+  slAtrMult: [0.125, 10],
+  tpAtrMult: [1, 20],
   trailAtrMult: [0.25, 10],
   trailActivateR: [0, 5],
-  riskAtrLen: [1, 200],
+  riskAtrLen: [5, 200],
 };
 
 const CORRELATED_MUTATION_KEYS = {
@@ -270,7 +270,7 @@ function pickNonTabuVariant({
   };
 }
 
-export function signalPatches(base) {
+function legacySignalPatches(base) {
   return [
     { neighborsCount: Math.max(12, (base.neighborsCount || 32) - 8) },
     { neighborsCount: (base.neighborsCount || 32) + 8 },
@@ -287,7 +287,38 @@ export function signalPatches(base) {
   ];
 }
 
-export function riskPatches(base) {
+export function signalPatches(base, { temperature = 1 } = {}) {
+  const safeTemp = Math.max(1, Number(temperature) || 1);
+  const baseNeighbors = base.neighborsCount || 32;
+  const baseAdx = base.adxThreshold || 20;
+  const baseMinPred = base.minPredSum || 2;
+  const baseBars = base.minBarsBetween || 2;
+  const baseH = base.h || 8;
+  const baseR = base.r || 8;
+  const baseX = base.x || 25;
+  const stepScales = safeTemp >= 3 ? [0.5, 2, 3] : safeTemp >= 2 ? [0.5, 2] : [0.5];
+  const targetCount = safeTemp >= 3 ? 36 : safeTemp >= 2 ? 24 : 18;
+  const patches = [...legacySignalPatches(base)];
+  for (const scale of stepScales) {
+    patches.push(
+      { neighborsCount: Math.max(12, Math.round(baseNeighbors - 8 * scale)) },
+      { neighborsCount: Math.round(baseNeighbors + 8 * scale) },
+      { adxThreshold: Math.max(10, Math.round(baseAdx - 5 * scale)) },
+      { adxThreshold: Math.round(baseAdx + 5 * scale) },
+      { minPredSum: Math.max(1, Number((baseMinPred - 0.5 * scale).toFixed(2))) },
+      { minPredSum: Number((baseMinPred + 0.5 * scale).toFixed(2)) },
+      { minBarsBetween: Math.max(0, Math.round(baseBars - scale)) },
+      { minBarsBetween: Math.round(baseBars + 2 * scale) },
+      { h: Math.max(4, Math.round(baseH - 2 * scale)) },
+      { h: Math.round(baseH + 2 * scale) },
+      { r: Math.max(2, Number((baseR / (1 + scale)).toFixed(2))) },
+      { x: Math.max(15, Math.round(baseX - 5 * scale)) },
+    );
+  }
+  return deduplicatePatches(patches, base, targetCount);
+}
+
+function legacyRiskPatches(base) {
   return [
     { slAtrMult: Math.max(0.75, (base.slAtrMult || 1) - 0.25) },
     { slAtrMult: (base.slAtrMult || 1) + 0.25 },
@@ -300,6 +331,46 @@ export function riskPatches(base) {
     { riskAtrLen: Math.max(7, (base.riskAtrLen || 14) - 7) },
     { riskAtrLen: (base.riskAtrLen || 14) + 7 },
   ];
+}
+
+export function riskPatches(base, { temperature = 1 } = {}) {
+  const safeTemp = Math.max(1, Number(temperature) || 1);
+  const baseSl = base.slAtrMult || 1;
+  const baseTp = base.tpAtrMult || 2.5;
+  const baseTrail = base.trailAtrMult || 1;
+  const baseActivate = base.trailActivateR || 0.5;
+  const baseAtrLen = base.riskAtrLen || 14;
+  const stepScales = safeTemp >= 3 ? [0.5, 2, 3] : safeTemp >= 2 ? [0.5, 2] : [0.5];
+  const targetCount = safeTemp >= 3 ? 30 : safeTemp >= 2 ? 20 : 15;
+  const patches = [...legacyRiskPatches(base)];
+  for (const scale of stepScales) {
+    patches.push(
+      { slAtrMult: Math.max(0.125, Number((baseSl - 0.25 * scale).toFixed(3))) },
+      { slAtrMult: Number((baseSl + 0.25 * scale).toFixed(3)) },
+      { tpAtrMult: Math.max(1.0, Number((baseTp - 0.5 * scale).toFixed(3))) },
+      { tpAtrMult: Number((baseTp + 0.5 * scale).toFixed(3)) },
+      { trailAtrMult: Math.max(0.25, Number((baseTrail - 0.25 * scale).toFixed(3))) },
+      { trailAtrMult: Number((baseTrail + 0.25 * scale).toFixed(3)) },
+      { trailActivateR: Math.max(0, Number((baseActivate - 0.25 * scale).toFixed(3))) },
+      { trailActivateR: Number((baseActivate + 0.5 * scale).toFixed(3)) },
+      { riskAtrLen: Math.max(5, Math.round(baseAtrLen - 7 * scale)) },
+      { riskAtrLen: Math.round(baseAtrLen + 7 * scale) },
+    );
+  }
+  return deduplicatePatches(patches, base, targetCount);
+}
+
+function deduplicatePatches(patches, base, limit = Infinity) {
+  const seen = new Set();
+  const output = [];
+  for (const patch of patches) {
+    const fp = configFingerprint({ ...base, ...patch });
+    if (seen.has(fp)) continue;
+    seen.add(fp);
+    output.push(patch);
+    if (output.length >= limit) break;
+  }
+  return output;
 }
 
 function forcedEntryPatches(base, requiredKeys = []) {
@@ -364,8 +435,8 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
   const externalTabuFingerprints = new Set(tabuSet);
 
   const familyPatchMap = {
-    signal: signalPatches(base),
-    risk: riskPatches(base),
+    signal: signalPatches(base, { temperature }),
+    risk: riskPatches(base, { temperature }),
   };
   const poolSizes = {
     signal: familyPatchMap.signal.length,

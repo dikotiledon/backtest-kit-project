@@ -127,6 +127,9 @@ export function pruneTabuFingerprints(input = {}) {
     : 0;
   const currentChampionFingerprint = normalizeKnownFingerprint(input.currentChampionFingerprint);
   const policy = normalizeTabuPrunePolicy(input.policy);
+  const stagnationLevel = Math.max(0, Math.floor(Number(input.stagnationLevel) || 0));
+  const divisor = stagnationLevel >= 2 ? 4 : stagnationLevel >= 1 ? 2 : 1;
+  const effectiveMaxAge = Math.max(2, Math.floor(policy.maxAgeCycles / divisor));
   const deduped = new Map();
 
   entries.forEach((entry, index) => {
@@ -140,7 +143,7 @@ export function pruneTabuFingerprints(input = {}) {
     ) {
       return;
     }
-    if (currentCycle - normalized.addedAtCycle > policy.maxAgeCycles) return;
+    if (currentCycle - normalized.addedAtCycle > effectiveMaxAge) return;
 
     const existing = deduped.get(normalized.fingerprint);
     if (!existing
@@ -588,6 +591,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     currentCycle: nextCycleIndex,
     currentChampionFingerprint,
     policy: resolveTabuPolicy(policy),
+    stagnationLevel: stagnationState.stagnationLevel,
   });
 
   const sameTrackCycleStreak = rotationHappened

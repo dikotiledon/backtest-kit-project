@@ -1218,6 +1218,7 @@ export function mergeSchedulerTabuFingerprints({
       currentCycle: cycle,
       currentChampionFingerprint: champion,
       policy: resolveTabuMergePolicy({ policy, tabuLimit }),
+      stagnationLevel: Number(schedulerState?.stagnationLevel) || 0,
     }),
   };
 }

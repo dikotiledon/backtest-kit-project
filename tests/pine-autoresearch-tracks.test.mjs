@@ -728,6 +728,57 @@ test('pruneTabuFingerprints is robust to null input and clamps invalid policy li
   ]);
 });
 
+test('pruneTabuFingerprints halves effective maxAgeCycles when stagnationLevel >= 1', () => {
+  const championFingerprint = '{"adxThreshold":20}';
+  const entries = [
+    { fingerprint: 'fp-a', addedAtCycle: 45, championFingerprint },
+    { fingerprint: 'fp-b', addedAtCycle: 38, championFingerprint },
+    { fingerprint: 'fp-c', addedAtCycle: 32, championFingerprint },
+    { fingerprint: 'fp-d', addedAtCycle: 25, championFingerprint },
+  ];
+  const pruned = pruneTabuFingerprints({
+    entries,
+    currentCycle: 50,
+    currentChampionFingerprint: championFingerprint,
+    policy: { maxAgeCycles: 20, maxEntries: 32, dropOnChampionChange: true },
+    stagnationLevel: 1,
+  });
+  assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-a']);
+});
+
+test('pruneTabuFingerprints at stagnationLevel 2 clears entries older than maxAge/4', () => {
+  const championFingerprint = '{"adxThreshold":20}';
+  const entries = [
+    { fingerprint: 'fp-a', addedAtCycle: 48, championFingerprint },
+    { fingerprint: 'fp-b', addedAtCycle: 44, championFingerprint },
+    { fingerprint: 'fp-c', addedAtCycle: 40, championFingerprint },
+  ];
+  const pruned = pruneTabuFingerprints({
+    entries,
+    currentCycle: 50,
+    currentChampionFingerprint: championFingerprint,
+    policy: { maxAgeCycles: 20, maxEntries: 32, dropOnChampionChange: true },
+    stagnationLevel: 2,
+  });
+  assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-a']);
+});
+
+test('pruneTabuFingerprints floors effective maxAgeCycles at 2 to avoid wiping everything', () => {
+  const championFingerprint = '{"adxThreshold":20}';
+  const entries = [
+    { fingerprint: 'fp-a', addedAtCycle: 49, championFingerprint },
+    { fingerprint: 'fp-b', addedAtCycle: 47, championFingerprint },
+  ];
+  const pruned = pruneTabuFingerprints({
+    entries,
+    currentCycle: 50,
+    currentChampionFingerprint: championFingerprint,
+    policy: { maxAgeCycles: 4, maxEntries: 32, dropOnChampionChange: true },
+    stagnationLevel: 2,
+  });
+  assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-a']);
+});
+
 test('nextTrackState records rejected candidate fingerprints in a bounded tabu list', () => {
   const next = nextTrackState({
     state: {

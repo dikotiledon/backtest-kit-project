@@ -93,3 +93,54 @@ test('scoreMetricsBreakdown exposes corrected PF contribution for the XRP regres
     total: 150.56,
   });
 });
+
+test('simulateTrades does not use same-bar SL/TP update for exit decision', async () => {
+  const { simulateTrades } = await loadPineOptimizer();
+  const rows = [
+    { timestamp: '2025-01-01T00:00Z', Close: 100, High: 105, Low: 95, Signal: 1, StopLoss: 90, TakeProfit: 120, Feature_SimPos: 1 },
+    { timestamp: '2025-01-01T00:15Z', Close: 98, High: 100, Low: 96, Signal: 0, StopLoss: 85, TakeProfit: 130, Feature_SimPos: 1 },
+    { timestamp: '2025-01-01T00:30Z', Close: 84, High: 99, Low: 83, Signal: 0, StopLoss: 85, TakeProfit: 130, Feature_SimPos: 1 },
+  ];
+  const trades = simulateTrades(rows, { timeframeMinutes: 15 });
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].exitReason, 'stopLoss');
+  assert.equal(trades[0].exitIndex, 2);
+});
+
+test('simulateTrades uses intra-bar High/Low for SL/TP touch detection', async () => {
+  const { simulateTrades } = await loadPineOptimizer();
+  const rows = [
+    { timestamp: '2025-01-01T00:00Z', Close: 100, High: 100, Low: 100, Signal: 1, StopLoss: 95, TakeProfit: 110, Feature_SimPos: 1 },
+    { timestamp: '2025-01-01T00:15Z', Close: 105, High: 111, Low: 104, Signal: 0, Feature_SimPos: 1 },
+  ];
+  const trades = simulateTrades(rows, { timeframeMinutes: 15 });
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].exitReason, 'takeProfit');
+  assert.equal(trades[0].exitPrice, 110);
+});
+
+test('simulateTrades gap-through fills at open when open is past SL', async () => {
+  const { simulateTrades } = await loadPineOptimizer();
+  const rows = [
+    { timestamp: '2025-01-01T00:00Z', Close: 100, High: 100, Low: 100, Open: 100, Signal: 1, StopLoss: 95, TakeProfit: 120, Feature_SimPos: 1 },
+    { timestamp: '2025-01-01T00:15Z', Close: 90, High: 93, Low: 88, Open: 93, Signal: 0, Feature_SimPos: 1 },
+  ];
+  const trades = simulateTrades(rows, { timeframeMinutes: 15 });
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].exitReason, 'stopLoss');
+  assert.equal(trades[0].exitPrice, 93);
+});
+
+test('scoreMetricsBreakdown tradePenalty is smooth ramp, not cliff', async () => {
+  const base = { tradeCount: 5, winRatePct: 50, roiPct: 10, profitFactor: 2, maxDrawdownPct: 1 };
+  const { scoreMetricsBreakdown } = await loadPineOptimizer();
+  const atThreshold = scoreMetricsBreakdown({ ...base, tradeCount: 10 }, { minTrades: 10 });
+  const justBelow = scoreMetricsBreakdown({ ...base, tradeCount: 9 }, { minTrades: 10 });
+  const halfWay = scoreMetricsBreakdown({ ...base, tradeCount: 5 }, { minTrades: 10 });
+  const atZero = scoreMetricsBreakdown({ ...base, tradeCount: 0 }, { minTrades: 10 });
+  assert.equal(atThreshold.tradePenalty, 0);
+  assert.ok(justBelow.tradePenalty < 0);
+  assert.ok(justBelow.tradePenalty > -6); // should be -5
+  assert.ok(halfWay.tradePenalty < justBelow.tradePenalty);
+  assert.equal(atZero.tradePenalty, -50); // minTrades * 5
+});

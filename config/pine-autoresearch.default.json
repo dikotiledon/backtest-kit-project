@@ -11,7 +11,8 @@
       "risk"
     ],
     "exploreFamilies": [
-      "signal"
+      "signal",
+      "risk"
     ],
     "paretoShortlistSize": 12,
     "matrixCandidateLimit": 12,
@@ -37,7 +38,7 @@
       "enabled": true,
       "baseTemperature": 0.4,
       "growthFactor": 1.8,
-      "maxTemperature": 12
+      "maxTemperature": 16
     }
   },
   "defaultProfile": "full",
@@ -95,7 +96,7 @@
       "noNewCandidateEscalateAfter": 2,
       "holdEscalateAfter": 3,
       "highSimilarityThreshold": 0.8,
-      "maxStagnationLevel": 2,
+      "maxStagnationLevel": 4,
       "lowEmissionEscalateAfter": 3,
       "lowEmissionThreshold": 3
     }
@@ -140,7 +141,7 @@
   },
   "scoutProfiles": {
     "full": {
-      "maxConfigs": 8,
+      "maxConfigs": 12,
       "minTrades": 10
     },
     "micro": {
@@ -148,7 +149,7 @@
       "minTrades": 10
     }
   },
-  "maxConfigs": 8,
+  "maxConfigs": 12,
   "minTrades": 10,
   "pinnedData": {
     "enabled": true,
@@ -176,7 +177,7 @@
       "minTradeCount": 150,
       "minTradeRatioVsIncumbent": 0.75,
       "significance": {
-        "minRelativeScoreDelta": 0.02,
+        "minRelativeScoreDelta": 0.005,
         "minTradeCount": 150
       }
     }
@@ -306,8 +307,8 @@
   },
   "complexityPolicy": {
     "enabled": true,
-    "scorePenaltyPerActivatedParam": 0.75,
-    "roiPenaltyPctPerActivatedParam": 0.5,
+    "scorePenaltyPerActivatedParam": 0.25,
+    "roiPenaltyPctPerActivatedParam": 0.25,
     "profitFactorPenaltyPerActivatedParam": 0,
     "scorePenaltyPerChangedParam": 0,
     "roiPenaltyPctPerChangedParam": 0,

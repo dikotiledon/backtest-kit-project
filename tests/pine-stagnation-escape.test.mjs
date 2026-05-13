@@ -51,6 +51,38 @@ test('decideStagnationEscapePlan progressively widens once generated and exploit
   });
 });
 
+test('decideStagnationEscapePlan allows architecture keys at level 2 when both lanes exhausted', () => {
+  const result = decideStagnationEscapePlan({
+    stagnationLevel: 2,
+    generatedLanesExhausted: true,
+    exploitExhausted: true,
+  });
+  assert.equal(result.allowArchitectureKeys, true);
+  assert.equal(result.mode, 'widen-architecture');
+  assert.equal(result.reason, 'all-lanes-exhausted-at-level-2');
+});
+
+test('decideStagnationEscapePlan returns widen-bounds at level 2 when only generated exhausted', () => {
+  const result = decideStagnationEscapePlan({
+    stagnationLevel: 2,
+    generatedLanesExhausted: true,
+    exploitExhausted: false,
+  });
+  assert.equal(result.mode, 'widen-bounds');
+  assert.equal(result.allowArchitectureKeys, false);
+});
+
+test('decideStagnationEscapePlan reaches progressive-widen at level 3', () => {
+  const result = decideStagnationEscapePlan({
+    stagnationLevel: 3,
+    generatedLanesExhausted: true,
+    exploitExhausted: true,
+  });
+  assert.equal(result.mode, 'progressive-widen');
+  assert.equal(result.allowArchitectureKeys, true);
+  assert.equal(result.multiKeyMutationCount, 3);
+});
+
 test('decideStagnationEscapePlan tolerates malformed inputs', () => {
   assert.deepEqual(decideStagnationEscapePlan('bad'), { mode: 'none', reason: 'not-eligible' });
   assert.deepEqual(decideStagnationEscapePlan({ stagnationLevel: '3', generatedLanesExhausted: 1, exploitExhausted: 1 }), {

@@ -21,6 +21,7 @@ import {
   sameConfig,
   selectChampionBootstrapSource,
   selectRobustMatrixCandidate,
+  shortConfigLabel,
   summarizeDigestAnnouncement,
 } from '../scripts/lib/pine-autoresearch.mjs';
 import {
@@ -633,6 +634,65 @@ test('evaluateMatrix short-circuits shadow labs when primary cannot promote', as
   assert.equal(result.labResults[0].decision.recommendation, 'hold');
   assert.equal(result.matrixDecision.recommendation, 'hold');
   assert.equal(result.matrixDecision.gates.primaryPromote, false);
+});
+
+test('evaluateMatrix short-circuit marks shadow gates as not_evaluated', async () => {
+  const champion = makeResult({
+    configId: 'champion',
+    score: 100,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.4,
+    maxDrawdownPct: 5,
+    config: { minPredSum: 2 },
+  });
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 85,
+    tradeCount: 210,
+    roiPct: 20,
+    profitFactor: 1.1,
+    maxDrawdownPct: 5.1,
+    config: { minPredSum: 1.8 },
+  });
+  const calls = [];
+  const result = await evaluateMatrix({
+    primaryLab: {
+      labId: 'primary',
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 100,
+        minTradeRatioVsIncumbent: 0.75,
+        significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+      },
+    },
+    shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
+    blindHoldoutLabs: [],
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 1, minShadowPassRatio: 0.5, requireCandidateChange: true },
+    expectancyPolicy: { enabled: false },
+    regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
+  }, 'run-honesty', champion, challenger, {
+    evaluateConfigOnLab: async ({ lab, variantKey, candidate }) => {
+      calls.push(`${lab.labId}:${variantKey}`);
+      return candidate;
+    },
+  });
+
+  // Only primary lab was evaluated
+  assert.deepEqual(result.labResults.map((entry) => entry.lab.labId), ['primary']);
+  assert.deepEqual(calls, ['primary:champion', 'primary:challenger']);
+  // Shadow gates are not_evaluated, not false
+  assert.equal(result.matrixDecision.gates.shadowPassCount, 'not_evaluated');
+  assert.equal(result.matrixDecision.gates.shadowPassRatio, 'not_evaluated');
+  // failedGates only includes genuinely failed gates
+  assert.ok(!result.matrixDecision.failedGates.includes('shadowPassCount'));
+  assert.ok(!result.matrixDecision.failedGates.includes('shadowPassRatio'));
+  assert.ok(result.matrixDecision.failedGates.includes('primaryPromote'));
+  // skipped reason present
+  assert.deepEqual(result.matrixDecision.skipped, { reason: 'primary_hold' });
 });
 
 test('evaluateMatrix still evaluates shadow labs after primary hold when primary promote is optional', async () => {
@@ -1714,7 +1774,7 @@ test('decideAutoresearchOutcome preserves earlier failure reasons when significa
   assert.match(outcome.summary, /failed score, significance gate\(s\)\./);
 });
 
-test('decideAutoresearchOutcome applies default significance sample floor to legacy thresholds', () => {
+test('decideAutoresearchOutcome passes parent minTradeCount to significance gate (unified default)', () => {
   const outcome = decideAutoresearchOutcome({
     incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 140, maxDrawdownPct: 5 }),
     challenger: makeResult({ configId: 'challenger', score: 103, roiPct: 41, profitFactor: 1.5, tradeCount: 120, maxDrawdownPct: 5 }),
@@ -1732,9 +1792,9 @@ test('decideAutoresearchOutcome applies default significance sample floor to leg
   assert.equal(outcome.gates.tradeFloor, true);
   assert.equal(outcome.gates.significance, false);
   assert.deepEqual(outcome.failedGates, ['significance']);
-  assert.equal(outcome.significanceGate.reason, 'insufficient_sample');
-  assert.equal(outcome.significanceGate.challengerTradeCount, 120);
-  assert.equal(outcome.significanceGate.minTradeCount, 150);
+  // With unified minTradeCount=100, 120 >= 100 passes sample floor
+  // but trade ratio 120/140=0.857 triggers drift penalty
+  assert.equal(outcome.significanceGate.reason, 'trade_count_drift_requires_larger_delta');
 });
 
 test('decideAutoresearchOutcome blocks promotion when blind holdout verdict is required synchronously', () => {
@@ -2793,6 +2853,48 @@ test('decideMatrixPromotion explains steady-state hold clearly', () => {
   assert.equal(result.recommendation, 'hold');
   assert.deepEqual(result.failedGates, ['candidateChanged', 'primaryPromote', 'shadowPassCount', 'shadowPassRatio']);
   assert.match(result.summary, /No new candidate/);
+});
+
+test('decideMatrixPromotion marks shadow gates not_evaluated when shadowsEvaluated=false', () => {
+  const result = decideMatrixPromotion({
+    labResults: [{ decision: { recommendation: 'hold' } }],
+    champion: { configId: 'champion', config: { minPredSum: 2 } },
+    challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+    shadowsEvaluated: false,
+    policy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 1,
+      minShadowPassRatio: 0.5,
+      requireCandidateChange: true,
+    },
+  });
+
+  assert.equal(result.gates.shadowPassCount, 'not_evaluated');
+  assert.equal(result.gates.shadowPassRatio, 'not_evaluated');
+  assert.deepEqual(result.failedGates, ['primaryPromote']);
+  assert.deepEqual(result.skipped, { reason: 'primary_hold' });
+  assert.equal(result.recommendation, 'hold');
+});
+
+test('decideMatrixPromotion passes shadow gates when zero shadows and zero thresholds', () => {
+  const result = decideMatrixPromotion({
+    labResults: [{ decision: { recommendation: 'promote' } }],
+    champion: { configId: 'champion', config: { minPredSum: 2 } },
+    challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+    shadowsEvaluated: true,
+    policy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 0,
+      minShadowPassRatio: 0,
+      requireCandidateChange: true,
+    },
+  });
+
+  assert.equal(result.gates.shadowPassCount, true);
+  assert.equal(result.gates.shadowPassRatio, true);
+  assert.deepEqual(result.failedGates, []);
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.skipped, null);
 });
 
 test('decideAutoPromotionAction requires matrix pass, change, cooldown, and quota', () => {
@@ -5441,7 +5543,7 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     exploitRatio: 0.5,
     freezeArchitecture: false,
     exploitFamilies: ['signal', 'risk'],
-    exploreFamilies: ['signal'],
+    exploreFamilies: ['signal', 'risk'],
     paretoShortlistSize: 12,
     matrixCandidateLimit: 12,
     selfLoopEscape: {
@@ -5458,7 +5560,7 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
       enabled: true,
       baseTemperature: 0.4,
       growthFactor: 1.8,
-      maxTemperature: 12,
+      maxTemperature: 16,
     },
   });
   const loaded = await loadConfig(process.cwd(), './config/pine-autoresearch.default.json');
@@ -5474,7 +5576,7 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     requireExpectancyNonRegression: true,
   });
   assert.deepEqual(config.primaryLab.thresholds.significance, {
-    minRelativeScoreDelta: 0.02,
+    minRelativeScoreDelta: 0.005,
     minTradeCount: 150,
   });
   assert.deepEqual(loaded.primaryLab.thresholds.significance, config.primaryLab.thresholds.significance);
@@ -7400,6 +7502,27 @@ test('partitionLabs keeps blind holdout out of selection labs', () => {
   assert.deepEqual(tiers.trainingLabs.map((lab) => lab.labId), ['train-primary']);
   assert.deepEqual(tiers.selectionLabs.map((lab) => lab.labId), ['train-primary', 'selection-shadow']);
   assert.deepEqual(tiers.blindHoldoutLabs.map((lab) => lab.labId), ['november-blind']);
+});
+
+test('partitionLabs throws when primaryLab is missing but shadowLabs exist', () => {
+  assert.throws(
+    () => partitionLabs({ primaryLab: null, shadowLabs: [{ labId: 's1' }] }),
+    { message: /primaryLab is required/ },
+  );
+});
+
+test('partitionLabs returns empty arrays when both are empty', () => {
+  const result = partitionLabs({ primaryLab: null, shadowLabs: [] });
+  assert.deepEqual(result.trainingLabs, []);
+  assert.deepEqual(result.selectionLabs, []);
+});
+
+test('shortConfigLabel produces readable short label', () => {
+  const full = '0007__useRegimeFilter-false__useVolatilityFilter-false__useAdxFilter-true__adxThreshold-20';
+  const short = shortConfigLabel(full);
+  assert.ok(short.length < 20, `Expected short label, got: ${short}`);
+  assert.ok(short.startsWith('0007_'));
+  assert.equal(short, shortConfigLabel(full)); // deterministic
 });
 
 

@@ -272,30 +272,30 @@ function pickNonTabuVariant({
 
 function legacySignalPatches(base) {
   return [
-    { neighborsCount: Math.max(12, (base.neighborsCount || 32) - 8) },
-    { neighborsCount: (base.neighborsCount || 32) + 8 },
-    { adxThreshold: Math.max(10, (base.adxThreshold || 20) - 5) },
-    { adxThreshold: (base.adxThreshold || 20) + 5 },
-    { minPredSum: Math.max(1, (base.minPredSum || 2) - 0.5) },
-    { minPredSum: (base.minPredSum || 2) + 0.5 },
-    { minBarsBetween: Math.max(0, (base.minBarsBetween || 2) - 1) },
-    { minBarsBetween: (base.minBarsBetween || 2) + 2 },
-    { h: Math.max(4, (base.h || 8) - 2) },
-    { h: (base.h || 8) + 2 },
-    { r: Math.max(2, (base.r || 8) / 2) },
-    { x: Math.max(15, (base.x || 25) - 5) },
+    { neighborsCount: Math.max(12, (base.neighborsCount ?? 32) - 8) },
+    { neighborsCount: (base.neighborsCount ?? 32) + 8 },
+    { adxThreshold: Math.max(10, (base.adxThreshold ?? 20) - 5) },
+    { adxThreshold: (base.adxThreshold ?? 20) + 5 },
+    { minPredSum: Math.max(1, (base.minPredSum ?? 2) - 0.5) },
+    { minPredSum: (base.minPredSum ?? 2) + 0.5 },
+    { minBarsBetween: Math.max(0, (base.minBarsBetween ?? 2) - 1) },
+    { minBarsBetween: (base.minBarsBetween ?? 2) + 2 },
+    { h: Math.max(4, (base.h ?? 8) - 2) },
+    { h: (base.h ?? 8) + 2 },
+    { r: Math.max(2, (base.r ?? 8) / 2) },
+    { x: Math.max(15, (base.x ?? 25) - 5) },
   ];
 }
 
 export function signalPatches(base, { temperature = 1 } = {}) {
   const safeTemp = Math.max(1, Number(temperature) || 1);
-  const baseNeighbors = base.neighborsCount || 32;
-  const baseAdx = base.adxThreshold || 20;
-  const baseMinPred = base.minPredSum || 2;
-  const baseBars = base.minBarsBetween || 2;
-  const baseH = base.h || 8;
-  const baseR = base.r || 8;
-  const baseX = base.x || 25;
+  const baseNeighbors = base.neighborsCount ?? 32;
+  const baseAdx = base.adxThreshold ?? 20;
+  const baseMinPred = base.minPredSum ?? 2;
+  const baseBars = base.minBarsBetween ?? 2;
+  const baseH = base.h ?? 8;
+  const baseR = base.r ?? 8;
+  const baseX = base.x ?? 25;
   const stepScales = safeTemp >= 3 ? [0.5, 2, 3] : safeTemp >= 2 ? [0.5, 2] : [0.5];
   const targetCount = safeTemp >= 3 ? 36 : safeTemp >= 2 ? 24 : 18;
   const patches = [...legacySignalPatches(base)];
@@ -320,26 +320,26 @@ export function signalPatches(base, { temperature = 1 } = {}) {
 
 function legacyRiskPatches(base) {
   return [
-    { slAtrMult: Math.max(0.75, (base.slAtrMult || 1) - 0.25) },
-    { slAtrMult: (base.slAtrMult || 1) + 0.25 },
-    { tpAtrMult: Math.max(1.5, (base.tpAtrMult || 2.5) - 0.5) },
-    { tpAtrMult: (base.tpAtrMult || 2.5) + 0.5 },
-    { trailAtrMult: Math.max(0.75, (base.trailAtrMult || 1) - 0.25) },
-    { trailAtrMult: (base.trailAtrMult || 1) + 0.25 },
-    { trailActivateR: Math.max(0, (base.trailActivateR || 0.5) - 0.5) },
-    { trailActivateR: (base.trailActivateR || 0.5) + 0.5 },
-    { riskAtrLen: Math.max(7, (base.riskAtrLen || 14) - 7) },
-    { riskAtrLen: (base.riskAtrLen || 14) + 7 },
+    { slAtrMult: Math.max(0.75, (base.slAtrMult ?? 1) - 0.25) },
+    { slAtrMult: (base.slAtrMult ?? 1) + 0.25 },
+    { tpAtrMult: Math.max(1.5, (base.tpAtrMult ?? 2.5) - 0.5) },
+    { tpAtrMult: (base.tpAtrMult ?? 2.5) + 0.5 },
+    { trailAtrMult: Math.max(0.75, (base.trailAtrMult ?? 1) - 0.25) },
+    { trailAtrMult: (base.trailAtrMult ?? 1) + 0.25 },
+    { trailActivateR: Math.max(0, (base.trailActivateR ?? 0.5) - 0.5) },
+    { trailActivateR: (base.trailActivateR ?? 0.5) + 0.5 },
+    { riskAtrLen: Math.max(7, (base.riskAtrLen ?? 14) - 7) },
+    { riskAtrLen: (base.riskAtrLen ?? 14) + 7 },
   ];
 }
 
 export function riskPatches(base, { temperature = 1 } = {}) {
   const safeTemp = Math.max(1, Number(temperature) || 1);
-  const baseSl = base.slAtrMult || 1;
-  const baseTp = base.tpAtrMult || 2.5;
-  const baseTrail = base.trailAtrMult || 1;
-  const baseActivate = base.trailActivateR || 0.5;
-  const baseAtrLen = base.riskAtrLen || 14;
+  const baseSl = base.slAtrMult ?? 1;
+  const baseTp = base.tpAtrMult ?? 2.5;
+  const baseTrail = base.trailAtrMult ?? 1;
+  const baseActivate = base.trailActivateR ?? 0.5;
+  const baseAtrLen = base.riskAtrLen ?? 14;
   const stepScales = safeTemp >= 3 ? [0.5, 2, 3] : safeTemp >= 2 ? [0.5, 2] : [0.5];
   const targetCount = safeTemp >= 3 ? 30 : safeTemp >= 2 ? 20 : 15;
   const patches = [...legacyRiskPatches(base)];
@@ -361,7 +361,7 @@ export function riskPatches(base, { temperature = 1 } = {}) {
 }
 
 function deduplicatePatches(patches, base, limit = Infinity) {
-  const seen = new Set();
+  const seen = new Set([configFingerprint(base)]);
   const output = [];
   for (const patch of patches) {
     const fp = configFingerprint({ ...base, ...patch });

@@ -529,6 +529,38 @@ test('riskPatches returns at least 15 distinct candidates at baseline temperatur
   assert.equal(fingerprints.size, patches.length);
 });
 
+test('patch pools never produce no-op patches that replay the incumbent', () => {
+  const base = { ...buildBaselineConfig(), neighborsCount: 12 };
+  const baseFp = configFingerprint(base);
+  const signalFps = signalPatches(base, { temperature: 4 }).map((patch) => configFingerprint({ ...base, ...patch }));
+  const riskFps = riskPatches(base, { temperature: 4 }).map((patch) => configFingerprint({ ...base, ...patch }));
+
+  for (const fp of signalFps) assert.notEqual(fp, baseFp, 'signal patch equals base');
+  for (const fp of riskFps) assert.notEqual(fp, baseFp, 'risk patch equals base');
+});
+
+test('patch pools handle champions with valid zero values', () => {
+  const base = { ...buildBaselineConfig(), trailActivateR: 0, minBarsBetween: 0 };
+  const signal = signalPatches(base, { temperature: 1 });
+  const risk = riskPatches(base, { temperature: 1 });
+
+  assert.ok(signal.length >= 18, `expected >=18, got ${signal.length}`);
+  assert.ok(risk.length >= 15, `expected >=15, got ${risk.length}`);
+
+  for (const patch of risk) {
+    if ('trailActivateR' in patch) {
+      assert.ok(patch.trailActivateR >= 0, `trailActivateR negative: ${patch.trailActivateR}`);
+      assert.ok(patch.trailActivateR <= 0.5, `trailActivateR ignored champion zero: ${patch.trailActivateR}`);
+    }
+  }
+  for (const patch of signal) {
+    if ('minBarsBetween' in patch) {
+      assert.ok(patch.minBarsBetween >= 0, `minBarsBetween negative: ${patch.minBarsBetween}`);
+      assert.ok(patch.minBarsBetween <= 2, `minBarsBetween ignored champion zero: ${patch.minBarsBetween}`);
+    }
+  }
+});
+
 test('riskPatches never produces invalid knob values', () => {
   const base = { ...buildBaselineConfig(), slAtrMult: 0.25, tpAtrMult: 1.5, riskAtrLen: 7, trailActivateR: 0 };
   const patches = riskPatches(base, { temperature: 4 });

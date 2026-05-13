@@ -130,3 +130,17 @@ test('simulateTrades gap-through fills at open when open is past SL', async () =
   assert.equal(trades[0].exitReason, 'stopLoss');
   assert.equal(trades[0].exitPrice, 93);
 });
+
+test('scoreMetricsBreakdown tradePenalty is smooth ramp, not cliff', async () => {
+  const base = { tradeCount: 5, winRatePct: 50, roiPct: 10, profitFactor: 2, maxDrawdownPct: 1 };
+  const { scoreMetricsBreakdown } = await loadPineOptimizer();
+  const atThreshold = scoreMetricsBreakdown({ ...base, tradeCount: 10 }, { minTrades: 10 });
+  const justBelow = scoreMetricsBreakdown({ ...base, tradeCount: 9 }, { minTrades: 10 });
+  const halfWay = scoreMetricsBreakdown({ ...base, tradeCount: 5 }, { minTrades: 10 });
+  const atZero = scoreMetricsBreakdown({ ...base, tradeCount: 0 }, { minTrades: 10 });
+  assert.equal(atThreshold.tradePenalty, 0);
+  assert.ok(justBelow.tradePenalty < 0);
+  assert.ok(justBelow.tradePenalty > -6); // should be -5
+  assert.ok(halfWay.tradePenalty < justBelow.tradePenalty);
+  assert.equal(atZero.tradePenalty, -50); // minTrades * 5
+});

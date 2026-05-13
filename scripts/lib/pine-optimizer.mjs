@@ -241,7 +241,9 @@ export function scoreMetricsBreakdown(metrics, options = {}) {
   const winRate = round(metrics.winRatePct * weights.winRate);
   const profitFactorContribution = round(profitFactor * weights.profitFactor);
   const drawdown = round(-metrics.maxDrawdownPct * weights.drawdown);
-  const tradePenalty = metrics.tradeCount < minTrades ? round((metrics.tradeCount - minTrades) * 5) : 0;
+  const tradePenalty = metrics.tradeCount >= minTrades
+    ? 0
+    : round(-((minTrades - metrics.tradeCount) / minTrades) * (minTrades * 5));
 
   return {
     roi,

@@ -114,12 +114,11 @@ async function setupFixture() {
   const championFingerprint = buildChampionConfigFingerprint(championState.config);
   const agedTabuEntries = buildIncumbentSearchBatch({
     incumbent: championState.config,
-    maxConfigs: 4,
+    maxConfigs: 64,
     policy: config.searchPolicy,
     schedulerState: {},
   })
     .filter((variant) => variant?.config)
-    .slice(0, 4)
     .map((variant) => ({
       fingerprint: configFingerprint(variant.config),
       addedAtCycle: 0,
@@ -208,17 +207,21 @@ test('tabu saturation recovers via lowEmissionStreak escalation and tabu aging',
     assert.ok(
       cycle3.manifest.stagnationLevel >= 1
         || cycle3.manifest.searchEfficiency?.allCandidatesTabu === true
-        || cycle3.manifest.lowEmissionStreak >= 2,
-      'cycle 3 should have escalated, reported tabu exhaustion, or accumulated low emission pressure',
+        || (cycle3.schedulerState.lowEmissionStreak ?? 0) >= 2,
+      'cycle 3 should have escalated, reported tabu exhaustion, or accumulated scheduler low emission pressure',
     );
 
     const cycle4 = cycles[3];
     const cycle5 = cycles[4];
     assert.ok(cycle4.manifest.stagnationLevel >= 1, 'cycle 4 should remain escalated');
+    assert.ok(
+      (cycle4.schedulerState.lowEmissionStreak ?? 0) > 0 || Boolean(cycle4.schedulerState.stagnationReason),
+      'cycle 4 scheduler state should retain low-emission or stagnation progression',
+    );
     assert.ok(cycle4.tabuCount < cycle3.tabuCount, 'cycle 4 tabu set should shrink after escalation-aged pruning');
     assert.ok(
-      (cycle5.manifest.searchEfficiency?.emittedVariantCount ?? 0) >= (cycle4.manifest.searchEfficiency?.emittedVariantCount ?? 0),
-      'cycle 5 emitted count should not regress after tabu aging + pool widening',
+      (cycle5.manifest.searchEfficiency?.emittedVariantCount ?? 0) > (cycle4.manifest.searchEfficiency?.emittedVariantCount ?? 0),
+      'cycle 5 emitted count should increase after tabu aging + pool widening',
     );
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });

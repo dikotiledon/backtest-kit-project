@@ -5543,7 +5543,7 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     exploitRatio: 0.5,
     freezeArchitecture: false,
     exploitFamilies: ['signal', 'risk'],
-    exploreFamilies: ['signal'],
+    exploreFamilies: ['signal', 'risk'],
     paretoShortlistSize: 12,
     matrixCandidateLimit: 12,
     selfLoopEscape: {
@@ -5560,7 +5560,7 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
       enabled: true,
       baseTemperature: 0.4,
       growthFactor: 1.8,
-      maxTemperature: 12,
+      maxTemperature: 16,
     },
   });
   const loaded = await loadConfig(process.cwd(), './config/pine-autoresearch.default.json');
@@ -5576,7 +5576,7 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     requireExpectancyNonRegression: true,
   });
   assert.deepEqual(config.primaryLab.thresholds.significance, {
-    minRelativeScoreDelta: 0.02,
+    minRelativeScoreDelta: 0.005,
     minTradeCount: 150,
   });
   assert.deepEqual(loaded.primaryLab.thresholds.significance, config.primaryLab.thresholds.significance);

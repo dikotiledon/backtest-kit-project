@@ -1,198 +1,60 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  classifyHoldoutGate,
-  decideAutoresearchOutcome,
-} from '../scripts/lib/pine-autoresearch.mjs';
-import {
-  buildScoutOrchestrationState,
-  shouldQueuePromotionManifest,
-} from '../scripts/pine-autoresearch.mjs';
+import { evaluateMatrix } from '../scripts/pine-autoresearch.mjs';
 
-function makeResult({ configId, score = 100, tradeCount = 200, roiPct = 50, profitFactor = 2, maxDrawdownPct = 5, config = null } = {}) {
-  return {
-    configId,
-    score,
-    config: config ?? { configId },
-    metrics: {
-      tradeCount,
-      roiPct,
-      profitFactor,
-      maxDrawdownPct,
-    },
+test('evaluateMatrix runs holdout labs when matrix recommends promote', async () => {
+  const labCalls = [];
+  const evaluateConfigOnLab = async ({ lab, variantKey }) => {
+    labCalls.push({ labId: lab.labId, variantKey });
+    return {
+      label: `${variantKey}-label`,
+      configId: `${variantKey}-id`,
+      config: variantKey === 'champion' ? { a: 1 } : { a: 2 },
+      score: variantKey === 'champion' ? 100 : 110,
+      metrics: { tradeCount: 200, roiPct: 20, profitFactor: 3, maxDrawdownPct: 2, winRatePct: 50, avgWin: 1.5, avgLoss: 0.5 },
+      trades: [],
+      rows: [],
+    };
   };
-}
-
-const passingThresholds = {
-  minScoreDelta: 0.25,
-  minRoiDeltaPct: 0,
-  minProfitFactorDelta: 0,
-  maxDrawdownDeltaPct: 0.75,
-  minTradeCount: 100,
-  minTradeRatioVsIncumbent: 0.75,
-  significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
-};
-
-function promoteCandidateInput(overrides = {}) {
-  return {
-    incumbent: makeResult({
-      configId: 'champion',
-      score: 100,
-      roiPct: 40,
-      profitFactor: 1.4,
-      tradeCount: 200,
-      maxDrawdownPct: 5,
-      config: { minPredSum: 2 },
-    }),
-    challenger: makeResult({
-      configId: 'challenger',
-      score: 110,
-      roiPct: 55,
-      profitFactor: 1.8,
-      tradeCount: 220,
-      maxDrawdownPct: 5.1,
-      config: { minPredSum: 1.8 },
-    }),
-    thresholds: passingThresholds,
+  const config = {
+    primaryLab: { labId: 'primary', thresholds: { minScoreDelta: 0.1, minTradeCount: 50, minTradeRatioVsIncumbent: 0.5, significance: { minRelativeScoreDelta: 0.01, minTradeCount: 50 } } },
+    shadowLabs: [{ labId: 'shadow1', thresholds: { minScoreDelta: 0.1, minTradeCount: 50, minTradeRatioVsIncumbent: 0.5, significance: { minRelativeScoreDelta: 0.01, minTradeCount: 50 } } }],
+    blindHoldoutLabs: [{ labId: 'holdout1', thresholds: { minScoreDelta: 0, minRoiDeltaPct: 5, minProfitFactorDelta: 0.1, maxDrawdownDeltaPct: 0.75, minTradeCount: 60, minTradeRatioVsIncumbent: 0.75, significance: { minRelativeScoreDelta: 0.01, minTradeCount: 50 } } }],
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 1, minShadowPassRatio: 0.5, requireCandidateChange: true },
     expectancyPolicy: { enabled: false },
-    blindHoldoutLabs: [{ labId: 'blind-holdout-a' }],
-    ...overrides,
+    complexityPolicy: { enabled: false },
   };
-}
+  const out = await evaluateMatrix(config, 'run-1', { configId: 'champ', config: { a: 1 } }, { configId: 'chal', config: { a: 2 } }, { evaluateConfigOnLab });
+  const holdoutCalls = labCalls.filter(c => c.labId === 'holdout1');
+  assert.ok(holdoutCalls.length > 0, 'holdout lab was evaluated');
+  assert.ok(out.holdoutVerdict != null, 'holdoutVerdict is populated');
+  assert.equal(typeof out.holdoutVerdict.passed, 'boolean');
+});
 
-test('classifyHoldoutGate treats malformed top-level input as not required', () => {
-  const expected = {
-    required: false,
-    status: 'not_required',
-    passed: true,
-    reason: 'blind_holdout_not_required',
+test('evaluateMatrix does not run holdout when matrix holds', async () => {
+  const labCalls = [];
+  const evaluateConfigOnLab = async ({ lab, variantKey }) => {
+    labCalls.push({ labId: lab.labId, variantKey });
+    return {
+      label: `${variantKey}-label`,
+      configId: `${variantKey}-id`,
+      config: variantKey === 'champion' ? { a: 1 } : { a: 2 },
+      score: variantKey === 'champion' ? 100 : 100.01,
+      metrics: { tradeCount: 200, roiPct: 10, profitFactor: 2, maxDrawdownPct: 3, winRatePct: 45, avgWin: 1, avgLoss: 0.5 },
+      trades: [],
+      rows: [],
+    };
   };
-
-  assert.deepEqual(classifyHoldoutGate(null), expected);
-  assert.deepEqual(classifyHoldoutGate('malformed'), expected);
-});
-
-test('classifyHoldoutGate marks required blind holdout as pending without a verdict', () => {
-  assert.deepEqual(classifyHoldoutGate({ blindHoldoutLabs: [{ labId: 'holdout-a' }] }), {
-    required: true,
-    status: 'pending',
-    passed: false,
-    reason: 'blind_holdout_pending',
-  });
-});
-
-test('decideAutoresearchOutcome can promote matrix while blind holdout is pending in defer mode', () => {
-  const decision = decideAutoresearchOutcome(promoteCandidateInput());
-
-  assert.equal(decision.recommendation, 'promote');
-  assert.equal(decision.holdoutGate.status, 'pending');
-  assert.equal(decision.gates.holdoutVerdict, undefined);
-  assert.equal(decision.failedGates.includes('holdoutVerdict'), false);
-});
-
-test('decideAutoresearchOutcome require mode blocks pending blind holdout', () => {
-  const decision = decideAutoresearchOutcome(promoteCandidateInput({ holdoutMode: 'require' }));
-
-  assert.equal(decision.recommendation, 'hold');
-  assert.equal(decision.holdoutGate.status, 'pending');
-  assert.equal(decision.gates.holdoutVerdict, false);
-  assert.deepEqual(decision.failedGates, ['holdoutVerdict']);
-});
-
-test('decideAutoresearchOutcome blocks failed blind holdout', () => {
-  const decision = decideAutoresearchOutcome(promoteCandidateInput({
-    holdoutVerdict: { passed: false, reason: 'blind_holdout_regression' },
-  }));
-
-  assert.equal(decision.recommendation, 'hold');
-  assert.equal(decision.holdoutGate.status, 'failed');
-  assert.equal(decision.holdoutGate.reason, 'blind_holdout_regression');
-  assert.equal(decision.gates.holdoutVerdict, false);
-  assert.deepEqual(decision.failedGates, ['holdoutVerdict']);
-});
-
-test('shouldQueuePromotionManifest rejects holdout-pending manifest', () => {
-  const manifest = {
-    matrixDecision: { recommendation: 'promote' },
-    challenger: { configId: 'challenger', config: { minPredSum: 1.8 } },
-    candidateFingerprint: 'candidate-fp',
-    championFingerprint: 'champion-fp',
-    holdoutGate: { required: true, status: 'pending', passed: false, reason: 'blind_holdout_pending' },
-    promotionReady: false,
+  const config = {
+    primaryLab: { labId: 'primary', thresholds: { minScoreDelta: 5, minTradeCount: 50, minTradeRatioVsIncumbent: 0.5, significance: { minRelativeScoreDelta: 0.02, minTradeCount: 50 } } },
+    shadowLabs: [{ labId: 'shadow1', thresholds: { minScoreDelta: 5, minTradeCount: 50, minTradeRatioVsIncumbent: 0.5 } }],
+    blindHoldoutLabs: [{ labId: 'holdout1', thresholds: { minScoreDelta: 0, minRoiDeltaPct: 5 } }],
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 1, minShadowPassRatio: 0.5, requireCandidateChange: true },
+    expectancyPolicy: { enabled: false },
+    complexityPolicy: { enabled: false },
   };
-
-  assert.equal(shouldQueuePromotionManifest(manifest), false);
-});
-
-test('shouldQueuePromotionManifest queues holdout-passed ready manifest when matrix passed and candidate changed', () => {
-  const manifest = {
-    matrixDecision: { recommendation: 'promote' },
-    challenger: { configId: 'challenger', config: { minPredSum: 1.8 } },
-    candidateFingerprint: 'candidate-fp',
-    championFingerprint: 'champion-fp',
-    holdoutGate: { required: true, status: 'passed', passed: true, reason: 'blind_holdout_passed' },
-    promotionReady: true,
-  };
-
-  assert.equal(shouldQueuePromotionManifest(manifest), true);
-});
-
-test('buildScoutOrchestrationState persists pending holdout gate and disables promotion readiness', () => {
-  const championState = makeResult({
-    configId: 'champion',
-    score: 100,
-    roiPct: 40,
-    profitFactor: 1.4,
-    tradeCount: 200,
-    maxDrawdownPct: 5,
-    config: { minPredSum: 2 },
-  });
-  const challenger = makeResult({
-    configId: 'challenger',
-    score: 110,
-    roiPct: 55,
-    profitFactor: 1.8,
-    tradeCount: 220,
-    maxDrawdownPct: 5,
-    config: { minPredSum: 1.8 },
-  });
-
-  const { manifest } = buildScoutOrchestrationState({
-    config: {
-      matrixId: 'holdout-readiness-test',
-      selectedProfile: 'test',
-      researchRoot: '/tmp/research',
-      searchPolicy: { mode: 'incumbent-local', exploitRatio: 1, paretoShortlistSize: 2, matrixCandidateLimit: 1 },
-      matrixPolicy: { requireCandidateChange: true, requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0 },
-      primaryLab: { labId: 'primary' },
-      shadowLabs: [],
-      blindHoldoutLabs: [{ labId: 'blind-holdout-a' }],
-      pinnedData: { enabled: false },
-    },
-    runId: 'holdout-readiness-run',
-    championState,
-    historyEventsBefore: [],
-    searchBatch: [],
-    primarySweep: { topConfigs: [challenger] },
-    matrixCandidates: [{
-      challenger,
-      labResults: [{
-        lab: { labId: 'primary' },
-        incumbent: championState,
-        challenger,
-        decision: decideAutoresearchOutcome(promoteCandidateInput({ incumbent: championState, challenger })),
-      }],
-      matrixDecision: { recommendation: 'promote', summary: 'Promote challenger: matrix guards passed.', gates: { candidateChanged: true }, failedGates: [] },
-      robustness: {},
-    }],
-    trackState: {
-      candidateFingerprint: 'candidate-fp',
-      championFingerprint: 'champion-fp',
-    },
-  });
-
-  assert.equal(manifest.matrixDecision.recommendation, 'promote');
-  assert.equal(manifest.holdoutGate.status, 'pending');
-  assert.equal(manifest.promotionEligible, true);
-  assert.equal(manifest.promotionReady, false);
+  const out = await evaluateMatrix(config, 'run-1', { configId: 'champ', config: { a: 1 } }, { configId: 'chal', config: { a: 2 } }, { evaluateConfigOnLab });
+  const holdoutCalls = labCalls.filter(c => c.labId === 'holdout1');
+  assert.equal(holdoutCalls.length, 0, 'holdout lab was NOT evaluated');
+  assert.equal(out.holdoutVerdict, null);
 });

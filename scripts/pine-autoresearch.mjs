@@ -2841,10 +2841,44 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
   const shadowResults = await mapWithConcurrency(labs.slice(1), shadowConcurrency, evaluateLabPair);
   const labResults = [primaryResult, ...shadowResults];
 
+  // Evaluate blind holdout if matrix would promote
+  const preliminaryDecision = decideMatrixPromotion({
+    labResults,
+    shadowsEvaluated: true,
+    policy: config.matrixPolicy,
+    champion: championState,
+    challenger: challengerSummary,
+  });
+
+  let holdoutVerdict = null;
+  if (preliminaryDecision.recommendation === 'promote' && Array.isArray(config.blindHoldoutLabs) && config.blindHoldoutLabs.length > 0) {
+    const holdoutResults = await mapWithConcurrency(
+      config.blindHoldoutLabs,
+      shadowConcurrency,
+      evaluateLabPair,
+    );
+    const holdoutPassCount = holdoutResults.filter(r => r.decision?.recommendation === 'promote').length;
+    const holdoutPassRatio = holdoutResults.length > 0 ? holdoutPassCount / holdoutResults.length : 0;
+    const holdoutPassed = holdoutPassCount === holdoutResults.length;
+    holdoutVerdict = {
+      passed: holdoutPassed,
+      reason: holdoutPassed ? 'blind_holdout_passed' : 'blind_holdout_failed',
+      labResults: holdoutResults.map(r => ({
+        labId: r.lab?.labId,
+        recommendation: r.decision?.recommendation,
+        scoreDelta: r.decision?.comparisons?.scoreDelta,
+        roiDeltaPct: r.decision?.comparisons?.roiDeltaPct,
+      })),
+      counts: { total: holdoutResults.length, passed: holdoutPassCount, ratio: holdoutPassRatio },
+    };
+  }
+
   return {
     labResults,
+    holdoutVerdict,
     matrixDecision: decideMatrixPromotion({
       labResults,
+      shadowsEvaluated: true,
       policy: config.matrixPolicy,
       champion: championState,
       challenger: challengerSummary,
@@ -3236,7 +3270,7 @@ export async function runScout(config, dependencies = {}) {
   const matrixCandidates = [];
   const matrixEvaluationCache = createEvaluationCache();
   for (const candidate of paretoShortlist.slice(0, trackedConfig.searchPolicy.matrixCandidateLimit)) {
-    const { labResults, matrixDecision } = await evaluateMatrix(trackedConfig, runId, championState, candidate, {
+    const { labResults, matrixDecision, holdoutVerdict } = await evaluateMatrix(trackedConfig, runId, championState, candidate, {
       evaluationCache: matrixEvaluationCache,
       ...(dependencies.evaluateConfigOnLab ? { evaluateConfigOnLab: dependencies.evaluateConfigOnLab } : {}),
     });
@@ -3246,7 +3280,7 @@ export async function runScout(config, dependencies = {}) {
       aggregateProfitFactorDelta: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.profitFactorDelta || 0), 0),
       aggregateDrawdownDeltaPct: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.drawdownDeltaPct || 0), 0),
     };
-    matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, robustness, expectancy: labResults[0]?.decision?.expectancy || null });
+    matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, holdoutVerdict, robustness, expectancy: labResults[0]?.decision?.expectancy || null });
   }
 
   const selectedCandidate = selectChangedMatrixCandidate({ candidates: matrixCandidates, championState });

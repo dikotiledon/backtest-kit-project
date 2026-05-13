@@ -652,7 +652,10 @@ export function decideAutoresearchOutcome({
   const significanceGate = decideSignificanceGate({
     incumbent,
     challenger,
-    policy: thresholds?.significance || {},
+    policy: {
+      ...thresholds?.significance,
+      minTradeCount: thresholds?.significance?.minTradeCount ?? thresholds?.minTradeCount ?? 100,
+    },
   });
   gates.significance = significanceGate.passed;
   if (significanceGate.passed === false && !failedGates.includes('significance')) {

@@ -108,7 +108,7 @@ test('decideSignificanceGate defaults null relative score delta policy', () => {
 test('decideSignificanceGate defaults null minimum trade count policy', () => {
   const result = decideSignificanceGate({
     incumbent: { score: 100, metrics: { tradeCount: 220 } },
-    challenger: { score: 110, metrics: { tradeCount: 149 } },
+    challenger: { score: 110, metrics: { tradeCount: 99 } },
     policy: { minTradeCount: null },
   });
 
@@ -116,8 +116,8 @@ test('decideSignificanceGate defaults null minimum trade count policy', () => {
     passed: false,
     reason: 'insufficient_sample',
     relativeScoreDelta: null,
-    challengerTradeCount: 149,
-    minTradeCount: 150,
+    challengerTradeCount: 99,
+    minTradeCount: 100,
   });
 });
 
@@ -135,6 +135,18 @@ test('decideSignificanceGate treats non-numeric score values as missing', () => 
       },
     );
   }
+});
+
+test('decideSignificanceGate defaults minTradeCount to 100 (not 150)', () => {
+  const result = decideSignificanceGate({
+    incumbent: { score: 100, metrics: { tradeCount: 120 } },
+    challenger: { score: 105, metrics: { tradeCount: 120 } },
+    policy: { minRelativeScoreDelta: 0.01 },
+  });
+  // With 120 trades and old default 150, this would fail with 'insufficient_sample'
+  // With new default 100, it should pass (120 >= 100)
+  assert.notEqual(result.reason, 'insufficient_sample');
+  assert.equal(result.passed, true);
 });
 
 test('decideSignificanceGate requires larger delta when challenger trade count drifts below parity', () => {

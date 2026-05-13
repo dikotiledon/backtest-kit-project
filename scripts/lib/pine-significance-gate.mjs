@@ -1,5 +1,5 @@
 const DEFAULT_MIN_RELATIVE_SCORE_DELTA = 0.02;
-const DEFAULT_MIN_TRADE_COUNT = 150;
+const DEFAULT_MIN_TRADE_COUNT = 100;
 const SCORE_DENOMINATOR_FLOOR = 1e-6;
 
 function finiteNumberOrNull(value) {

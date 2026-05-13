@@ -1773,7 +1773,7 @@ test('decideAutoresearchOutcome preserves earlier failure reasons when significa
   assert.match(outcome.summary, /failed score, significance gate\(s\)\./);
 });
 
-test('decideAutoresearchOutcome applies default significance sample floor to legacy thresholds', () => {
+test('decideAutoresearchOutcome passes parent minTradeCount to significance gate (unified default)', () => {
   const outcome = decideAutoresearchOutcome({
     incumbent: makeResult({ configId: 'champion', score: 100, roiPct: 40, profitFactor: 1.4, tradeCount: 140, maxDrawdownPct: 5 }),
     challenger: makeResult({ configId: 'challenger', score: 103, roiPct: 41, profitFactor: 1.5, tradeCount: 120, maxDrawdownPct: 5 }),
@@ -1791,9 +1791,9 @@ test('decideAutoresearchOutcome applies default significance sample floor to leg
   assert.equal(outcome.gates.tradeFloor, true);
   assert.equal(outcome.gates.significance, false);
   assert.deepEqual(outcome.failedGates, ['significance']);
-  assert.equal(outcome.significanceGate.reason, 'insufficient_sample');
-  assert.equal(outcome.significanceGate.challengerTradeCount, 120);
-  assert.equal(outcome.significanceGate.minTradeCount, 150);
+  // With unified minTradeCount=100, 120 >= 100 passes sample floor
+  // but trade ratio 120/140=0.857 triggers drift penalty
+  assert.equal(outcome.significanceGate.reason, 'trade_count_drift_requires_larger_delta');
 });
 
 test('decideAutoresearchOutcome blocks promotion when blind holdout verdict is required synchronously', () => {

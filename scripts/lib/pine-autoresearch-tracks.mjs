@@ -57,6 +57,8 @@ const STAGNATION_POLICY_KEYS = new Set([
   'holdEscalateAfter',
   'highSimilarityThreshold',
   'maxStagnationLevel',
+  'lowEmissionEscalateAfter',
+  'lowEmissionThreshold',
 ]);
 
 function hasStagnationPolicyKeys(value) {
@@ -309,6 +311,7 @@ export function defaultSchedulerState() {
     cycleIndex: 0,
     noChangeStreak: 0,
     noNewCandidateStreak: 0,
+    lowEmissionStreak: 0,
     sameTrackCycleStreak: 0,
     lastNoveltySignature: null,
     lastChampionFingerprint: null,
@@ -393,6 +396,7 @@ export function nextStagnationState(input = {}) {
     previousLevel = 0,
     noNewCandidateStreak = 0,
     noChangeStreak = 0,
+    lowEmissionStreak = 0,
     promotionEligible = false,
     topCandidateSimilarity = null,
     policy = {},
@@ -402,6 +406,7 @@ export function nextStagnationState(input = {}) {
   const maxStagnationLevel = normalizeNumericPolicyInteger(sourcePolicy.maxStagnationLevel, { fallback: 3, min: 0 });
   const noNewCandidateEscalateAfter = normalizeNumericPolicyInteger(sourcePolicy.noNewCandidateEscalateAfter, { fallback: 3, min: 1 });
   const holdEscalateAfter = normalizeNumericPolicyInteger(sourcePolicy.holdEscalateAfter, { fallback: 5, min: 1 });
+  const lowEmissionEscalateAfter = normalizeNumericPolicyInteger(sourcePolicy.lowEmissionEscalateAfter, { fallback: 3, min: 1 });
   const highSimilarityThreshold = typeof sourcePolicy.highSimilarityThreshold === 'number' && Number.isFinite(sourcePolicy.highSimilarityThreshold)
     ? sourcePolicy.highSimilarityThreshold
     : 0.9;
@@ -416,6 +421,10 @@ export function nextStagnationState(input = {}) {
   const normalizedNoChangeStreak = Math.max(
     0,
     Math.floor(Number.isFinite(Number(noChangeStreak)) ? Number(noChangeStreak) : 0),
+  );
+  const normalizedLowEmissionStreak = Math.max(
+    0,
+    Math.floor(Number.isFinite(Number(lowEmissionStreak)) ? Number(lowEmissionStreak) : 0),
   );
   const normalizedTopCandidateSimilarity = typeof topCandidateSimilarity === 'number' && Number.isFinite(topCandidateSimilarity)
     ? topCandidateSimilarity
@@ -444,6 +453,13 @@ export function nextStagnationState(input = {}) {
         && normalizedNoChangeStreak >= holdEscalateAfter
         && normalizedTopCandidateSimilarity !== null
         && normalizedTopCandidateSimilarity >= highSimilarityThreshold,
+    },
+    {
+      reason: 'lowEmissionStreak',
+      anchor: normalizedLowEmissionStreak,
+      threshold: lowEmissionEscalateAfter,
+      active: promotionEligible === false
+        && normalizedLowEmissionStreak >= lowEmissionEscalateAfter,
     },
   ];
   const transition = candidates.find((candidate) => candidate.active);
@@ -506,6 +522,16 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     : 0;
 
   const configuredStagnationPolicy = resolveStagnationPolicy(policy);
+  const lowEmissionThreshold = normalizeNumericPolicyInteger(
+    configuredStagnationPolicy.lowEmissionThreshold,
+    { fallback: 3, min: 0 },
+  );
+  const emittedVariantCount = Number(manifest.searchEfficiency?.emittedVariantCount);
+  const lowEmissionStreak = manifest.promotionEligible === true
+    ? 0
+    : Number.isFinite(emittedVariantCount) && emittedVariantCount <= lowEmissionThreshold
+      ? previous.lowEmissionStreak + 1
+      : 0;
   const stagnationState = configuredStagnationPolicy.enabled === false
     ? {
         stagnationLevel: previous.stagnationLevel ?? 0,
@@ -516,6 +542,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
         previousLevel: previous.stagnationLevel,
         noNewCandidateStreak,
         noChangeStreak,
+        lowEmissionStreak,
         promotionEligible: manifest.promotionEligible === true,
         topCandidateSimilarity: manifest.topCandidateSimilarity,
         policy: {
@@ -568,6 +595,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     cycleIndex: nextCycleIndex,
     noChangeStreak,
     noNewCandidateStreak,
+    lowEmissionStreak,
     sameTrackCycleStreak,
     lastNoveltySignature: noveltySignature,
     lastChampionFingerprint: championFingerprint ?? previous.lastChampionFingerprint,
@@ -601,6 +629,7 @@ function normalizeSchedulerState(state = {}) {
     cycleIndex: Number.isFinite(state.cycleIndex) ? state.cycleIndex : base.cycleIndex,
     noChangeStreak: Number.isFinite(state.noChangeStreak) ? state.noChangeStreak : base.noChangeStreak,
     noNewCandidateStreak: Number.isFinite(state.noNewCandidateStreak) ? state.noNewCandidateStreak : base.noNewCandidateStreak,
+    lowEmissionStreak: Number.isFinite(state.lowEmissionStreak) ? state.lowEmissionStreak : base.lowEmissionStreak,
     sameTrackCycleStreak: Number.isFinite(state.sameTrackCycleStreak) ? state.sameTrackCycleStreak : base.sameTrackCycleStreak,
     lastNoveltySignature: state.lastNoveltySignature ?? base.lastNoveltySignature,
     lastChampionFingerprint: state.lastChampionFingerprint ?? base.lastChampionFingerprint,

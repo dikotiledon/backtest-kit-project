@@ -110,6 +110,7 @@ test('readSchedulerState and writeSchedulerState round-trip the explicit schedul
     activeTrackId: 'track-c',
     cycleIndex: 3,
     noChangeStreak: 2,
+    lowEmissionStreak: 4,
     sameTrackCycleStreak: 5,
     lastNoveltySignature: 'sig-1',
     lastChampionFingerprint: 'champ-1',
@@ -243,6 +244,118 @@ test('nextStagnationState resets when promotion becomes eligible', () => {
     stagnationReason: null,
     lastEscalatedAt: null,
   });
+});
+
+test('nextStagnationState escalates after lowEmissionStreak meets threshold', () => {
+  const result = nextStagnationState({
+    previousLevel: 0,
+    noNewCandidateStreak: 0,
+    noChangeStreak: 0,
+    topCandidateSimilarity: 0.5,
+    promotionEligible: false,
+    lowEmissionStreak: 3,
+    policy: {
+      noNewCandidateEscalateAfter: 2,
+      holdEscalateAfter: 3,
+      highSimilarityThreshold: 0.8,
+      maxStagnationLevel: 2,
+      lowEmissionEscalateAfter: 3,
+      lowEmissionThreshold: 3,
+    },
+  });
+  assert.equal(result.stagnationLevel, 1);
+  assert.equal(result.stagnationReason, 'lowEmissionStreak');
+});
+
+test('nextStagnationState does not escalate when lowEmissionStreak is below threshold', () => {
+  const result = nextStagnationState({
+    previousLevel: 0,
+    noNewCandidateStreak: 0,
+    noChangeStreak: 0,
+    topCandidateSimilarity: 0.5,
+    promotionEligible: false,
+    lowEmissionStreak: 2,
+    policy: {
+      noNewCandidateEscalateAfter: 2,
+      holdEscalateAfter: 3,
+      highSimilarityThreshold: 0.8,
+      maxStagnationLevel: 2,
+      lowEmissionEscalateAfter: 3,
+      lowEmissionThreshold: 3,
+    },
+  });
+  assert.equal(result.stagnationLevel, 0);
+  assert.equal(result.stagnationReason, null);
+});
+
+test('nextStagnationState resets stagnation when promotion becomes eligible regardless of lowEmissionStreak', () => {
+  const result = nextStagnationState({
+    previousLevel: 2,
+    noNewCandidateStreak: 0,
+    noChangeStreak: 0,
+    topCandidateSimilarity: 0.5,
+    promotionEligible: true,
+    lowEmissionStreak: 10,
+    policy: {
+      noNewCandidateEscalateAfter: 2,
+      holdEscalateAfter: 3,
+      highSimilarityThreshold: 0.8,
+      maxStagnationLevel: 2,
+      lowEmissionEscalateAfter: 3,
+      lowEmissionThreshold: 3,
+    },
+  });
+  assert.equal(result.stagnationLevel, 0);
+  assert.equal(result.stagnationReason, null);
+});
+
+test('nextTrackState tracks and persists lowEmissionStreak across low-emission cycles', () => {
+  const next = nextTrackState({
+    state: {
+      ...defaultSchedulerState(),
+      lowEmissionStreak: 2,
+    },
+    policy: {
+      stagnation: {
+        lowEmissionEscalateAfter: 3,
+        lowEmissionThreshold: 3,
+      },
+    },
+    manifest: {
+      searchEfficiency: { emittedVariantCount: 3 },
+      promotionEligible: false,
+    },
+  });
+
+  assert.equal(next.lowEmissionStreak, 3);
+  assert.equal(next.stagnationLevel, 1);
+  assert.equal(next.stagnationReason, 'lowEmissionStreak');
+});
+
+test('nextTrackState resets lowEmissionStreak when emissions recover or promotion is eligible', () => {
+  const baseState = {
+    ...defaultSchedulerState(),
+    lowEmissionStreak: 3,
+  };
+  const policy = { stagnation: { lowEmissionThreshold: 3 } };
+
+  assert.equal(nextTrackState({
+    state: baseState,
+    policy,
+    manifest: {
+      searchEfficiency: { emittedVariantCount: 4 },
+      promotionEligible: false,
+    },
+  }).lowEmissionStreak, 0);
+
+  assert.equal(nextTrackState({
+    state: baseState,
+    policy,
+    manifest: {
+      searchEfficiency: { emittedVariantCount: 1 },
+      promotionEligible: true,
+    },
+  }).lowEmissionStreak, 0);
 });
 
 test('nextStagnationState caps escalation and preserves metadata below threshold', () => {

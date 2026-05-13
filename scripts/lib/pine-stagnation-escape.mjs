@@ -22,6 +22,17 @@ export function decideStagnationEscapePlan(input = {}) {
     return { mode: 'none', reason: 'not-eligible' };
   }
 
+  // Level 2 + both exhausted → allow architecture mutation
+  if (safeLevel === 2 && exploitDone) {
+    return {
+      mode: 'widen-architecture',
+      reason: 'all-lanes-exhausted-at-level-2',
+      allowArchitectureKeys: true,
+      multiKeyMutationCount: 2,
+      ladderScale: 1.5,
+    };
+  }
+
   if (safeLevel === 2) {
     return {
       mode: 'widen-bounds',

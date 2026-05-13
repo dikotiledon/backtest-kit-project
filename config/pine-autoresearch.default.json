@@ -95,7 +95,7 @@
       "noNewCandidateEscalateAfter": 2,
       "holdEscalateAfter": 3,
       "highSimilarityThreshold": 0.8,
-      "maxStagnationLevel": 2,
+      "maxStagnationLevel": 4,
       "lowEmissionEscalateAfter": 3,
       "lowEmissionThreshold": 3
     }

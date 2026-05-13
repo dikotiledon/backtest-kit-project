@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import { buildIncumbentSearchBatch } from '../scripts/lib/pine-search-policy.mjs';
 import { buildCanonicalConfigFingerprint } from '../scripts/lib/pine-global-search.mjs';
+import { buildSearchEfficiency } from '../scripts/pine-autoresearch.mjs';
 
 function fingerprint(config) {
   return buildCanonicalConfigFingerprint(config || {});
@@ -462,12 +463,9 @@ test('buildIncumbentSearchBatch reports tabu exhaustion when >75% of pool is rej
     ...signalPatchCandidatesForTest(base),
     ...riskPatchCandidatesForTest(base),
   ];
-  const tabuFingerprints = [
-    ...new Set([
-      ...poolSample.map((candidate) => configFingerprint({ ...base, ...candidate })),
-      configFingerprint(base),
-    ]),
-  ];
+  const tabuFingerprints = poolSample
+    .slice(0, Math.ceil(poolSample.length * 0.9))
+    .map((candidate) => configFingerprint({ ...base, ...candidate }));
 
   const batch = buildIncumbentSearchBatch({
     incumbent: base,
@@ -477,14 +475,54 @@ test('buildIncumbentSearchBatch reports tabu exhaustion when >75% of pool is rej
     schedulerState: { tabuRejectedFingerprints: tabuFingerprints.map((fingerprint) => ({ fingerprint })) },
   });
 
-  const exhaustion = batch.filter((variant) => variant?.metadata?.exhaustedFamily);
-  assert.ok(exhaustion.length > 0, 'at least one family should emit an exhaustion marker');
-  assert.ok(
-    exhaustion.some((variant) => variant.metadata.exhaustedFamily === 'signal' || variant.metadata.exhaustedFamily === 'risk'),
-    'exhaustion marker should identify the saturated family',
-  );
-  assert.ok(
-    batch.some((variant) => variant?.metadata?.allCandidatesTabu === true),
-    'at least one marker should set allCandidatesTabu so downstream escalation fires',
-  );
+  const markers = batch.filter((variant) => variant?.lane === 'exhaustion');
+  assert.ok(markers.length > 0, 'at least one exhaustion marker should be emitted');
+  for (const marker of markers) {
+    assert.equal(marker.family, 'incumbent-search');
+    assert.ok(marker.exhaustedFamily === 'signal' || marker.exhaustedFamily === 'risk', 'exhaustedFamily must be signal or risk');
+    assert.ok(Array.isArray(marker.metadata?.exhaustedFamilies), 'metadata.exhaustedFamilies must be an array');
+    assert.ok(marker.metadata.exhaustedFamilies.length > 0, 'metadata.exhaustedFamilies must be non-empty');
+    assert.equal(typeof marker.metadata?.allCandidatesTabu, 'boolean');
+  }
+
+  const emittedNonMarkerCount = batch.filter((variant) => variant?.lane !== 'exhaustion' && !variant?.exhaustedFamily).length;
+  for (const marker of markers) {
+    assert.equal(marker.metadata.allCandidatesTabu, emittedNonMarkerCount === 0,
+      'metadata.allCandidatesTabu must be true iff there are no emitted non-marker variants');
+  }
+
+  const efficiency = buildSearchEfficiency(batch);
+  assert.equal(efficiency.variantCount, batch.length, 'variantCount must include marker entries');
+  assert.equal(efficiency.emittedVariantCount, emittedNonMarkerCount, 'emittedVariantCount must exclude markers');
+  if (emittedNonMarkerCount === 0) {
+    assert.equal(efficiency.allCandidatesTabu, true, 'allCandidatesTabu must be true when no emitted variants and exhaustion marker present');
+  }
+  const flaggedFamilies = new Set();
+  for (const marker of markers) {
+    for (const family of marker.metadata.exhaustedFamilies) flaggedFamilies.add(family);
+  }
+  for (const family of flaggedFamilies) {
+    assert.ok(efficiency.exhaustedFamilies.includes(family), `efficiency.exhaustedFamilies must include ${family}`);
+  }
+});
+
+test('buildIncumbentSearchBatch emits no exhaustion marker when pool has healthy emission', () => {
+  const base = buildBaselineConfig();
+
+  const batch = buildIncumbentSearchBatch({
+    incumbent: base,
+    maxConfigs: 8,
+    historyEvents: [],
+    policy: { testedCandidateFingerprints: [], exploitRatio: 0.5 },
+    schedulerState: { tabuRejectedFingerprints: [] },
+  });
+
+  const markers = batch.filter((variant) => variant?.lane === 'exhaustion');
+  assert.equal(markers.length, 0, 'no exhaustion marker when pool is healthy');
+  assert.equal(batch.filter((variant) => variant?.exhaustedFamily).length, 0, 'no exhaustedFamily marker when pool is healthy');
+
+  const efficiency = buildSearchEfficiency(batch);
+  assert.equal(efficiency.allCandidatesTabu, false, 'allCandidatesTabu must be false when pool is healthy');
+  assert.equal(efficiency.exhaustedFamilies.length, 0, 'no exhausted families when pool is healthy');
+  assert.ok(efficiency.emittedVariantCount > 0, 'emittedVariantCount must be > 0 when pool is healthy');
 });

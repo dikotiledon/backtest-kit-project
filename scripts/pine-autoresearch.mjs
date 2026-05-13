@@ -1271,7 +1271,7 @@ function uniqueStrings(values = []) {
     .filter(Boolean))];
 }
 
-function buildSearchEfficiency(searchBatch = [], options = {}) {
+export function buildSearchEfficiency(searchBatch = [], options = {}) {
   const variants = Array.isArray(searchBatch) ? searchBatch : [];
   const emittedVariants = variants.filter((variant) => Boolean(variant) && !variant?.exhaustedFamily && variant?.lane !== 'exhaustion');
   const familyExhaustion = variants

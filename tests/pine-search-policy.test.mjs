@@ -438,14 +438,13 @@ test('buildIncumbentSearchBatch reports tabu exhaustion when >75% of pool is rej
   const efficiency = buildSearchEfficiency(batch);
   assert.equal(efficiency.variantCount, batch.length, 'variantCount must include marker entries');
   assert.equal(efficiency.emittedVariantCount, emittedNonMarkerCount, 'emittedVariantCount must exclude markers');
-  if (emittedNonMarkerCount === 0) {
-    assert.equal(efficiency.allCandidatesTabu, true, 'allCandidatesTabu must be true when no emitted variants and exhaustion marker present');
-  }
+  assert.equal(efficiency.allCandidatesTabu, true, 'allCandidatesTabu must be true when signal and risk are both exhausted');
   const flaggedFamilies = new Set();
   for (const marker of markers) {
     for (const family of marker.metadata.exhaustedFamilies) flaggedFamilies.add(family);
   }
-  for (const family of flaggedFamilies) {
+  for (const family of ['signal', 'risk']) {
+    assert.ok(flaggedFamilies.has(family), `exhaustion marker must flag ${family}`);
     assert.ok(efficiency.exhaustedFamilies.includes(family), `efficiency.exhaustedFamilies must include ${family}`);
   }
 });

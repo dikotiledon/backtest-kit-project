@@ -1295,7 +1295,9 @@ export function buildSearchEfficiency(searchBatch = [], options = {}) {
     ...(Array.isArray(options.exhaustedFamilies) ? options.exhaustedFamilies : []),
   ]);
   const markerAllCandidatesTabu = variants.some((variant) => variant?.allCandidatesTabu === true || variant?.metadata?.allCandidatesTabu === true);
+  const bothFamiliesExhausted = ['signal', 'risk'].every((family) => exhaustedFamilies.includes(family));
   const allCandidatesTabu = options.allCandidatesTabu === true
+    || bothFamiliesExhausted
     || (emittedVariants.length === 0 && (markerAllCandidatesTabu || exhaustedFamilies.length > 0));
   const efficiency = {
     variantCount: variants.length,

@@ -2826,8 +2826,10 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
     const labResults = [primaryResult];
     return {
       labResults,
+      holdoutVerdict: null,
       matrixDecision: decideMatrixPromotion({
         labResults,
+        shadowsEvaluated: false,
         policy: config.matrixPolicy,
         champion: championState,
         challenger: challengerSummary,

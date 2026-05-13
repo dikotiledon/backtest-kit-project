@@ -635,6 +635,65 @@ test('evaluateMatrix short-circuits shadow labs when primary cannot promote', as
   assert.equal(result.matrixDecision.gates.primaryPromote, false);
 });
 
+test('evaluateMatrix short-circuit marks shadow gates as not_evaluated', async () => {
+  const champion = makeResult({
+    configId: 'champion',
+    score: 100,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.4,
+    maxDrawdownPct: 5,
+    config: { minPredSum: 2 },
+  });
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 85,
+    tradeCount: 210,
+    roiPct: 20,
+    profitFactor: 1.1,
+    maxDrawdownPct: 5.1,
+    config: { minPredSum: 1.8 },
+  });
+  const calls = [];
+  const result = await evaluateMatrix({
+    primaryLab: {
+      labId: 'primary',
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 100,
+        minTradeRatioVsIncumbent: 0.75,
+        significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+      },
+    },
+    shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
+    blindHoldoutLabs: [],
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 1, minShadowPassRatio: 0.5, requireCandidateChange: true },
+    expectancyPolicy: { enabled: false },
+    regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
+  }, 'run-honesty', champion, challenger, {
+    evaluateConfigOnLab: async ({ lab, variantKey, candidate }) => {
+      calls.push(`${lab.labId}:${variantKey}`);
+      return candidate;
+    },
+  });
+
+  // Only primary lab was evaluated
+  assert.deepEqual(result.labResults.map((entry) => entry.lab.labId), ['primary']);
+  assert.deepEqual(calls, ['primary:champion', 'primary:challenger']);
+  // Shadow gates are not_evaluated, not false
+  assert.equal(result.matrixDecision.gates.shadowPassCount, 'not_evaluated');
+  assert.equal(result.matrixDecision.gates.shadowPassRatio, 'not_evaluated');
+  // failedGates only includes genuinely failed gates
+  assert.ok(!result.matrixDecision.failedGates.includes('shadowPassCount'));
+  assert.ok(!result.matrixDecision.failedGates.includes('shadowPassRatio'));
+  assert.ok(result.matrixDecision.failedGates.includes('primaryPromote'));
+  // skipped reason present
+  assert.deepEqual(result.matrixDecision.skipped, { reason: 'primary_hold' });
+});
+
 test('evaluateMatrix still evaluates shadow labs after primary hold when primary promote is optional', async () => {
   const thresholds = {
     minScoreDelta: 0.25,
@@ -2793,6 +2852,48 @@ test('decideMatrixPromotion explains steady-state hold clearly', () => {
   assert.equal(result.recommendation, 'hold');
   assert.deepEqual(result.failedGates, ['candidateChanged', 'primaryPromote', 'shadowPassCount', 'shadowPassRatio']);
   assert.match(result.summary, /No new candidate/);
+});
+
+test('decideMatrixPromotion marks shadow gates not_evaluated when shadowsEvaluated=false', () => {
+  const result = decideMatrixPromotion({
+    labResults: [{ decision: { recommendation: 'hold' } }],
+    champion: { configId: 'champion', config: { minPredSum: 2 } },
+    challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+    shadowsEvaluated: false,
+    policy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 1,
+      minShadowPassRatio: 0.5,
+      requireCandidateChange: true,
+    },
+  });
+
+  assert.equal(result.gates.shadowPassCount, 'not_evaluated');
+  assert.equal(result.gates.shadowPassRatio, 'not_evaluated');
+  assert.deepEqual(result.failedGates, ['primaryPromote']);
+  assert.deepEqual(result.skipped, { reason: 'primary_hold' });
+  assert.equal(result.recommendation, 'hold');
+});
+
+test('decideMatrixPromotion passes shadow gates when zero shadows and zero thresholds', () => {
+  const result = decideMatrixPromotion({
+    labResults: [{ decision: { recommendation: 'promote' } }],
+    champion: { configId: 'champion', config: { minPredSum: 2 } },
+    challenger: { configId: 'challenger', config: { minPredSum: 1.5 } },
+    shadowsEvaluated: true,
+    policy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 0,
+      minShadowPassRatio: 0,
+      requireCandidateChange: true,
+    },
+  });
+
+  assert.equal(result.gates.shadowPassCount, true);
+  assert.equal(result.gates.shadowPassRatio, true);
+  assert.deepEqual(result.failedGates, []);
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.skipped, null);
 });
 
 test('decideAutoPromotionAction requires matrix pass, change, cooldown, and quota', () => {

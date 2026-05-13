@@ -766,7 +766,7 @@ export function decideAutoresearchOutcome({
   };
 }
 
-export function decideMatrixPromotion({ labResults = [], policy = {}, champion, challenger }) {
+export function decideMatrixPromotion({ labResults = [], policy = {}, champion, challenger, shadowsEvaluated = true }) {
   const primary = labResults[0] || null;
   const shadowLabs = labResults.slice(1);
   const shadowPassCount = shadowLabs.filter((item) => item.decision?.recommendation === 'promote').length;
@@ -779,29 +779,46 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
   const minShadowPassRatio = policy.minShadowPassRatio ?? 0;
   const requireCandidateChange = policy.requireCandidateChange ?? true;
 
+  let shadowPassCountGate;
+  let shadowPassRatioGate;
+
+  if (!shadowsEvaluated) {
+    shadowPassCountGate = 'not_evaluated';
+    shadowPassRatioGate = 'not_evaluated';
+  } else if (shadowLabs.length === 0 && minShadowPassCount === 0 && minShadowPassRatio === 0) {
+    shadowPassCountGate = true;
+    shadowPassRatioGate = true;
+  } else {
+    shadowPassCountGate = shadowPassCount >= minShadowPassCount;
+    shadowPassRatioGate = shadowLabs.length > 0 && shadowPassRatio >= minShadowPassRatio;
+  }
+
   const gates = {
     candidateChanged: requireCandidateChange ? candidateChanged : true,
     primaryPromote: requirePrimaryPromote ? primary?.decision?.recommendation === 'promote' : true,
-    shadowPassCount: shadowPassCount >= minShadowPassCount,
-    shadowPassRatio: shadowLabs.length > 0 && shadowPassRatio >= minShadowPassRatio,
+    shadowPassCount: shadowPassCountGate,
+    shadowPassRatio: shadowPassRatioGate,
   };
 
   const failedGates = Object.entries(gates)
-    .filter(([, passed]) => !passed)
+    .filter(([, passed]) => passed === false)
     .map(([name]) => name);
 
-  const recommendation = failedGates.length === 0 ? 'promote' : 'hold';
+  const recommendation = failedGates.length === 0 && gates.primaryPromote === true ? 'promote' : 'hold';
   const summary = !candidateChanged
     ? `No new candidate. Current champion ${champion?.configId} remains best on the pinned matrix.`
     : recommendation === 'promote'
       ? `Promote challenger ${challenger?.configId}: matrix guards passed (${allPassCount}/${labResults.length} labs promote).`
       : `Hold champion ${champion?.configId}: matrix failed ${failedGates.join(', ')} gate(s).`;
 
+  const skipped = !shadowsEvaluated ? { reason: 'primary_hold' } : null;
+
   return {
     recommendation,
     summary,
     gates,
     failedGates,
+    skipped,
     counts: {
       totalLabs: labResults.length,
       shadowLabs: shadowLabs.length,
@@ -1002,7 +1019,8 @@ export function renderScoutMarkdown({ config, manifest }) {
 
   if (decision?.counts) {
     lines.push(`- Labs promoting: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
-    lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
+    const shadowRatioDisplay = decision.skipped ? 'n/a' : decision.counts.shadowPassRatio;
+    lines.push(`- Shadow pass ratio: ${shadowRatioDisplay}`);
   }
 
   if (manifest) {
@@ -1077,7 +1095,8 @@ export function renderDigestMarkdown({ config, latestManifest, previousManifest,
 
   if (decision?.counts) {
     lines.push(`- Promote labs: ${decision.counts.allPassCount}/${decision.counts.totalLabs}`);
-    lines.push(`- Shadow pass ratio: ${decision.counts.shadowPassRatio}`);
+    const shadowRatioDisplay = decision.skipped ? 'n/a' : decision.counts.shadowPassRatio;
+    lines.push(`- Shadow pass ratio: ${shadowRatioDisplay}`);
   }
 
   if (latestManifest) {

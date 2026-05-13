@@ -128,8 +128,13 @@ export function pruneTabuFingerprints(input = {}) {
   const currentChampionFingerprint = normalizeKnownFingerprint(input.currentChampionFingerprint);
   const policy = normalizeTabuPrunePolicy(input.policy);
   const stagnationLevel = Math.max(0, Math.floor(Number(input.stagnationLevel) || 0));
+  // Stagnation escalation shrinks the tabu horizon: level 1 halves maxAgeCycles,
+  // level 2 quarters it (floor at 2 to keep some aging in effect).
   const divisor = stagnationLevel >= 2 ? 4 : stagnationLevel >= 1 ? 2 : 1;
   const effectiveMaxAge = Math.max(2, Math.floor(policy.maxAgeCycles / divisor));
+  // The base filter uses strict `>` for legacy level-0 behavior (age == maxAgeCycles survives).
+  // During escalation (level >= 1) we tighten to prune entries at the boundary too,
+  // which keeps the `>` comparator intact by subtracting 1 from the cutoff.
   const ageCutoff = stagnationLevel >= 1 ? effectiveMaxAge - 1 : effectiveMaxAge;
   const deduped = new Map();
 

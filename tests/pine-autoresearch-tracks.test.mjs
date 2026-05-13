@@ -802,6 +802,27 @@ test('pruneTabuFingerprints floors effective maxAgeCycles at 2 to avoid wiping e
   assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-b', 'fp-a']);
 });
 
+test('pruneTabuFingerprints still applies maxEntries cap after stagnation-adjusted age filter', () => {
+  const championFingerprint = '{"adxThreshold":20}';
+  const entries = [
+    { fingerprint: 'fp-a', addedAtCycle: 49, championFingerprint }, // age 1
+    { fingerprint: 'fp-b', addedAtCycle: 48, championFingerprint }, // age 2
+    { fingerprint: 'fp-c', addedAtCycle: 47, championFingerprint }, // age 3
+    { fingerprint: 'fp-d', addedAtCycle: 46, championFingerprint }, // age 4
+    { fingerprint: 'fp-e', addedAtCycle: 45, championFingerprint }, // age 5
+  ];
+  const pruned = pruneTabuFingerprints({
+    entries,
+    currentCycle: 50,
+    currentChampionFingerprint: championFingerprint,
+    policy: { maxAgeCycles: 20, maxEntries: 2, dropOnChampionChange: true },
+    stagnationLevel: 1,
+  });
+  // effective=10, cutoff=9 (>= at boundary). All 5 survive the age filter, then maxEntries=2 caps to newest 2.
+  assert.equal(pruned.length, 2);
+  assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-b', 'fp-a']);
+});
+
 test('nextTrackState records rejected candidate fingerprints in a bounded tabu list', () => {
   const next = nextTrackState({
     state: {

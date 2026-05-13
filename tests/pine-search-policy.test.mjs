@@ -8,6 +8,67 @@ function fingerprint(config) {
   return buildCanonicalConfigFingerprint(config || {});
 }
 
+function configFingerprint(config) {
+  return fingerprint(config);
+}
+
+function buildBaselineConfig() {
+  return {
+    adxThreshold: 20,
+    minPredSum: 1.8,
+    minBarsBetween: 1,
+    slAtrMult: 0.5,
+    tpAtrMult: 7.6,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+    riskAtrLen: 14,
+    neighborsCount: 32,
+    h: 8,
+    r: 8,
+    x: 25,
+    useTrendXConf: true,
+    useSignalFusion: true,
+    useFusionV2: false,
+    useFusionV3: false,
+    useFusionV4: true,
+    useSupertrendFilter: true,
+    useTrailingStop: true,
+    useStopsTP: true,
+  };
+}
+
+function signalPatchCandidatesForTest(base) {
+  return [
+    { neighborsCount: Math.max(12, (base.neighborsCount || 32) - 8) },
+    { neighborsCount: (base.neighborsCount || 32) + 8 },
+    { adxThreshold: Math.max(10, (base.adxThreshold || 20) - 5) },
+    { adxThreshold: (base.adxThreshold || 20) + 5 },
+    { minPredSum: Math.max(1, (base.minPredSum || 2) - 0.5) },
+    { minPredSum: (base.minPredSum || 2) + 0.5 },
+    { minBarsBetween: Math.max(0, (base.minBarsBetween || 2) - 1) },
+    { minBarsBetween: (base.minBarsBetween || 2) + 2 },
+    { h: Math.max(4, (base.h || 8) - 2) },
+    { h: (base.h || 8) + 2 },
+    { r: Math.max(2, (base.r || 8) / 2) },
+    { x: Math.max(15, (base.x || 25) - 5) },
+  ];
+}
+
+function riskPatchCandidatesForTest(base) {
+  return [
+    { slAtrMult: Math.max(0.75, (base.slAtrMult || 1) - 0.25) },
+    { slAtrMult: (base.slAtrMult || 1) + 0.25 },
+    { tpAtrMult: Math.max(1.5, (base.tpAtrMult || 2.5) - 0.5) },
+    { tpAtrMult: (base.tpAtrMult || 2.5) + 0.5 },
+    { trailAtrMult: Math.max(0.75, (base.trailAtrMult || 1) - 0.25) },
+    { trailAtrMult: (base.trailAtrMult || 1) + 0.25 },
+    { trailActivateR: Math.max(0, (base.trailActivateR || 0.5) - 0.5) },
+    { trailActivateR: (base.trailActivateR || 0.5) + 0.5 },
+    { riskAtrLen: Math.max(7, (base.riskAtrLen || 14) - 7) },
+    { riskAtrLen: (base.riskAtrLen || 14) + 7 },
+  ];
+}
+
 function frozenIncumbent(config) {
   return {
     ...config,
@@ -139,7 +200,7 @@ test('buildIncumbentSearchBatch fails closed when every exploit-family candidate
     },
   });
 
-  assert.deepEqual(batch, []);
+  assert.deepEqual(batch.filter((variant) => variant?.lane !== 'exhaustion'), []);
 });
 
 const hotAnnealingPolicy = {
@@ -186,9 +247,10 @@ test('buildIncumbentSearchBatch does not replay duplicate final configs within o
     policy: { exploitRatio: 1, exploitFamilies: ['signal'] },
     schedulerState: {},
   });
-  const fingerprints = batch.map((variant) => fingerprint(variant.config));
+  const emittedBatch = batch.filter((variant) => variant?.lane !== 'exhaustion');
+  const fingerprints = emittedBatch.map((variant) => fingerprint(variant.config));
 
-  assert.equal(batch.length, 12);
+  assert.equal(emittedBatch.length, 12);
   assert.equal(new Set(fingerprints).size, fingerprints.length);
 });
 
@@ -270,7 +332,7 @@ test('buildIncumbentSearchBatch fails closed when all signal candidates are test
     schedulerState: {},
   });
 
-  assert.deepEqual(batch, []);
+  assert.deepEqual(batch.filter((variant) => variant?.lane !== 'exhaustion'), []);
 });
 
 test('buildIncumbentSearchBatch reads object tabu entries by fingerprint', () => {
@@ -291,7 +353,7 @@ test('buildIncumbentSearchBatch fails closed when all signal candidates are lega
     schedulerState: { tabuRejectedFingerprints: signalFingerprints },
   });
 
-  assert.deepEqual(batch, []);
+  assert.deepEqual(batch.filter((variant) => variant?.lane !== 'exhaustion'), []);
 });
 
 test('buildIncumbentSearchBatch fails closed when all signal candidates are object tabu entries', () => {
@@ -309,7 +371,7 @@ test('buildIncumbentSearchBatch fails closed when all signal candidates are obje
     },
   });
 
-  assert.deepEqual(batch, []);
+  assert.deepEqual(batch.filter((variant) => variant?.lane !== 'exhaustion'), []);
 });
 
 test('buildIncumbentSearchBatch emits final non-tabu config when raw required-key candidate is tabu', () => {
@@ -358,7 +420,7 @@ test('buildIncumbentSearchBatch rejects tabu final configs after required key en
     schedulerState: { tabuRejectedFingerprints: enforcedRiskFingerprints },
   });
 
-  assert.deepEqual(batch, []);
+  assert.deepEqual(batch.filter((variant) => variant?.lane !== 'exhaustion'), []);
 });
 
 test('buildIncumbentSearchBatch tries the next candidate when required key enforcement makes the first final config tabu', () => {
@@ -391,5 +453,38 @@ test('buildIncumbentSearchBatch rejects object-shaped tabu entries for enforced 
     },
   });
 
-  assert.deepEqual(batch, []);
+  assert.deepEqual(batch.filter((variant) => variant?.lane !== 'exhaustion'), []);
+});
+
+test('buildIncumbentSearchBatch reports tabu exhaustion when >75% of pool is rejected', () => {
+  const base = buildBaselineConfig();
+  const poolSample = [
+    ...signalPatchCandidatesForTest(base),
+    ...riskPatchCandidatesForTest(base),
+  ];
+  const tabuFingerprints = [
+    ...new Set([
+      ...poolSample.map((candidate) => configFingerprint({ ...base, ...candidate })),
+      configFingerprint(base),
+    ]),
+  ];
+
+  const batch = buildIncumbentSearchBatch({
+    incumbent: base,
+    maxConfigs: 8,
+    historyEvents: [],
+    policy: { testedCandidateFingerprints: tabuFingerprints, exploitRatio: 0.5 },
+    schedulerState: { tabuRejectedFingerprints: tabuFingerprints.map((fingerprint) => ({ fingerprint })) },
+  });
+
+  const exhaustion = batch.filter((variant) => variant?.metadata?.exhaustedFamily);
+  assert.ok(exhaustion.length > 0, 'at least one family should emit an exhaustion marker');
+  assert.ok(
+    exhaustion.some((variant) => variant.metadata.exhaustedFamily === 'signal' || variant.metadata.exhaustedFamily === 'risk'),
+    'exhaustion marker should identify the saturated family',
+  );
+  assert.ok(
+    batch.some((variant) => variant?.metadata?.allCandidatesTabu === true),
+    'at least one marker should set allCandidatesTabu so downstream escalation fires',
+  );
 });

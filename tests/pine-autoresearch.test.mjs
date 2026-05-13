@@ -6655,7 +6655,7 @@ test('runScout skips primary sweep and records selected exitRegime exhaustion wi
       variantCount: 0,
       emittedVariantCount: 0,
       exhaustedFamilies: ['exitRegime'],
-      allCandidatesTabu: false,
+      allCandidatesTabu: true,
       exhaustionReason: 'exit-regime-exhausted',
       exhaustionSource: 'generatedLaneExhaustion',
     });
@@ -6770,7 +6770,7 @@ test('runScout skips primary sweep and updates scheduler state when globalAllPar
       variantCount: 0,
       emittedVariantCount: 0,
       exhaustedFamilies: ['globalAllParameter'],
-      allCandidatesTabu: false,
+      allCandidatesTabu: true,
       exhaustionReason: 'global-all-parameter-exhausted',
       exhaustionSource: 'generatedLaneExhaustion',
     });

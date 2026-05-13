@@ -1273,20 +1273,26 @@ function uniqueStrings(values = []) {
 
 function buildSearchEfficiency(searchBatch = [], options = {}) {
   const variants = Array.isArray(searchBatch) ? searchBatch : [];
-  const emittedVariants = variants.filter((variant) => Boolean(variant) && !variant?.exhaustedFamily);
+  const emittedVariants = variants.filter((variant) => Boolean(variant) && !variant?.exhaustedFamily && variant?.lane !== 'exhaustion');
+  const familyExhaustion = variants
+    .filter((variant) => variant?.exhaustedFamily || variant?.metadata?.exhaustedFamily)
+    .flatMap((variant) => {
+      const list = Array.isArray(variant?.metadata?.exhaustedFamilies) ? variant.metadata.exhaustedFamilies : null;
+      if (list && list.length) return list;
+      return [variant.exhaustedFamily || variant.metadata?.exhaustedFamily].filter(Boolean);
+    });
   const exhaustedFamilies = uniqueStrings([
-    ...variants
-      .filter((variant) => variant?.exhaustedFamily)
-      .map((variant) => variant.exhaustedFamily),
+    ...familyExhaustion,
     ...(Array.isArray(options.exhaustedFamilies) ? options.exhaustedFamilies : []),
   ]);
-  const explicitAllCandidatesTabu = options.allCandidatesTabu === true
-    || variants.some((variant) => variant?.allCandidatesTabu === true || variant?.metadata?.allCandidatesTabu === true);
+  const markerAllCandidatesTabu = variants.some((variant) => variant?.allCandidatesTabu === true || variant?.metadata?.allCandidatesTabu === true);
+  const allCandidatesTabu = options.allCandidatesTabu === true
+    || (emittedVariants.length === 0 && (markerAllCandidatesTabu || exhaustedFamilies.length > 0));
   const efficiency = {
     variantCount: variants.length,
     emittedVariantCount: emittedVariants.length,
     exhaustedFamilies,
-    allCandidatesTabu: emittedVariants.length === 0 && explicitAllCandidatesTabu,
+    allCandidatesTabu,
   };
   if (options.exhaustionReason) efficiency.exhaustionReason = options.exhaustionReason;
   if (options.exhaustionSource) efficiency.exhaustionSource = options.exhaustionSource;

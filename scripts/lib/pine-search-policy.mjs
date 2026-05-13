@@ -191,7 +191,7 @@ function pickNonTabuVariant({
   patchBounds = {},
 }) {
   if (!Array.isArray(pool) || !pool.length) {
-    return { variant: null, nextIndex: startIndex, tabuSkipped: 0, exhausted: true };
+    return { variant: null, nextIndex: startIndex, tabuSkipped: 0, exhausted: true, poolSize: 0 };
   }
 
   const enforceRequiredKeys = normalizeStringList(requiredTouchedKeys).length > 0;
@@ -228,13 +228,20 @@ function pickNonTabuVariant({
         nextIndex: startIndex + probe + 1,
         tabuSkipped,
         exhausted: false,
+        poolSize: pool.length,
       };
     }
 
     tabuSkipped += 1;
   }
 
-  return { variant: null, nextIndex: startIndex + pool.length, tabuSkipped, exhausted: true };
+  return {
+    variant: null,
+    nextIndex: startIndex + pool.length,
+    tabuSkipped,
+    exhausted: true,
+    poolSize: pool.length,
+  };
 }
 
 function signalPatches(base) {
@@ -333,6 +340,14 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
     signal: signalPatches(base),
     risk: riskPatches(base),
   };
+  const poolSizes = {
+    signal: familyPatchMap.signal.length,
+    risk: familyPatchMap.risk.length,
+  };
+  const familyTabuRejects = {
+    signal: 0,
+    risk: 0,
+  };
 
   const orderedExploitFamilies = exploitFamilies.map((_, index) => exploitFamilies[(cycleCount + index) % exploitFamilies.length]);
   const batch = [];
@@ -355,6 +370,9 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       patchBounds: policy.patchBounds,
     });
     index = picked.nextIndex;
+    if (family in familyTabuRejects) {
+      familyTabuRejects[family] += Number(picked.tabuSkipped) || 0;
+    }
     if (!picked.variant) continue;
     batch.push(picked.variant);
     tabuSet.add(configFingerprint(picked.variant.config));
@@ -376,9 +394,36 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       enforcementBatchIndex: batch.length,
       patchBounds: policy.patchBounds,
     });
+    if (family in familyTabuRejects) {
+      familyTabuRejects[family] += Number(picked.tabuSkipped) || 0;
+    }
     if (!picked.variant) continue;
     batch.push(picked.variant);
     tabuSet.add(configFingerprint(picked.variant.config));
+  }
+
+  const poolExhaustionRatio = Number.isFinite(Number(policy.poolExhaustionRatio))
+    ? Number(policy.poolExhaustionRatio)
+    : 0.75;
+  const exhaustedFamilies = ['signal', 'risk'].filter((family) => {
+    const size = poolSizes[family];
+    if (!size) return false;
+    const rejects = familyTabuRejects[family];
+    return rejects >= Math.ceil(size * poolExhaustionRatio);
+  });
+  if (exhaustedFamilies.length > 0) {
+    batch.push({
+      metadata: {
+        exhaustedFamily: exhaustedFamilies.length === 2 ? 'signal' : exhaustedFamilies[0],
+        allCandidatesTabu: batch.length === 0,
+        poolExhaustionRatio,
+        exhaustedFamilies,
+      },
+      exhaustedFamily: exhaustedFamilies.length === 2 ? 'signal' : exhaustedFamilies[0],
+      allCandidatesTabu: batch.length === 0,
+      lane: 'exhaustion',
+      family: 'incumbent-search',
+    });
   }
 
   return batch;

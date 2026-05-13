@@ -3236,6 +3236,7 @@ export async function runScout(config, dependencies = {}) {
   for (const candidate of paretoShortlist.slice(0, trackedConfig.searchPolicy.matrixCandidateLimit)) {
     const { labResults, matrixDecision } = await evaluateMatrix(trackedConfig, runId, championState, candidate, {
       evaluationCache: matrixEvaluationCache,
+      ...(dependencies.evaluateConfigOnLab ? { evaluateConfigOnLab: dependencies.evaluateConfigOnLab } : {}),
     });
     const robustness = {
       aggregateScoreDelta: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.scoreDelta || 0), 0),

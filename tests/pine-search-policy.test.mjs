@@ -449,6 +449,28 @@ test('buildIncumbentSearchBatch reports tabu exhaustion when >75% of pool is rej
   }
 });
 
+test('buildIncumbentSearchBatch falls back to default pool exhaustion ratio for invalid overrides', () => {
+  const base = buildBaselineConfig();
+  const poolSample = [
+    ...signalPatches(base),
+    ...riskPatches(base),
+  ];
+  const tabuFingerprints = poolSample
+    .slice(0, Math.ceil(poolSample.length * 0.9))
+    .map((candidate) => configFingerprint({ ...base, ...candidate }));
+
+  const batch = buildIncumbentSearchBatch({
+    incumbent: base,
+    maxConfigs: 8,
+    historyEvents: [],
+    policy: { testedCandidateFingerprints: tabuFingerprints, exploitRatio: 0.5, poolExhaustionRatio: 0 },
+    schedulerState: { tabuRejectedFingerprints: tabuFingerprints.map((fingerprint) => ({ fingerprint })) },
+  });
+
+  const marker = batch.find((variant) => variant?.lane === 'exhaustion');
+  assert.equal(marker?.metadata?.poolExhaustionRatio, 0.75, 'invalid exhaustion ratios must fall back to default');
+});
+
 test('buildIncumbentSearchBatch emits no exhaustion marker when pool has healthy emission', () => {
   const base = buildBaselineConfig();
 
@@ -468,4 +490,24 @@ test('buildIncumbentSearchBatch emits no exhaustion marker when pool has healthy
   assert.equal(efficiency.allCandidatesTabu, false, 'allCandidatesTabu must be false when pool is healthy');
   assert.equal(efficiency.exhaustedFamilies.length, 0, 'no exhausted families when pool is healthy');
   assert.ok(efficiency.emittedVariantCount > 0, 'emittedVariantCount must be > 0 when pool is healthy');
+});
+
+test('buildIncumbentSearchBatch does not report exhaustion from batch de-dupe alone', () => {
+  const base = buildBaselineConfig();
+
+  const batch = buildIncumbentSearchBatch({
+    incumbent: base,
+    maxConfigs: 64,
+    historyEvents: [],
+    policy: { testedCandidateFingerprints: [], exploitRatio: 0.5 },
+    schedulerState: { tabuRejectedFingerprints: [] },
+  });
+
+  const markers = batch.filter((variant) => variant?.lane === 'exhaustion');
+  assert.equal(markers.length, 0, 'no exhaustion marker when only previous picks in the batch are tabu');
+
+  const efficiency = buildSearchEfficiency(batch);
+  assert.equal(efficiency.allCandidatesTabu, false, 'allCandidatesTabu must be false without external tabu pressure');
+  assert.equal(efficiency.exhaustedFamilies.length, 0, 'batch de-dupe must not mark families exhausted');
+  assert.ok(efficiency.emittedVariantCount > 0, 'healthy pool should emit non-marker variants');
 });

@@ -185,17 +185,37 @@ function pickNonTabuVariant({
   family,
   batchIndex,
   tabuSet,
+  externalTabuFingerprints = tabuSet,
   temperature,
   requiredTouchedKeys,
   enforcementBatchIndex = batchIndex,
   patchBounds = {},
 }) {
   if (!Array.isArray(pool) || !pool.length) {
-    return { variant: null, nextIndex: startIndex, tabuSkipped: 0, exhausted: true, poolSize: 0 };
+    return {
+      variant: null,
+      nextIndex: startIndex,
+      tabuSkipped: 0,
+      externalTabuSkipped: 0,
+      batchDedupeSkipped: 0,
+      exhausted: true,
+      poolSize: 0,
+    };
   }
 
   const enforceRequiredKeys = normalizeStringList(requiredTouchedKeys).length > 0;
   let tabuSkipped = 0;
+  let externalTabuSkipped = 0;
+  let batchDedupeSkipped = 0;
+  const countTabuSkip = (fingerprint) => {
+    tabuSkipped += 1;
+    if (externalTabuFingerprints.has(fingerprint)) {
+      externalTabuSkipped += 1;
+    } else {
+      batchDedupeSkipped += 1;
+    }
+  };
+
   for (let probe = 0; probe < pool.length; probe++) {
     const rawPatch = pool[(startIndex + probe) % pool.length];
     const patch = buildDiversePatch({
@@ -207,8 +227,9 @@ function pickNonTabuVariant({
       patchBounds,
     });
     const candidate = { ...clone(base), ...patch };
-    if (!enforceRequiredKeys && tabuSet.has(configFingerprint(candidate))) {
-      tabuSkipped += 1;
+    const candidateFingerprint = configFingerprint(candidate);
+    if (!enforceRequiredKeys && tabuSet.has(candidateFingerprint)) {
+      countTabuSkip(candidateFingerprint);
       continue;
     }
 
@@ -222,23 +243,28 @@ function pickNonTabuVariant({
       patchBounds,
     });
 
-    if (!tabuSet.has(configFingerprint(enforcedVariant.config))) {
+    const enforcedFingerprint = configFingerprint(enforcedVariant.config);
+    if (!tabuSet.has(enforcedFingerprint)) {
       return {
         variant: enforcedVariant,
         nextIndex: startIndex + probe + 1,
         tabuSkipped,
+        externalTabuSkipped,
+        batchDedupeSkipped,
         exhausted: false,
         poolSize: pool.length,
       };
     }
 
-    tabuSkipped += 1;
+    countTabuSkip(enforcedFingerprint);
   }
 
   return {
     variant: null,
     nextIndex: startIndex + pool.length,
     tabuSkipped,
+    externalTabuSkipped,
+    batchDedupeSkipped,
     exhausted: true,
     poolSize: pool.length,
   };
@@ -335,6 +361,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
     ...normalizeTabuFingerprintSet(schedulerState.tabuRejectedFingerprints),
     ...normalizeTabuFingerprintSet(policy.testedCandidateFingerprints),
   ]);
+  const externalTabuFingerprints = new Set(tabuSet);
 
   const familyPatchMap = {
     signal: signalPatches(base),
@@ -364,6 +391,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       family,
       batchIndex: exploitSlot + 1,
       tabuSet,
+      externalTabuFingerprints,
       temperature,
       requiredTouchedKeys: policy.requiredTouchedKeys,
       enforcementBatchIndex: batch.length,
@@ -371,7 +399,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
     });
     index = picked.nextIndex;
     if (family in familyTabuRejects) {
-      familyTabuRejects[family] += Number(picked.tabuSkipped) || 0;
+      familyTabuRejects[family] += Number(picked.externalTabuSkipped) || 0;
     }
     if (!picked.variant) continue;
     batch.push(picked.variant);
@@ -389,21 +417,23 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
       family,
       batchIndex: exploreIndex + 1,
       tabuSet,
+      externalTabuFingerprints,
       temperature,
       requiredTouchedKeys: policy.requiredTouchedKeys,
       enforcementBatchIndex: batch.length,
       patchBounds: policy.patchBounds,
     });
     if (family in familyTabuRejects) {
-      familyTabuRejects[family] += Number(picked.tabuSkipped) || 0;
+      familyTabuRejects[family] += Number(picked.externalTabuSkipped) || 0;
     }
     if (!picked.variant) continue;
     batch.push(picked.variant);
     tabuSet.add(configFingerprint(picked.variant.config));
   }
 
-  const poolExhaustionRatio = Number.isFinite(Number(policy.poolExhaustionRatio))
-    ? Number(policy.poolExhaustionRatio)
+  const rawPoolExhaustionRatio = Number(policy.poolExhaustionRatio);
+  const poolExhaustionRatio = Number.isFinite(rawPoolExhaustionRatio) && rawPoolExhaustionRatio > 0 && rawPoolExhaustionRatio <= 1
+    ? rawPoolExhaustionRatio
     : 0.75;
   const exhaustedFamilies = ['signal', 'risk'].filter((family) => {
     const size = poolSizes[family];

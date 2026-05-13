@@ -2652,12 +2652,13 @@ async function writeEmptyLeaderboard({ runDir, runId, reason, gridName, totalCom
       gridName,
       totalCombos,
       sweepOffset,
-      resultCount: 0,
-      skipReason: reason,
-      generatedAt: new Date().toISOString(),
     },
+    generatedAt: new Date().toISOString(),
+    resultCount: 0,
     ranked: [],
+    failures: [],
     skipped: true,
+    skipReason: reason,
   };
   await fs.writeFile(path.join(runDir, 'leaderboard.json'), JSON.stringify(payload, null, 2), 'utf8');
 }

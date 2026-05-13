@@ -948,9 +948,15 @@ export function renderScoutMarkdown({ config, manifest }) {
   const steadyState = manifest.researchState?.steadyState || isSteadyStateCandidate(champion, challenger);
   const noChangeStreak = manifest.researchState?.noChangeStreak || 0;
   const bestAlternative = findBestAlternative(manifest.primarySweep, champion);
-  const primarySweepSkippedReason = manifest.primarySweep === null
-    ? (decision?.reason || manifest.stagnationReason || 'skipped')
-    : null;
+  const primarySweepSkippedReason = (() => {
+    if (manifest.primarySweep?.skipped === true) {
+      return manifest.primarySweep.skipReason || 'skipped';
+    }
+    if (manifest.primarySweep === null) {
+      return decision?.reason || manifest.stagnationReason || 'skipped';
+    }
+    return null;
+  })();
   const gridName = [manifest.primarySweep?.gridName, manifest.gridName]
     .find((value) => value !== undefined && value !== null && value !== '' && value !== 'undefined') || 'n/a';
   const lines = [

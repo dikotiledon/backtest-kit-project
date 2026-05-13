@@ -106,7 +106,7 @@ test('runPrimarySweep returns empty leaderboard without reading the file when no
         primaryLab: { labId: 'xrp', symbol: 'XRPUSDT', timeframe: '15m', limit: 100, when: '2026-04-21T10:30:00Z' },
       },
       runId,
-      { variantFilePath: variantFile, sweepOffset: 7 }
+      { variantFilePath: variantFile, sweepOffset: 0 }
     );
 
     const runDirStat = await fs.stat(runDir);
@@ -115,7 +115,7 @@ test('runPrimarySweep returns empty leaderboard without reading the file when no
       runDir,
       gridName: 'phase3-core',
       totalCombos: 0,
-      sweepOffset: 7,
+      sweepOffset: 0,
       topConfigs: [],
       best: null,
       skipped: true,
@@ -124,14 +124,16 @@ test('runPrimarySweep returns empty leaderboard without reading the file when no
 
     const leaderboard = JSON.parse(await fs.readFile(path.join(runDir, 'leaderboard.json'), 'utf8'));
     assert.notDeepEqual(leaderboard, sentinelLeaderboard);
-    assert.equal(leaderboard.skipped, true);
+    assert.equal(leaderboard.generatedAt ? typeof leaderboard.generatedAt === 'string' : false, true);
+    assert.equal(leaderboard.resultCount, 0);
     assert.deepEqual(leaderboard.ranked, []);
+    assert.deepEqual(leaderboard.failures, []);
+    assert.equal(leaderboard.skipped, true);
+    assert.equal(leaderboard.skipReason, 'no-variants-generated');
     assert.equal(leaderboard.meta.runId, runId);
     assert.equal(leaderboard.meta.gridName, 'phase3-core');
     assert.equal(leaderboard.meta.totalCombos, 0);
-    assert.equal(leaderboard.meta.sweepOffset, 7);
-    assert.equal(leaderboard.meta.resultCount, 0);
-    assert.equal(leaderboard.meta.skipReason, 'no-variants-generated');
+    assert.equal(leaderboard.meta.sweepOffset, 0);
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
@@ -5339,6 +5341,25 @@ test('renderScoutMarkdown emits Search plan and Pareto shortlist only once', () 
 
   assert.equal((text.match(/^## Search plan$/gm) || []).length, 1);
   assert.equal((text.match(/^## Pareto shortlist$/gm) || []).length, 1);
+});
+
+test('renderScoutMarkdown handles primary sweep skipped artifact', () => {
+  const text = renderScoutMarkdown({
+    config: { matrixId: 'matrix-a', primaryLab: { labId: 'primary' } },
+    manifest: {
+      generatedAt: '2026-05-11T00:00:00.000Z',
+      runId: 'run-1',
+      champion: { configId: 'champ', score: 1, tradeCount: 10, roiPct: 1, profitFactor: 1.2, maxDrawdownPct: 1, config: { a: 1 } },
+      challenger: null,
+      matrixDecision: { recommendation: 'hold', summary: 'hold' },
+      primarySweep: { skipped: true, skipReason: 'no-variants-generated', runDir: '/stub' },
+      researchState: { steadyState: false, noChangeStreak: 0 },
+    },
+  });
+
+  assert.match(text, /Primary sweep: \*\*skipped\*\*/);
+  assert.match(text, /no-variants-generated/);
+  assert.doesNotMatch(text, /Primary run dir:/);
 });
 
 test('renderDigestMarkdown includes search-plan, shortlist summary, and rotation diagnostics', () => {

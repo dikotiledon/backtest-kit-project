@@ -728,13 +728,32 @@ test('pruneTabuFingerprints is robust to null input and clamps invalid policy li
   ]);
 });
 
+test('pruneTabuFingerprints at stagnationLevel 0 applies only policy.maxAgeCycles', () => {
+  const championFingerprint = '{"adxThreshold":20}';
+  const entries = [
+    { fingerprint: 'fp-a', addedAtCycle: 45, championFingerprint }, // age 5
+    { fingerprint: 'fp-b', addedAtCycle: 38, championFingerprint }, // age 12
+    { fingerprint: 'fp-c', addedAtCycle: 32, championFingerprint }, // age 18
+    { fingerprint: 'fp-d', addedAtCycle: 25, championFingerprint }, // age 25
+  ];
+  const pruned = pruneTabuFingerprints({
+    entries,
+    currentCycle: 50,
+    currentChampionFingerprint: championFingerprint,
+    policy: { maxAgeCycles: 20, maxEntries: 32, dropOnChampionChange: true },
+    stagnationLevel: 0,
+  });
+  // Returned entries remain ordered by addedAtCycle ascending.
+  assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-c', 'fp-b', 'fp-a']);
+});
+
 test('pruneTabuFingerprints halves effective maxAgeCycles when stagnationLevel >= 1', () => {
   const championFingerprint = '{"adxThreshold":20}';
   const entries = [
-    { fingerprint: 'fp-a', addedAtCycle: 45, championFingerprint },
-    { fingerprint: 'fp-b', addedAtCycle: 38, championFingerprint },
-    { fingerprint: 'fp-c', addedAtCycle: 32, championFingerprint },
-    { fingerprint: 'fp-d', addedAtCycle: 25, championFingerprint },
+    { fingerprint: 'fp-a', addedAtCycle: 45, championFingerprint }, // age 5
+    { fingerprint: 'fp-b', addedAtCycle: 38, championFingerprint }, // age 12
+    { fingerprint: 'fp-c', addedAtCycle: 32, championFingerprint }, // age 18
+    { fingerprint: 'fp-d', addedAtCycle: 25, championFingerprint }, // age 25
   ];
   const pruned = pruneTabuFingerprints({
     entries,
@@ -746,12 +765,13 @@ test('pruneTabuFingerprints halves effective maxAgeCycles when stagnationLevel >
   assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-a']);
 });
 
-test('pruneTabuFingerprints at stagnationLevel 2 clears entries older than maxAge/4', () => {
+test('pruneTabuFingerprints at stagnationLevel 2 clears entries at or older than maxAge/4', () => {
   const championFingerprint = '{"adxThreshold":20}';
   const entries = [
-    { fingerprint: 'fp-a', addedAtCycle: 48, championFingerprint },
-    { fingerprint: 'fp-b', addedAtCycle: 44, championFingerprint },
-    { fingerprint: 'fp-c', addedAtCycle: 40, championFingerprint },
+    { fingerprint: 'fp-a', addedAtCycle: 45, championFingerprint }, // age 5
+    { fingerprint: 'fp-b', addedAtCycle: 38, championFingerprint }, // age 12
+    { fingerprint: 'fp-c', addedAtCycle: 32, championFingerprint }, // age 18
+    { fingerprint: 'fp-d', addedAtCycle: 25, championFingerprint }, // age 25
   ];
   const pruned = pruneTabuFingerprints({
     entries,
@@ -760,14 +780,15 @@ test('pruneTabuFingerprints at stagnationLevel 2 clears entries older than maxAg
     policy: { maxAgeCycles: 20, maxEntries: 32, dropOnChampionChange: true },
     stagnationLevel: 2,
   });
-  assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-a']);
+  assert.deepEqual(pruned.map((entry) => entry.fingerprint), []);
 });
 
 test('pruneTabuFingerprints floors effective maxAgeCycles at 2 to avoid wiping everything', () => {
   const championFingerprint = '{"adxThreshold":20}';
   const entries = [
-    { fingerprint: 'fp-a', addedAtCycle: 49, championFingerprint },
-    { fingerprint: 'fp-b', addedAtCycle: 47, championFingerprint },
+    { fingerprint: 'fp-a', addedAtCycle: 50, championFingerprint }, // age 0
+    { fingerprint: 'fp-b', addedAtCycle: 49, championFingerprint }, // age 1
+    { fingerprint: 'fp-c', addedAtCycle: 48, championFingerprint }, // age 2
   ];
   const pruned = pruneTabuFingerprints({
     entries,
@@ -776,7 +797,9 @@ test('pruneTabuFingerprints floors effective maxAgeCycles at 2 to avoid wiping e
     policy: { maxAgeCycles: 4, maxEntries: 32, dropOnChampionChange: true },
     stagnationLevel: 2,
   });
-  assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-a']);
+  // effective = Math.max(2, floor(4/4)) = 2. With >=, ages 2+ pruned, keep 0 and 1.
+  // Returned entries remain ordered by addedAtCycle ascending.
+  assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-b', 'fp-a']);
 });
 
 test('nextTrackState records rejected candidate fingerprints in a bounded tabu list', () => {

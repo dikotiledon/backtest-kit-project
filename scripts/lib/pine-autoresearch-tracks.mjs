@@ -130,6 +130,7 @@ export function pruneTabuFingerprints(input = {}) {
   const stagnationLevel = Math.max(0, Math.floor(Number(input.stagnationLevel) || 0));
   const divisor = stagnationLevel >= 2 ? 4 : stagnationLevel >= 1 ? 2 : 1;
   const effectiveMaxAge = Math.max(2, Math.floor(policy.maxAgeCycles / divisor));
+  const ageCutoff = stagnationLevel >= 1 ? effectiveMaxAge - 1 : effectiveMaxAge;
   const deduped = new Map();
 
   entries.forEach((entry, index) => {
@@ -143,7 +144,7 @@ export function pruneTabuFingerprints(input = {}) {
     ) {
       return;
     }
-    if (currentCycle - normalized.addedAtCycle > effectiveMaxAge) return;
+    if (currentCycle - normalized.addedAtCycle > ageCutoff) return;
 
     const existing = deduped.get(normalized.fingerprint);
     if (!existing

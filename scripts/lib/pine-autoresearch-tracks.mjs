@@ -320,6 +320,7 @@ export function defaultSchedulerState() {
     cycleIndex: 0,
     noChangeStreak: 0,
     noNewCandidateStreak: 0,
+    noScoreImprovementStreak: 0,
     lowEmissionStreak: 0,
     sameTrackCycleStreak: 0,
     lastNoveltySignature: null,
@@ -417,6 +418,7 @@ export function nextStagnationState(input = {}) {
   const {
     previousLevel = 0,
     noNewCandidateStreak = 0,
+    noScoreImprovementStreak = 0,
     noChangeStreak = 0,
     lowEmissionStreak = 0,
     promotionEligible = false,
@@ -460,7 +462,20 @@ export function nextStagnationState(input = {}) {
     };
   }
 
+  const noScoreImprovementEscalateAfter = normalizeNumericPolicyInteger(sourcePolicy.noScoreImprovementEscalateAfter, { fallback: 2, min: 1 });
+  const normalizedNoScoreImprovementStreak = Math.max(
+    0,
+    Math.floor(Number.isFinite(Number(noScoreImprovementStreak)) ? Number(noScoreImprovementStreak) : 0),
+  );
+
   const candidates = [
+    {
+      reason: 'noScoreImprovementStreak',
+      anchor: normalizedNoScoreImprovementStreak,
+      threshold: noScoreImprovementEscalateAfter,
+      active: promotionEligible === false
+        && normalizedNoScoreImprovementStreak >= noScoreImprovementEscalateAfter,
+    },
     {
       reason: 'noNewCandidateStreak',
       anchor: normalizedNoNewCandidateStreak,
@@ -543,6 +558,20 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     ? previous.noNewCandidateStreak + 1
     : 0;
 
+  // Score-based stagnation: track cycles where no score improvement was found.
+  // manifest.bestScoreDelta is the best challenger score minus champion score from the sweep.
+  // If it's <= 0 and we're not in a rotation, the search is functionally stuck.
+  const bestScoreDelta = typeof manifest.bestScoreDelta === 'number' && Number.isFinite(manifest.bestScoreDelta)
+    ? manifest.bestScoreDelta
+    : null;
+  const scoreImproved = manifest.promotionEligible === true || (bestScoreDelta !== null && bestScoreDelta > 0);
+  const scoreStagnant = bestScoreDelta !== null && bestScoreDelta <= 0 && manifest.promotionEligible !== true;
+  const noScoreImprovementStreak = rotationHappened || scoreImproved
+    ? 0
+    : scoreStagnant
+      ? (previous.noScoreImprovementStreak ?? 0) + 1
+      : (previous.noScoreImprovementStreak ?? 0);
+
   const configuredStagnationPolicy = resolveStagnationPolicy(policy);
   const lowEmissionThreshold = normalizeNumericPolicyInteger(
     configuredStagnationPolicy.lowEmissionThreshold,
@@ -563,6 +592,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     : nextStagnationState({
         previousLevel: previous.stagnationLevel,
         noNewCandidateStreak,
+        noScoreImprovementStreak,
         noChangeStreak,
         lowEmissionStreak,
         promotionEligible: manifest.promotionEligible === true,
@@ -618,6 +648,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     cycleIndex: nextCycleIndex,
     noChangeStreak,
     noNewCandidateStreak,
+    noScoreImprovementStreak,
     lowEmissionStreak,
     sameTrackCycleStreak,
     lastNoveltySignature: noveltySignature,

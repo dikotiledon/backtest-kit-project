@@ -43,6 +43,9 @@ import {
   writeText,
   buildRegimeAnalysisArtifact,
   summarizeSideMetrics,
+  buildBlockedChallengerEntry,
+  shouldRequeueBlockedChallenger,
+  filterRequeueCandidates,
 } from './lib/pine-autoresearch.mjs';
 export { isManifestPromotionReady } from './lib/pine-autoresearch.mjs';
 import { stagePinnedDatasetForLab, validatePinnedCacheComplete } from './lib/pine-dataset.mjs';
@@ -2902,6 +2905,22 @@ export async function runScout(config, dependencies = {}) {
       pendingPromotion,
     };
   }
+
+  // Convergence detection: if the system has been unable to improve for N cycles, stop searching.
+  const convergencePath = path.join(config.researchRoot, 'state', 'converged.json');
+  if (!config.forceCycle) {
+    try {
+      const convergenceMarker = JSON.parse(await fs.readFile(convergencePath, 'utf8'));
+      if (convergenceMarker?.converged === true) {
+        return {
+          skipped: true,
+          reason: 'converged',
+          convergence: convergenceMarker,
+        };
+      }
+    } catch { /* no convergence marker — proceed normally */ }
+  }
+
   const championState = await ensureChampionState(config);
   const runId = buildRunId(config);
   let manifestFinalized = false;
@@ -2961,6 +2980,22 @@ export async function runScout(config, dependencies = {}) {
   const schedulerStatePath = resolveSchedulerStatePath({ researchRoot: config.researchRoot, matrixId: config.matrixId });
   const loadedSchedulerState = await readSchedulerState(schedulerStatePath);
   const schedulerChampionFingerprint = buildCanonicalConfigFingerprint(championState.config);
+
+  // Detect external champion change (manual promotion) and clear stale tabu
+  if (loadedSchedulerState.lastChampionFingerprint &&
+      loadedSchedulerState.lastChampionFingerprint !== schedulerChampionFingerprint &&
+      config.searchPolicy?.tabuPolicy?.dropOnChampionChange !== false) {
+    loadedSchedulerState.tabuRejectedFingerprints = [];
+    loadedSchedulerState.lastChampionFingerprint = schedulerChampionFingerprint;
+    loadedSchedulerState.cycleIndex = 0;
+    loadedSchedulerState.noChangeStreak = 0;
+    loadedSchedulerState.noNewCandidateStreak = 0;
+    loadedSchedulerState.stagnationLevel = 0;
+    loadedSchedulerState.stagnationReason = null;
+    loadedSchedulerState.laneExhaustions = {};
+    loadedSchedulerState.lastLaneExhaustion = null;
+    await writeSchedulerState(schedulerStatePath, loadedSchedulerState);
+  }
   const schedulerTabuPolicy = config.searchPolicy?.tabu
     ?? config.rotationPolicy?.tabu
     ?? {
@@ -3377,6 +3412,8 @@ export async function runScout(config, dependencies = {}) {
         promotionEligibleReason: manifest.promotionEligibleReason,
         noNewCandidate: manifest.noNewCandidate,
         searchEfficiency: manifest.searchEfficiency,
+        bestScoreDelta: manifest.matrixDecision?.comparisons?.scoreDelta
+          ?? ((manifest.challenger?.score ?? 0) - (manifest.champion?.score ?? 0)),
         stagnationLevel: manifest.stagnationLevel,
         stagnationReason: manifest.stagnationReason,
         lastEscalatedAt: manifest.lastEscalatedAt,
@@ -3389,6 +3426,23 @@ export async function runScout(config, dependencies = {}) {
     ...(laneBudgetDebtAdvance.advanced ? { budgetDebt: laneBudgetDebtAdvance.budgetDebt } : {}),
   };
   await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
+
+  // Write convergence marker when noScoreImprovementStreak reaches threshold
+  const convergenceThreshold = config.rotationPolicy?.stagnation?.noScoreImprovementConvergeAfter ?? 4;
+  if ((updatedSchedulerState.noScoreImprovementStreak ?? 0) >= convergenceThreshold) {
+    const convergencePath = path.join(config.researchRoot, 'state', 'converged.json');
+    await fs.mkdir(path.dirname(convergencePath), { recursive: true });
+    await fs.writeFile(convergencePath, JSON.stringify({
+      converged: true,
+      championConfigId: championState.configId,
+      championScore: championState.score,
+      championFingerprint: buildCanonicalConfigFingerprint(championState.config),
+      convergedAt: isoNow(),
+      cyclesRun: updatedSchedulerState.cycleIndex,
+      noScoreImprovementStreak: updatedSchedulerState.noScoreImprovementStreak,
+      reason: 'No meaningful score improvement found — parameter surface is flat near current champion.',
+    }, null, 2), 'utf8');
+  }
 
   const finalManifest = applySchedulerStateToManifest(withDuration(manifest), updatedSchedulerState);
 
@@ -3409,6 +3463,26 @@ export async function runScout(config, dependencies = {}) {
       item: queueItem,
       at: finalManifest.generatedAt,
     });
+  }
+
+  // Store blocked challenger for potential re-queue
+  if (selectedCandidate?.matrixDecision?.recommendation === 'hold') {
+    const blockedEntry = buildBlockedChallengerEntry({
+      runId,
+      challenger: selectedCandidate.challenger,
+      matrixDecision: selectedCandidate.matrixDecision,
+      candidateFingerprint,
+      championFingerprint,
+      generatedAt: finalManifest.generatedAt,
+    });
+    if (blockedEntry) {
+      const blockedQueuePath = path.join(trackedConfig.researchRoot, 'state', 'blocked-challenger-queue.json');
+      let existingQueue = [];
+      try { existingQueue = JSON.parse(await fs.readFile(blockedQueuePath, 'utf8')); } catch { /* no queue yet */ }
+      const deduped = [blockedEntry, ...existingQueue.filter(e => e.configFingerprint !== blockedEntry.configFingerprint)].slice(0, 5);
+      await fs.mkdir(path.dirname(blockedQueuePath), { recursive: true });
+      await fs.writeFile(blockedQueuePath, JSON.stringify(deduped, null, 2), 'utf8');
+    }
   }
 
   const asymmetryAnalysis = buildScoutRegimeAnalysisArtifact({

@@ -5542,18 +5542,18 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     mode: 'incumbent-local',
     exploitRatio: 0.5,
     freezeArchitecture: false,
-    exploitFamilies: ['signal', 'risk'],
-    exploreFamilies: ['signal', 'risk'],
+    exploitFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion', 'supertrend'],
+    exploreFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion', 'supertrend', 'squeeze', 'divergence', 'avwap-context', 'channel-context'],
     paretoShortlistSize: 12,
     matrixCandidateLimit: 12,
     selfLoopEscape: {
       enabled: true,
       activateAfter: 1,
       includeFallback: true,
-      fallbackFamilies: ['signal', 'risk'],
+      fallbackFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion'],
       minFallbackConfigs: 3,
       temperatureBoost: 1.5,
-      stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'asymmetry'],
+      stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion', 'supertrend', 'squeeze', 'divergence', 'avwap-context', 'channel-context'],
       stagnationTemperatureBoost: 4,
     },
     annealing: {
@@ -5577,11 +5577,11 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
   assert.deepEqual(config.expectancyPolicy, {
     enabled: true,
     wrJumpDiagnosticThreshold: 8,
-    rejectWrGainAvgWinLoss: true,
-    requireExpectancyNonRegression: true,
+    rejectWrGainAvgWinLoss: false,
+    requireExpectancyNonRegression: false,
   });
   assert.deepEqual(config.primaryLab.thresholds.significance, {
-    minRelativeScoreDelta: 0.005,
+    minRelativeScoreDelta: 0.003,
     minTradeCount: 150,
   });
   assert.deepEqual(loaded.primaryLab.thresholds.significance, config.primaryLab.thresholds.significance);

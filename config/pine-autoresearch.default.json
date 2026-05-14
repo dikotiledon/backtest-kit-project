@@ -8,11 +8,23 @@
     "freezeArchitecture": false,
     "exploitFamilies": [
       "signal",
-      "risk"
+      "risk",
+      "exit-state",
+      "ml-core",
+      "fusion",
+      "supertrend"
     ],
     "exploreFamilies": [
       "signal",
-      "risk"
+      "risk",
+      "exit-state",
+      "ml-core",
+      "fusion",
+      "supertrend",
+      "squeeze",
+      "divergence",
+      "avwap-context",
+      "channel-context"
     ],
     "paretoShortlistSize": 12,
     "matrixCandidateLimit": 12,
@@ -22,7 +34,10 @@
       "includeFallback": true,
       "fallbackFamilies": [
         "signal",
-        "risk"
+        "risk",
+        "exit-state",
+        "ml-core",
+        "fusion"
       ],
       "minFallbackConfigs": 3,
       "temperatureBoost": 1.5,
@@ -30,7 +45,13 @@
         "signal",
         "risk",
         "exit-state",
-        "asymmetry"
+        "ml-core",
+        "fusion",
+        "supertrend",
+        "squeeze",
+        "divergence",
+        "avwap-context",
+        "channel-context"
       ],
       "stagnationTemperatureBoost": 4
     },
@@ -84,15 +105,60 @@
       "stopPolicy": {
         "maxNoChangeStreak": 3
       }
+    },
+    {
+      "trackId": "exit-state-research",
+      "name": "Exit state features",
+      "sourceFamily": "exit-state",
+      "gridName": "phase3-core",
+      "variantMode": "grid",
+      "windowSet": "rotating",
+      "enabled": true,
+      "promotionPolicy": {
+        "requireCandidateChange": true
+      },
+      "stopPolicy": {
+        "maxNoChangeStreak": 5
+      }
+    },
+    {
+      "trackId": "ml-core-tuning",
+      "name": "ML core parameters",
+      "sourceFamily": "ml-core",
+      "gridName": "phase3-core",
+      "variantMode": "grid",
+      "windowSet": "primary",
+      "enabled": true,
+      "promotionPolicy": {
+        "requireCandidateChange": true
+      },
+      "stopPolicy": {
+        "maxNoChangeStreak": 5
+      }
+    },
+    {
+      "trackId": "supertrend-tuning",
+      "name": "Supertrend parameters",
+      "sourceFamily": "supertrend",
+      "gridName": "phase3-core",
+      "variantMode": "grid",
+      "windowSet": "rotating",
+      "enabled": true,
+      "promotionPolicy": {
+        "requireCandidateChange": true
+      },
+      "stopPolicy": {
+        "maxNoChangeStreak": 5
+      }
     }
   ],
   "rotationPolicy": {
-    "noChangeStreakRotateAfter": 32,
-    "noNoveltyRotateAfter": 1,
-    "maxCyclesPerTrack": 63,
-    "similarityRotateAbove": 0.98,
-    "similarityRotateMinEmitted": 4,
-    "preferCurrentChampionUntil": 2,
+    "noChangeStreakRotateAfter": 4,
+    "noNoveltyRotateAfter": 3,
+    "maxCyclesPerTrack": 8,
+    "similarityRotateAbove": 0.99,
+    "similarityRotateMinEmitted": 6,
+    "preferCurrentChampionUntil": 4,
     "cooldownCyclesAfterPromote": 1,
     "tabuLimit": 1000,
     "tabuBootstrapManifestLimit": 200,
@@ -130,8 +196,8 @@
   "expectancyPolicy": {
     "enabled": true,
     "wrJumpDiagnosticThreshold": 8,
-    "rejectWrGainAvgWinLoss": true,
-    "requireExpectancyNonRegression": true
+    "rejectWrGainAvgWinLoss": false,
+    "requireExpectancyNonRegression": false
   },
   "windowPolicy": {
     "primary": "primary",
@@ -165,7 +231,7 @@
     "sourceMode": "local-cache"
   },
   "seedChampion": {
-    "path": "./pine-autoresearch.seed.json"
+    "path": "./pine-autoresearch-seed-b2.json"
   },
   "primaryLab": {
     "labId": "xrpusdt-15m-primary",
@@ -175,14 +241,14 @@
     "when": "2026-04-21T10:30:00Z",
     "exchange": "default_exchange",
     "thresholds": {
-      "minScoreDelta": 0.25,
+      "minScoreDelta": 0.1,
       "minRoiDeltaPct": 0,
       "minProfitFactorDelta": 0,
       "maxDrawdownDeltaPct": 0.75,
       "minTradeCount": 150,
       "minTradeRatioVsIncumbent": 0.75,
       "significance": {
-        "minRelativeScoreDelta": 0.005,
+        "minRelativeScoreDelta": 0.003,
         "minTradeCount": 150
       }
     }

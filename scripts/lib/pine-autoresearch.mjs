@@ -1260,6 +1260,61 @@ export function summarizeDigestAnnouncement({ latestManifest, previousManifest }
   return parts.join(' | ');
 }
 
+// ─── Blocked-Challenger Re-Queue ───────────────────────────────────────────────
+
+const SOFT_GATES = new Set(['expectancy']);
+const HARD_GATES = new Set(['score', 'roi', 'profitFactor', 'drawdown', 'tradeFloor', 'tradeRatio', 'significance', 'candidateChanged']);
+
+/**
+ * Build a blocked-challenger queue entry from a held manifest.
+ * Returns null if the challenger failed hard gates (not re-queueable).
+ */
+export function buildBlockedChallengerEntry(manifest) {
+  if (!manifest?.challenger?.config || !manifest?.candidateFingerprint) return null;
+  const failedGates = manifest.matrixDecision?.failedGates ?? [];
+  if (failedGates.length === 0) return null;
+  if (failedGates.some(gate => HARD_GATES.has(gate))) return null;
+
+  return {
+    configFingerprint: manifest.candidateFingerprint,
+    config: manifest.challenger.config,
+    configId: manifest.challenger.configId,
+    score: manifest.challenger.score ?? manifest.challenger.metrics?.score ?? 0,
+    failedGates,
+    championFingerprintAtBlock: manifest.championFingerprint,
+    blockedAt: manifest.generatedAt ?? new Date().toISOString(),
+    runId: manifest.runId,
+  };
+}
+
+/**
+ * Determine if a blocked challenger should be re-queued based on current policy.
+ * Returns true if all failed gates are now disabled/relaxed.
+ */
+export function shouldRequeueBlockedChallenger(entry, { expectancyPolicy }) {
+  if (!entry || !Array.isArray(entry.failedGates)) return false;
+  for (const gate of entry.failedGates) {
+    if (gate === 'expectancy') {
+      if (expectancyPolicy?.requireExpectancyNonRegression !== false &&
+          expectancyPolicy?.rejectWrGainAvgWinLoss !== false) {
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+/**
+ * Filter blocked-challenger entries to only those that failed soft gates.
+ */
+export function filterRequeueCandidates(entries) {
+  if (!Array.isArray(entries)) return [];
+  return entries.filter(entry => {
+    if (!entry?.failedGates?.length) return false;
+    return entry.failedGates.every(gate => SOFT_GATES.has(gate));
+  });
+}
+
 export {
   buildRegimeAnalysisArtifact,
   buildRegimeAnalysisMarkdown,

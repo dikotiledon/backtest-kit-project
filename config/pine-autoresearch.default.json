@@ -39,6 +39,11 @@
       "baseTemperature": 0.4,
       "growthFactor": 1.8,
       "maxTemperature": 16
+    },
+    "tabuPolicy": {
+      "maxAgeCycles": 20,
+      "maxEntries": 40,
+      "dropOnChampionChange": true
     }
   },
   "defaultProfile": "full",

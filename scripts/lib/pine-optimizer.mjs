@@ -90,9 +90,10 @@ export function simulateTrades(rows, options = {}) {
 
     if (position) {
       const close = row.Close;
+      const hasExplicitOpen = Number.isFinite(row.Open);
       const high = Number.isFinite(row.High) ? row.High : close;
       const low = Number.isFinite(row.Low) ? row.Low : close;
-      const open = Number.isFinite(row.Open) ? row.Open : close;
+      const open = hasExplicitOpen ? row.Open : close;
       const heldBars = i - position.entryIndex;
       let exitReason = null;
       let exitPrice = null;
@@ -101,10 +102,10 @@ export function simulateTrades(rows, options = {}) {
       if (position.side === 'long') {
         if (Number.isFinite(position.stopLoss) && low <= position.stopLoss) {
           exitReason = 'stopLoss';
-          exitPrice = open < position.stopLoss ? open : position.stopLoss;
+          exitPrice = (hasExplicitOpen && open < position.stopLoss) ? open : position.stopLoss;
         } else if (Number.isFinite(position.takeProfit) && high >= position.takeProfit) {
           exitReason = 'takeProfit';
-          exitPrice = open > position.takeProfit ? open : position.takeProfit;
+          exitPrice = (hasExplicitOpen && open > position.takeProfit) ? open : position.takeProfit;
         } else if (signal === -1) {
           exitReason = 'flip';
           exitPrice = close;
@@ -115,10 +116,10 @@ export function simulateTrades(rows, options = {}) {
       } else {
         if (Number.isFinite(position.stopLoss) && high >= position.stopLoss) {
           exitReason = 'stopLoss';
-          exitPrice = open > position.stopLoss ? open : position.stopLoss;
+          exitPrice = (hasExplicitOpen && open > position.stopLoss) ? open : position.stopLoss;
         } else if (Number.isFinite(position.takeProfit) && low <= position.takeProfit) {
           exitReason = 'takeProfit';
-          exitPrice = open < position.takeProfit ? open : position.takeProfit;
+          exitPrice = (hasExplicitOpen && open < position.takeProfit) ? open : position.takeProfit;
         } else if (signal === 1) {
           exitReason = 'flip';
           exitPrice = close;

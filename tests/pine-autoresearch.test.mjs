@@ -5562,6 +5562,11 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
       growthFactor: 1.8,
       maxTemperature: 16,
     },
+    tabuPolicy: {
+      maxAgeCycles: 20,
+      maxEntries: 40,
+      dropOnChampionChange: true,
+    },
   });
   const loaded = await loadConfig(process.cwd(), './config/pine-autoresearch.default.json');
   assert.deepEqual(loaded.searchPolicy.selfLoopEscape, config.searchPolicy.selfLoopEscape);

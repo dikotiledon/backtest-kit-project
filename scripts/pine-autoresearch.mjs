@@ -1385,7 +1385,7 @@ function buildGeneratedLaneSearchEfficiency({ lane, reason, regimeExitState = {}
   });
 }
 
-export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {}, regimeExitState = DEFAULT_REGIME_EXIT_STATE, entryInvariance = null }) {
+export function buildScoutOrchestrationState({ config, runId, championState, historyEventsBefore, searchBatch, primarySweep, matrixCandidates, trackState = {}, regimeExitState = DEFAULT_REGIME_EXIT_STATE, entryInvariance = null, searchBatchSource = null }) {
 
   const championSummary = summarizeResult(championState);
   const entryInvarianceVerdict = entryInvariance ?? buildEntryInvarianceVerdict({
@@ -1520,6 +1520,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       challenger: challengerSummary,
       primarySweep,
       globalNoveltyGuardVersion: 1,
+      searchBatchSource,
       searchPlan: {
         mode: config.searchPolicy.mode,
         exploitRatio: config.searchPolicy.exploitRatio,
@@ -3154,6 +3155,12 @@ export async function runScout(config, dependencies = {}) {
     : fallbackSearchBatch.length > 0
       ? fallbackSearchBatch
       : regimeAwareSearchBatch;
+  // Track attribution: record which batch source was actually used
+  const searchBatchSource = generatedRegimeLane
+    ? 'regime-generated'
+    : fallbackSearchBatch.length > 0
+      ? (entryInvariance.flagged ? 'entry-invariance-fallback' : activeTrack ? `track:${activeTrackId}` : 'incumbent-fallback')
+      : 'regime-fallback';
   const executableBatch = selectedSearchBatch.filter(isExecutableSearchVariant);
   const executableVariants = enforceEntryInvarianceOnSearchBatch({
     searchBatch: executableBatch,
@@ -3426,6 +3433,7 @@ export async function runScout(config, dependencies = {}) {
     },
     regimeExitState,
     entryInvariance,
+    searchBatchSource,
   });
   const { manifest } = orchestration;
 

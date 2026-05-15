@@ -93,7 +93,22 @@ export function summarizeSideMetrics({ trades = [] } = {}) {
   };
 }
 
-export function classifyRegimeFromFeatures(featureRow = {}) {
+function normalizeFeatureKeys(row = {}) {
+  if (!row || typeof row !== 'object') return {};
+  const normalized = {};
+  for (const [key, value] of Object.entries(row)) {
+    // Map Feature_SqueezeState → featureSqueezeState
+    if (key.startsWith('Feature_')) {
+      const camelKey = 'feature' + key.slice(8); // Remove 'Feature_' prefix, keep rest as-is
+      normalized[camelKey] = value;
+    }
+    normalized[key] = value; // Keep original key too
+  }
+  return normalized;
+}
+
+export function classifyRegimeFromFeatures(rawFeatureRow = {}) {
+  const featureRow = normalizeFeatureKeys(rawFeatureRow);
   const squeezeActive = positiveCount(featureRow.featureSqueezeState, featureRow.featureFusionV4Active) > 0;
   const squeezeRelease = positiveCount(
     featureRow.featureSqueezeReleaseBull,

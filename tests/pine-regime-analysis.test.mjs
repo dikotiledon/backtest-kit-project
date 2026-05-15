@@ -74,6 +74,9 @@ test('classifyRegimeFromFeatures maps exported features into the four regimes', 
   assert.equal(classifyRegimeFromFeatures(sampleFeatureRows()[1]).regime, 'trend');
   assert.equal(classifyRegimeFromFeatures(sampleFeatureRows()[2]).regime, 'expansion');
   assert.equal(classifyRegimeFromFeatures(sampleFeatureRows()[3]).regime, 'chop');
+  assert.equal(classifyRegimeFromFeatures({ Feature_CompressionState: 1 }).regime, 'compression');
+  assert.equal(classifyRegimeFromFeatures({ Feature_ExpansionState: 1 }).regime, 'expansion');
+  assert.equal(classifyRegimeFromFeatures({ Feature_TrendX: 1 }).regime, 'trend');
 });
 
 test('summarizeRegimeSlices aggregates trade metrics by inferred regime', () => {

@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  buildBlockedChallengerEntry,
   buildParetoShortlist,
   computeParameterComplexityPenalty,
   computeSweepOffset,
@@ -5050,8 +5051,10 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
       promotionEligibleReason: 'Promote c1',
       topCandidateSimilarity: 0.5,
     },
+    searchBatchSource: 'track:squeeze-context',
   });
 
+  assert.equal(result.manifest.searchBatchSource, 'track:squeeze-context');
   assert.equal(result.manifest.activeTrackId, 'squeeze-context');
   assert.equal(result.manifest.windowSetId, 'primary');
   assert.equal(result.manifest.noveltySignature, 'squeeze-context|phase3-core|cand-1|primary|primary-shadow');
@@ -5061,6 +5064,42 @@ test('buildScoutOrchestrationState records active track and novelty metadata', (
   assert.equal(result.manifest.promotionEligible, true);
   assert.equal(result.manifest.promotionEligibleReason, 'Promote c1');
   assert.equal(result.manifest.topCandidateSimilarity, 0.5);
+});
+
+test('buildBlockedChallengerEntry preserves challenger diagnostics for requeueing', () => {
+  const entry = buildBlockedChallengerEntry({
+    runId: 'run-blocked-1',
+    generatedAt: '2026-05-15T00:00:00.000Z',
+    candidateFingerprint: 'candidate-fp',
+    championFingerprint: 'champion-fp',
+    challenger: {
+      configId: 'candidate-1',
+      config: { minPredSum: 1.9 },
+      metrics: {
+        score: 123.45,
+        roiPct: 12.3,
+        profitFactor: 1.8,
+        maxDrawdownPct: 4.5,
+        tradeCount: 67,
+      },
+    },
+    matrixDecision: { failedGates: ['expectancy'] },
+  });
+
+  assert.deepEqual(entry, {
+    configFingerprint: 'candidate-fp',
+    config: { minPredSum: 1.9 },
+    configId: 'candidate-1',
+    score: 123.45,
+    roiPct: 12.3,
+    profitFactor: 1.8,
+    maxDrawdownPct: 4.5,
+    tradeCount: 67,
+    failedGates: ['expectancy'],
+    championFingerprintAtBlock: 'champion-fp',
+    blockedAt: '2026-05-15T00:00:00.000Z',
+    runId: 'run-blocked-1',
+  });
 });
 
 test('normalizeTabuEntries migrates legacy string tabu entries to champion-scoped objects', () => {

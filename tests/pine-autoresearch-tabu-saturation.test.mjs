@@ -91,6 +91,8 @@ async function setupFixture() {
       stagnation: {
         enabled: true,
         noNewCandidateEscalateAfter: 99,
+        noScoreImprovementEscalateAfter: 99,
+        noScoreImprovementConvergeAfter: 99,
         holdEscalateAfter: 99,
         highSimilarityThreshold: 0.8,
         maxStagnationLevel: 2,

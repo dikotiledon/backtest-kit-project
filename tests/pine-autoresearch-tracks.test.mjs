@@ -333,6 +333,30 @@ test('nextTrackState tracks and persists lowEmissionStreak across low-emission c
   assert.equal(next.stagnationReason, 'lowEmissionStreak');
 });
 
+test('nextTrackState honors top-level no-score-improvement stagnation escalation', () => {
+  const next = nextTrackState({
+    state: defaultSchedulerState(),
+    policy: {
+      stagnation: {
+        enabled: true,
+        noScoreImprovementEscalateAfter: 1,
+        noNewCandidateEscalateAfter: 99,
+        lowEmissionEscalateAfter: 99,
+        holdEscalateAfter: 99,
+      },
+    },
+    manifest: {
+      bestScoreDelta: 0,
+      promotionEligible: false,
+      searchEfficiency: { emittedVariantCount: 10 },
+    },
+  });
+
+  assert.equal(next.noScoreImprovementStreak, 1);
+  assert.equal(next.stagnationLevel, 1);
+  assert.equal(next.stagnationReason, 'noScoreImprovementStreak');
+});
+
 test('nextTrackState resets lowEmissionStreak when emissions recover or promotion is eligible', () => {
   const baseState = {
     ...defaultSchedulerState(),

@@ -54,6 +54,7 @@ function normalizeNumericPolicyInteger(value, { fallback, min }) {
 const STAGNATION_POLICY_KEYS = new Set([
   'enabled',
   'noNewCandidateEscalateAfter',
+  'noScoreImprovementEscalateAfter',
   'holdEscalateAfter',
   'highSimilarityThreshold',
   'maxStagnationLevel',

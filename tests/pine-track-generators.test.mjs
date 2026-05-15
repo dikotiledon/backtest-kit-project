@@ -74,6 +74,10 @@ const expandedIncumbent = {
   avwapSwingPeriod: 50,
   useChannelContext: false,
   channelDetectLength: 18,
+  useContextAggregator: false,
+  contextBoostValue: 0.25,
+  useContextExitShaping: false,
+  contextTrailTightenFactor: 0.75,
 };
 
 function stableValue(value) {
@@ -338,6 +342,92 @@ test('advertised fallback families emit non-empty family-specific candidates und
     assert.equal(item.family, family);
     assert.equal(item.patch && Object.keys(item.patch).length > 0, true);
     assert.equal(item.ownKeys.some((key) => ownKeys.has(key)), true, `${family} fallback should mutate a ${family} key`);
+  }
+});
+
+test('fusion scaling preserves negative signed weights', () => {
+  const batch = buildTrackCandidateBatch({
+    track: { trackId: 'fusion', sourceFamily: 'fusion' },
+    incumbent: expandedIncumbent,
+    maxConfigs: 6,
+    historyEvents: [],
+    budgetPolicy: {
+      annealing: { enabled: true, baseTemperature: 2, growthFactor: 1, maxTemperature: 2 },
+    },
+  });
+
+  const weighted = batch.filter((item) => (
+    Object.hasOwn(item.patch, 'fusionV4LongAtrWeight')
+    || Object.hasOwn(item.patch, 'fusionV4ShortAtrWeight')
+  ));
+
+  assert.ok(weighted.length > 0);
+  assert.equal(weighted.some((item) => item.patch.fusionV4LongAtrWeight < 0 || item.patch.fusionV4ShortAtrWeight < 0), true);
+});
+
+test('high-temperature fallback keeps period and ml-core keys positive', () => {
+  const batch = buildTrackCandidateBatch({
+    track: { trackId: 'supertrend-tuning', sourceFamily: 'supertrend' },
+    incumbent: expandedIncumbent,
+    maxConfigs: 24,
+    historyEvents: [],
+    budgetPolicy: {
+      annealing: { enabled: true, baseTemperature: 1, growthFactor: 1, maxTemperature: 20 },
+      selfLoopEscape: {
+        enabled: true,
+        activateAfter: 1,
+        includeFallback: true,
+        fallbackFamilies: ['signal', 'risk'],
+        stagnationFallbackFamilies: ['ml-core', 'avwap-context', 'channel-context'],
+        minFallbackConfigs: 21,
+        temperatureBoost: 2,
+        stagnationTemperatureBoost: 10,
+      },
+    },
+    schedulerState: { noNewCandidateStreak: 3, stagnationLevel: 2, tabuRejectedFingerprints: [] },
+  });
+
+  const fallback = batch.filter((item) => item.lane === 'self-loop-fallback');
+  const requiredKeys = ['h', 'r', 'x', 'lag', 'avwapSwingPeriod', 'channelDetectLength'];
+  const seen = new Set();
+
+  for (const item of fallback) {
+    for (const key of requiredKeys) {
+      if (!Object.hasOwn(item.patch, key)) continue;
+      seen.add(key);
+      assert.ok(item.patch[key] > 0, `${key} should stay positive, got ${item.patch[key]}`);
+    }
+  }
+
+  assert.deepEqual([...seen].sort(), requiredKeys.sort());
+});
+
+test('context aggregator and exit shaping tracks emit own-key mutations', () => {
+  const cases = [
+    {
+      track: { trackId: 'context-aggregator', sourceFamily: 'context-aggregator' },
+      family: 'context-aggregator',
+      ownKeys: new Set(trackOwnKnobKeys('context-aggregator')),
+    },
+    {
+      track: { trackId: 'context-exit-shaping', sourceFamily: 'context-exit-shaping' },
+      family: 'context-exit-shaping',
+      ownKeys: new Set(trackOwnKnobKeys('context-exit-shaping')),
+    },
+  ];
+
+  for (const { track, family, ownKeys } of cases) {
+    const batch = buildTrackCandidateBatch({
+      track,
+      incumbent: expandedIncumbent,
+      maxConfigs: 3,
+      historyEvents: [],
+      budgetPolicy: {},
+    });
+
+    assert.equal(batch.length > 0, true);
+    assert.equal(batch.every((item) => item.family === family), true);
+    assert.equal(batch.some((item) => item.ownKeys.some((key) => ownKeys.has(key))), true);
   }
 });
 

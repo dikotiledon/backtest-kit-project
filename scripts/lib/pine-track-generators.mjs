@@ -50,14 +50,44 @@ function applyPatch(base, patch) {
   return { ...clone(base), ...clone(patch) };
 }
 
+function patchMinValue(key) {
+  const lowerKey = String(key).toLowerCase();
+  if (lowerKey.includes('weight')) return Number.NEGATIVE_INFINITY;
+  if (key === 'regimeThreshold') return Number.NEGATIVE_INFINITY;
+  if (key === 'minBarsBetween' || key === 'trailActivateR') return 0;
+  if (key === 'minPredSum') return 0.5;
+  if (key === 'r') return 0.1;
+  if (lowerKey.includes('absprediction')) return 0;
+  if (lowerKey.includes('score') || lowerKey.includes('boost') || lowerKey.includes('penalty')) return 0;
+  if (lowerKey.includes('threshold')) return 0;
+  if (lowerKey.includes('factor') || lowerKey.includes('distance') || lowerKey.includes('mult')) return 0.1;
+  if (
+    key === 'h'
+    || key === 'x'
+    || key === 'lag'
+    || lowerKey.includes('len')
+    || lowerKey.includes('length')
+    || lowerKey.includes('period')
+    || lowerKey.includes('bars')
+    || lowerKey.includes('fresh')
+    || lowerKey.includes('count')
+    || lowerKey.includes('left')
+    || lowerKey.includes('right')
+    || lowerKey.includes('stride')
+    || lowerKey.includes('cap')
+  ) return 1;
+  return Number.NEGATIVE_INFINITY;
+}
+
 function scalePatch(base, patch, temperature) {
   return Object.fromEntries(Object.entries(patch).map(([key, value]) => {
     const baseValue = Number(base[key]);
     if (typeof value !== 'number' || !Number.isFinite(baseValue)) return [key, value];
-    const minValue = key.toLowerCase().includes('len') || key.toLowerCase().includes('bars') || key === 'neighborsCount' ? 1 : 0;
+    const minValue = patchMinValue(key);
     const scaled = Math.max(minValue, baseValue + ((value - baseValue) * temperature));
     const integerLike = Number.isInteger(baseValue) && Number.isInteger(value);
-    return [key, integerLike ? Math.round(scaled) : Number(scaled.toFixed(4))];
+    const rounded = integerLike ? Math.round(scaled) : Number(scaled.toFixed(4));
+    return [key, Math.max(minValue, rounded)];
   }));
 }
 
@@ -170,7 +200,8 @@ function mlCorePatches(base) {
     { h: numeric(base.h ?? 8) + 2 },
     { r: Math.max(0.1, numeric(base.r ?? 8) - 2) },
     { x: lowerBound((base.x ?? 25) - 5, 1) },
-    { lag: lowerBound((base.lag ?? 2) + 1, 1) },
+    { lag: lowerBound((base.lag ?? 2) - 1, 1) },
+    { lag: numeric(base.lag ?? 2) + 1 },
   ];
 }
 
@@ -210,6 +241,40 @@ function channelContextPatches(base) {
     { useChannelContext: true, channelDetectLength: lowerBound((base.channelDetectLength ?? 18) - 6, 2) },
     { useChannelContext: true, channelDetectLength: numeric(base.channelDetectLength ?? 18) + 6 },
     { useChannelContext: !(base.useChannelContext === true), channelDetectLength: lowerBound((base.channelDetectLength ?? 18) + 2, 2) },
+  ];
+}
+
+function contextAggregatorPatches(base) {
+  return [
+    {
+      useContextAggregator: true,
+      contextBoostValue: numeric(base.contextBoostValue ?? 0.25) + 0.25,
+    },
+    {
+      useContextAggregator: true,
+      contextBoostValue: Math.max(0, numeric(base.contextBoostValue ?? 0.25) - 0.1),
+    },
+    {
+      useContextAggregator: !(base.useContextAggregator === true),
+      contextBoostValue: numeric(base.contextBoostValue ?? 0.25) + 0.1,
+    },
+  ];
+}
+
+function contextExitShapingPatches(base) {
+  return [
+    {
+      useContextExitShaping: true,
+      contextTrailTightenFactor: Math.max(0.1, numeric(base.contextTrailTightenFactor ?? 0.75) - 0.1),
+    },
+    {
+      useContextExitShaping: true,
+      contextTrailTightenFactor: numeric(base.contextTrailTightenFactor ?? 0.75) + 0.1,
+    },
+    {
+      useContextExitShaping: !(base.useContextExitShaping === true),
+      contextTrailTightenFactor: Math.max(0.1, numeric(base.contextTrailTightenFactor ?? 0.75) - 0.05),
+    },
   ];
 }
 
@@ -279,6 +344,8 @@ function getPatchPool(family, base) {
   if (family === 'fusion') return fusionPatches(base);
   if (family === 'avwap-context') return avwapContextPatches(base);
   if (family === 'channel-context') return channelContextPatches(base);
+  if (family === 'context-aggregator') return contextAggregatorPatches(base);
+  if (family === 'context-exit-shaping') return contextExitShapingPatches(base);
   if (family === 'exit-state') return exitStatePatches(base);
   if (family === 'asymmetry') return asymmetryPatches(base);
   return incumbentLocalPatches(base);
@@ -326,6 +393,8 @@ function getFallbackPatchPool(families = [], base = {}, { interleave = false } =
     supertrend: supertrendPatches(base),
     'avwap-context': avwapContextPatches(base),
     'channel-context': channelContextPatches(base),
+    'context-aggregator': contextAggregatorPatches(base),
+    'context-exit-shaping': contextExitShapingPatches(base),
   };
 
   const familyPools = normalizedFamilies

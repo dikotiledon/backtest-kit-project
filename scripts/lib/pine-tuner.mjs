@@ -77,9 +77,26 @@ const AVWAP_CONTEXT_KEYS = [
   'avwapSwingPeriod',
 ];
 
+const AVWAP_CONTEXT_DEPENDENT_KEYS = [
+  'avwapSwingPeriod',
+  'avwapReclaimFreshBars',
+  'avwapMaxDistanceAtr',
+  'avwapMaxAnchorAge',
+  'avwapRequireReclaimForEntry',
+];
+
 const CHANNEL_CONTEXT_KEYS = [
   'useChannelContext',
   'channelDetectLength',
+];
+
+const CHANNEL_CONTEXT_DEPENDENT_KEYS = [
+  'channelDetectLength',
+  'channelCompressionThreshold',
+  'channelBreakoutFreshBars',
+  'channelEnableRetest',
+  'channelRetestFreshBars',
+  'channelHostileBlocksEntry',
 ];
 
 const CONTEXT_AGGREGATOR_KEYS = [
@@ -87,9 +104,22 @@ const CONTEXT_AGGREGATOR_KEYS = [
   'contextBoostValue',
 ];
 
+const CONTEXT_AGGREGATOR_DEPENDENT_KEYS = [
+  'contextStrictRequireChannel',
+  'contextBoostAddsToStrength',
+  'contextBoostValue',
+  'contextHostileBlocksEntry',
+];
+
 const CONTEXT_EXIT_SHAPING_KEYS = [
   'useContextExitShaping',
   'contextTrailTightenFactor',
+];
+
+const CONTEXT_EXIT_SHAPING_DEPENDENT_KEYS = [
+  'contextTightenTrailOnCaution',
+  'contextTrailTightenFactor',
+  'contextAllowEarlySignalExit',
 ];
 
 const SQUEEZE_CONTEXT_KEYS = [
@@ -285,19 +315,19 @@ export function filterSweepCombos(combos) {
     }
 
     if (normalized.useAvwapContext !== true) {
-      deleteKeys(normalized, AVWAP_CONTEXT_KEYS);
+      deleteKeys(normalized, AVWAP_CONTEXT_DEPENDENT_KEYS);
     }
 
     if (normalized.useChannelContext !== true) {
-      deleteKeys(normalized, CHANNEL_CONTEXT_KEYS);
+      deleteKeys(normalized, CHANNEL_CONTEXT_DEPENDENT_KEYS);
     }
 
     if (normalized.useContextAggregator !== true) {
-      deleteKeys(normalized, CONTEXT_AGGREGATOR_KEYS);
+      deleteKeys(normalized, CONTEXT_AGGREGATOR_DEPENDENT_KEYS);
     }
 
     if (normalized.useContextExitShaping !== true) {
-      deleteKeys(normalized, CONTEXT_EXIT_SHAPING_KEYS);
+      deleteKeys(normalized, CONTEXT_EXIT_SHAPING_DEPENDENT_KEYS);
     }
 
     if (normalized.useSqueezeContext !== true) {

@@ -4865,6 +4865,40 @@ test('buildScoutRegimeAnalysisArtifact aggregates all selected-candidate lab ana
   assert.match(result.artifact.markdown, /Threshold surfaces/);
 });
 
+test('buildScoutRegimeAnalysisArtifact offsets trade feature indexes across selected-candidate labs', () => {
+  const { artifact } = buildScoutRegimeAnalysisArtifact({
+    matrixId: 'pine-autoresearch',
+    runId: 'run-multi-lab-regime-offsets',
+    selectedCandidate: {
+      challenger: { configId: 'cand-1' },
+      labResults: [
+        {
+          lab: { labId: 'primary' },
+          analysis: {
+            challenger: {
+              trades: [{ side: 'long', pnl: 1, entryIndex: 0 }],
+              rows: [{ featureCompressionState: 1 }],
+            },
+          },
+        },
+        {
+          lab: { labId: 'shadow-1' },
+          analysis: {
+            challenger: {
+              trades: [{ side: 'long', pnl: 1, entryIndex: 0 }],
+              rows: [{ featureExpansionState: 1 }],
+            },
+          },
+        },
+      ],
+    },
+    matrixCandidates: [],
+  });
+
+  assert.equal(artifact.regimeSlices.compression.tradeCount, 1);
+  assert.equal(artifact.regimeSlices.expansion.tradeCount, 1);
+});
+
 test('buildScoutRegimeAnalysisArtifact keeps analysis output available even without qualifying trade rows', () => {
   const result = buildScoutRegimeAnalysisArtifact({
     matrixId: 'pine-autoresearch',

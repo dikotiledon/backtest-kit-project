@@ -1595,6 +1595,40 @@ export function applySchedulerStateToManifest(manifest = {}, schedulerState = {}
   };
 }
 
+const REGIME_TRADE_FEATURE_INDEX_KEYS = ['featureIndex', 'featureRowIndex', 'entryIndex', 'barIndex'];
+
+function offsetRegimeTradeFeatureIndexes(trade, rowOffset) {
+  if (!trade || typeof trade !== 'object' || Array.isArray(trade)) return trade;
+  if (!Number.isInteger(rowOffset) || rowOffset <= 0) return { ...trade };
+
+  const offsetTrade = { ...trade };
+  for (const key of REGIME_TRADE_FEATURE_INDEX_KEYS) {
+    if (!Object.hasOwn(offsetTrade, key)) continue;
+    const index = Number(offsetTrade[key]);
+    if (Number.isInteger(index) && index >= 0) {
+      offsetTrade[key] = index + rowOffset;
+    }
+  }
+  return offsetTrade;
+}
+
+function collectAlignedRegimeAnalysis(sourceLabResults, side) {
+  const rows = [];
+  const trades = [];
+
+  for (const { analysis } of sourceLabResults) {
+    const sideAnalysis = analysis?.[side] || {};
+    const labRows = Array.isArray(sideAnalysis.rows) ? sideAnalysis.rows : [];
+    const rowOffset = rows.length;
+    rows.push(...labRows);
+
+    const labTrades = Array.isArray(sideAnalysis.trades) ? sideAnalysis.trades : [];
+    trades.push(...labTrades.map((trade) => offsetRegimeTradeFeatureIndexes(trade, rowOffset)));
+  }
+
+  return { trades, rows };
+}
+
 export function buildScoutRegimeAnalysisArtifact({ matrixId, runId, selectedCandidate = null, matrixCandidates = [] } = {}) {
   const candidatePool = selectedCandidate ? [selectedCandidate] : matrixCandidates;
   const sourceLabResults = candidatePool.flatMap((candidate) => (
@@ -1605,27 +1639,21 @@ export function buildScoutRegimeAnalysisArtifact({ matrixId, runId, selectedCand
     labResult,
     analysis: labResult?.analysis || null,
   })).filter(({ analysis }) => Boolean(analysis)));
+  const challengerAnalysis = collectAlignedRegimeAnalysis(sourceLabResults, 'challenger');
+  const incumbentAnalysis = collectAlignedRegimeAnalysis(sourceLabResults, 'incumbent');
 
   const analysisSource = sourceLabResults.length > 0
     ? {
         sourceLabCount: sourceLabResults.length,
         sourceLabIds: sourceLabResults.map(({ candidate, labIndex }) => candidate?.labResults?.[labIndex]?.lab?.labId || null),
         analyses: sourceLabResults.map(({ analysis }) => analysis),
-        challenger: {
-          trades: sourceLabResults.flatMap(({ analysis }) => analysis?.challenger?.trades || []),
-          rows: sourceLabResults.flatMap(({ analysis }) => analysis?.challenger?.rows || []),
-        },
-        incumbent: {
-          trades: sourceLabResults.flatMap(({ analysis }) => analysis?.incumbent?.trades || []),
-          rows: sourceLabResults.flatMap(({ analysis }) => analysis?.incumbent?.rows || []),
-        },
+        challenger: challengerAnalysis,
+        incumbent: incumbentAnalysis,
       }
     : null;
 
-  const challengerAnalysis = analysisSource?.challenger || null;
-  const incumbentAnalysis = analysisSource?.incumbent || null;
-  const trades = challengerAnalysis?.trades || [];
-  const featureRows = challengerAnalysis?.rows || [];
+  const trades = challengerAnalysis.trades;
+  const featureRows = challengerAnalysis.rows;
   return {
     analysisSource,
     artifact: buildRegimeAnalysisArtifact({
@@ -1633,8 +1661,8 @@ export function buildScoutRegimeAnalysisArtifact({ matrixId, runId, selectedCand
       runId,
       trades,
       featureRows,
-      championMetrics: incumbentAnalysis?.trades?.length ? summarizeSideMetrics({ trades: incumbentAnalysis.trades }) : {},
-      candidateMetrics: challengerAnalysis?.trades?.length ? summarizeSideMetrics({ trades: challengerAnalysis.trades }) : null,
+      championMetrics: incumbentAnalysis.trades.length ? summarizeSideMetrics({ trades: incumbentAnalysis.trades }) : {},
+      candidateMetrics: challengerAnalysis.trades.length ? summarizeSideMetrics({ trades: challengerAnalysis.trades }) : null,
     }),
   };
 }

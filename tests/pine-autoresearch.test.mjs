@@ -5596,6 +5596,14 @@ test('default autoresearch config rotates across multiple pinned windows', async
   assert.ok(config.shadowLabs.length >= 5);
 });
 
+test('default regime-exit promotion keeps profitability floor', async () => {
+  const configPath = path.resolve('config/pine-autoresearch.default.json');
+  const raw = JSON.parse(await fs.readFile(configPath, 'utf8'));
+
+  assert.equal(raw.regimeExitResearch.promotion.minRoiDeltaPct, 3);
+  assert.equal(raw.regimeExitResearch.promotion.minProfitFactorDelta, 0.1);
+  assert.equal(raw.regimeExitResearch.promotion.requireBlindHoldoutVerdict, true);
+});
 
 test('complexity penalty makes newly activated parameters pay for degrees of freedom', () => {
   const incumbent = makeResult({

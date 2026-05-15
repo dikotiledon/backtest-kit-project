@@ -119,6 +119,36 @@ test('simulateTrades uses intra-bar High/Low for SL/TP touch detection', async (
   assert.equal(trades[0].exitPrice, 110);
 });
 
+test('simulateTrades records long MFE and MAE from OHLC path including exit bar', async () => {
+  const { simulateTrades } = await loadPineOptimizer();
+  const rows = [
+    { timestamp: '2025-01-01T00:00Z', Close: 100, High: 100, Low: 100, Signal: 1, EstimatedTime: 15 },
+    { timestamp: '2025-01-01T00:15Z', Close: 102, High: 110, Low: 95, Signal: 0 },
+  ];
+
+  const trades = simulateTrades(rows, { timeframeMinutes: 15 });
+
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].exitPrice, 102);
+  assert.equal(trades[0].mfePct, 10);
+  assert.equal(trades[0].maePct, 5);
+});
+
+test('simulateTrades records short MFE and MAE from OHLC path including exit bar', async () => {
+  const { simulateTrades } = await loadPineOptimizer();
+  const rows = [
+    { timestamp: '2025-01-01T00:00Z', Close: 100, High: 100, Low: 100, Signal: -1, EstimatedTime: 15 },
+    { timestamp: '2025-01-01T00:15Z', Close: 98, High: 105, Low: 90, Signal: 0 },
+  ];
+
+  const trades = simulateTrades(rows, { timeframeMinutes: 15 });
+
+  assert.equal(trades.length, 1);
+  assert.equal(trades[0].exitPrice, 98);
+  assert.equal(trades[0].mfePct, 10);
+  assert.equal(trades[0].maePct, 5);
+});
+
 test('simulateTrades gap-through fills at open when open is past SL', async () => {
   const { simulateTrades } = await loadPineOptimizer();
   const rows = [

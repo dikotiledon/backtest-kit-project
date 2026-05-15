@@ -5,7 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { analyzeJsonlFile } from '../scripts/lib/pine-optimizer.mjs';
-import { analyzeJsonlFileStreaming } from '../scripts/lib/pine-streaming-metrics.mjs';
+import {
+  analyzeJsonlFileStreaming,
+  createIncrementalTradeSimulator,
+} from '../scripts/lib/pine-streaming-metrics.mjs';
 
 async function writeFixture(rows) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'pine-streaming-metrics-'));
@@ -59,6 +62,22 @@ test('streaming rowCount parity with mixed-validity rows and matching metrics', 
   assert.equal(streaming.metrics.tradeCount, full.metrics.tradeCount);
   assert.equal(Number(streaming.metrics.roiPct.toFixed(6)), Number(full.metrics.roiPct.toFixed(6)));
   assert.equal(Number(streaming.score.toFixed(6)), Number(full.score.toFixed(6)));
+});
+
+test('incremental streaming simulator records MFE and MAE from OHLC path including exit bar', () => {
+  const rows = [
+    { timestamp: '2026-01-01T00:00:00.000Z', Close: 100, High: 100, Low: 100, Signal: 1, EstimatedTime: 15 },
+    { timestamp: '2026-01-01T00:15:00.000Z', Close: 102, High: 110, Low: 95, Signal: 0 },
+  ];
+  const simulator = createIncrementalTradeSimulator({ timeframeMinutes: 15 });
+
+  for (const row of rows) simulator.push(row);
+  const result = simulator.finalize(rows.at(-1));
+
+  assert.equal(result.trades.length, 1);
+  assert.equal(result.trades[0].exitPrice, 102);
+  assert.equal(result.trades[0].mfePct, 10);
+  assert.equal(result.trades[0].maePct, 5);
 });
 
 test('streaming malformed JSONL throws contextual file and line error', async () => {

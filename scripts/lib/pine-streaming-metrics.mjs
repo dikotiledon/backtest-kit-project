@@ -16,6 +16,35 @@ function barsToHold(row, timeframeMinutes) {
   return Math.max(1, Math.ceil(estimatedMinutes / timeframeMinutes));
 }
 
+function barRange(row) {
+  const close = row.Close;
+  return {
+    high: Number.isFinite(row.High) ? row.High : close,
+    low: Number.isFinite(row.Low) ? row.Low : close,
+  };
+}
+
+function updateExcursions(position, row) {
+  const { high, low } = barRange(row);
+  if (Number.isFinite(high)) position.maxHigh = Math.max(position.maxHigh, high);
+  if (Number.isFinite(low)) position.minLow = Math.min(position.minLow, low);
+}
+
+function excursionPct(position, kind) {
+  const entryPrice = position.entryPrice;
+  if (!Number.isFinite(entryPrice) || entryPrice === 0) return null;
+
+  if (position.side === 'long') {
+    const favorable = position.maxHigh - entryPrice;
+    const adverse = entryPrice - position.minLow;
+    return round(((kind === 'mfe' ? favorable : adverse) / entryPrice) * 100);
+  }
+
+  const favorable = entryPrice - position.minLow;
+  const adverse = position.maxHigh - entryPrice;
+  return round(((kind === 'mfe' ? favorable : adverse) / entryPrice) * 100);
+}
+
 function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
   const rawPnlExact = position.side === 'long'
     ? exitPrice - position.entryPrice
@@ -39,6 +68,8 @@ function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
     returnPctExact,
     pnl: round(rawPnlExact),
     returnPct: round(returnPctExact),
+    mfePct: excursionPct(position, 'mfe'),
+    maePct: excursionPct(position, 'mae'),
   };
 }
 
@@ -204,27 +235,23 @@ export function createIncrementalTradeSimulator(options = {}) {
 
       if (position) {
         const close = row.Close;
+        const hasExplicitOpen = Number.isFinite(row.Open);
+        const { high, low } = barRange(row);
+        const open = hasExplicitOpen ? row.Open : close;
         const heldBars = index - position.entryIndex;
-        const simPos = Number(row?.Feature_SimPos);
         let exitReason = null;
         let exitPrice = null;
 
-        if (position.side === 'long' && simPos === 1) {
-          if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
-          if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
-        }
-        if (position.side === 'short' && simPos === -1) {
-          if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
-          if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
-        }
+        updateExcursions(position, row);
 
+        // Exit detection uses PREVIOUS bar's SL/TP (already stored in position)
         if (position.side === 'long') {
-          if (Number.isFinite(position.stopLoss) && close <= position.stopLoss) {
+          if (Number.isFinite(position.stopLoss) && low <= position.stopLoss) {
             exitReason = 'stopLoss';
-            exitPrice = position.stopLoss;
-          } else if (Number.isFinite(position.takeProfit) && close >= position.takeProfit) {
+            exitPrice = (hasExplicitOpen && open < position.stopLoss) ? open : position.stopLoss;
+          } else if (Number.isFinite(position.takeProfit) && high >= position.takeProfit) {
             exitReason = 'takeProfit';
-            exitPrice = position.takeProfit;
+            exitPrice = (hasExplicitOpen && open > position.takeProfit) ? open : position.takeProfit;
           } else if (signal === -1) {
             exitReason = 'flip';
             exitPrice = close;
@@ -232,23 +259,36 @@ export function createIncrementalTradeSimulator(options = {}) {
             exitReason = 'time';
             exitPrice = close;
           }
-        } else if (Number.isFinite(position.stopLoss) && close >= position.stopLoss) {
-          exitReason = 'stopLoss';
-          exitPrice = position.stopLoss;
-        } else if (Number.isFinite(position.takeProfit) && close <= position.takeProfit) {
-          exitReason = 'takeProfit';
-          exitPrice = position.takeProfit;
-        } else if (signal === 1) {
-          exitReason = 'flip';
-          exitPrice = close;
-        } else if (heldBars >= position.maxBars) {
-          exitReason = 'time';
-          exitPrice = close;
+        } else {
+          if (Number.isFinite(position.stopLoss) && high >= position.stopLoss) {
+            exitReason = 'stopLoss';
+            exitPrice = (hasExplicitOpen && open > position.stopLoss) ? open : position.stopLoss;
+          } else if (Number.isFinite(position.takeProfit) && low <= position.takeProfit) {
+            exitReason = 'takeProfit';
+            exitPrice = (hasExplicitOpen && open < position.takeProfit) ? open : position.takeProfit;
+          } else if (signal === 1) {
+            exitReason = 'flip';
+            exitPrice = close;
+          } else if (heldBars >= position.maxBars) {
+            exitReason = 'time';
+            exitPrice = close;
+          }
         }
 
         if (exitReason) {
           trades.push(buildTrade(position, row, exitReason, exitPrice, index));
           position = null;
+        } else {
+          // Update SL/TP AFTER exit check — effective next bar
+          const simPos = Number(row?.Feature_SimPos);
+          if (position.side === 'long' && simPos === 1) {
+            if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
+            if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
+          }
+          if (position.side === 'short' && simPos === -1) {
+            if (Number.isFinite(row?.StopLoss)) position.stopLoss = row.StopLoss;
+            if (Number.isFinite(row?.TakeProfit)) position.takeProfit = row.TakeProfit;
+          }
         }
       }
 
@@ -259,6 +299,8 @@ export function createIncrementalTradeSimulator(options = {}) {
           entryIndex: index,
           entryTime: row.timestamp,
           entryPrice: row.Close,
+          maxHigh: row.Close,
+          minLow: row.Close,
           stopLoss: Number.isFinite(row.StopLoss) ? row.StopLoss : NaN,
           takeProfit: Number.isFinite(row.TakeProfit) ? row.TakeProfit : NaN,
           maxBars: barsToHold(row, timeframeMinutes),

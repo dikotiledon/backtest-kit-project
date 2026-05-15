@@ -52,6 +52,35 @@ function exactReturnPct(trade) {
   return 0;
 }
 
+function barRange(row) {
+  const close = row.Close;
+  return {
+    high: Number.isFinite(row.High) ? row.High : close,
+    low: Number.isFinite(row.Low) ? row.Low : close,
+  };
+}
+
+function updateExcursions(position, row) {
+  const { high, low } = barRange(row);
+  if (Number.isFinite(high)) position.maxHigh = Math.max(position.maxHigh, high);
+  if (Number.isFinite(low)) position.minLow = Math.min(position.minLow, low);
+}
+
+function excursionPct(position, kind) {
+  const entryPrice = position.entryPrice;
+  if (!Number.isFinite(entryPrice) || entryPrice === 0) return null;
+
+  if (position.side === 'long') {
+    const favorable = position.maxHigh - entryPrice;
+    const adverse = entryPrice - position.minLow;
+    return round(((kind === 'mfe' ? favorable : adverse) / entryPrice) * 100);
+  }
+
+  const favorable = entryPrice - position.minLow;
+  const adverse = position.maxHigh - entryPrice;
+  return round(((kind === 'mfe' ? favorable : adverse) / entryPrice) * 100);
+}
+
 function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
   const rawPnlExact = position.side === 'long'
     ? exitPrice - position.entryPrice
@@ -75,6 +104,8 @@ function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
     returnPctExact,
     pnl: round(rawPnlExact),
     returnPct: round(returnPctExact),
+    mfePct: excursionPct(position, 'mfe'),
+    maePct: excursionPct(position, 'mae'),
   };
 }
 
@@ -91,12 +122,13 @@ export function simulateTrades(rows, options = {}) {
     if (position) {
       const close = row.Close;
       const hasExplicitOpen = Number.isFinite(row.Open);
-      const high = Number.isFinite(row.High) ? row.High : close;
-      const low = Number.isFinite(row.Low) ? row.Low : close;
+      const { high, low } = barRange(row);
       const open = hasExplicitOpen ? row.Open : close;
       const heldBars = i - position.entryIndex;
       let exitReason = null;
       let exitPrice = null;
+
+      updateExcursions(position, row);
 
       // Exit detection uses PREVIOUS bar's SL/TP (already stored in position)
       if (position.side === 'long') {
@@ -152,6 +184,8 @@ export function simulateTrades(rows, options = {}) {
         entryIndex: i,
         entryTime: row.timestamp,
         entryPrice: row.Close,
+        maxHigh: row.Close,
+        minLow: row.Close,
         stopLoss: Number.isFinite(row.StopLoss) ? row.StopLoss : NaN,
         takeProfit: Number.isFinite(row.TakeProfit) ? row.TakeProfit : NaN,
         maxBars: barsToHold(row, timeframeMinutes),

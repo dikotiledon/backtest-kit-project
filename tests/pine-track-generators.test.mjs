@@ -174,32 +174,22 @@ test('advertised autoresearch families expose track-owned knob lists', () => {
   assert.deepEqual(trackOwnKnobKeys('avwap-context'), [
     'useAvwapContext',
     'avwapSwingPeriod',
-    'avwapReclaimFreshBars',
-    'avwapMaxDistanceAtr',
-    'avwapMaxAnchorAge',
-    'avwapRequireReclaimForEntry',
   ]);
   assert.deepEqual(trackOwnKnobKeys('channel-context'), [
     'useChannelContext',
     'channelDetectLength',
-    'channelCompressionThreshold',
-    'channelBreakoutFreshBars',
-    'channelEnableRetest',
-    'channelRetestFreshBars',
-    'channelHostileBlocksEntry',
   ]);
   assert.deepEqual(trackOwnKnobKeys('context-aggregator'), [
     'useContextAggregator',
-    'contextStrictRequireChannel',
-    'contextBoostAddsToStrength',
     'contextBoostValue',
-    'contextHostileBlocksEntry',
   ]);
   assert.deepEqual(trackOwnKnobKeys('context-exit-shaping'), [
     'useContextExitShaping',
-    'contextTightenTrailOnCaution',
     'contextTrailTightenFactor',
-    'contextAllowEarlySignalExit',
+  ]);
+  assert.deepEqual(trackOwnKnobKeys('context exit shaping'), [
+    'useContextExitShaping',
+    'contextTrailTightenFactor',
   ]);
 });
 
@@ -240,6 +230,26 @@ test('advertised autoresearch families validate representative track-owned patch
     trackId: 'context-exit-shaping',
     patch: { useContextExitShaping: true, contextTrailTightenFactor: 0.75 },
   }), { useContextExitShaping: true, contextTrailTightenFactor: 0.75 });
+  assert.deepEqual(validateTrackPatch({
+    trackId: 'context exit shaping',
+    patch: { useContextExitShaping: true },
+  }), { useContextExitShaping: true });
+  assert.throws(
+    () => validateTrackPatch({ trackId: 'avwap-context', patch: { avwapReclaimFreshBars: 6 } }),
+    /avwapReclaimFreshBars/,
+  );
+  assert.throws(
+    () => validateTrackPatch({ trackId: 'channel-context', patch: { channelCompressionThreshold: 0.35 } }),
+    /channelCompressionThreshold/,
+  );
+  assert.throws(
+    () => validateTrackPatch({ trackId: 'context-aggregator', patch: { contextStrictRequireChannel: true } }),
+    /contextStrictRequireChannel/,
+  );
+  assert.throws(
+    () => validateTrackPatch({ trackId: 'context-exit-shaping', patch: { contextTightenTrailOnCaution: true } }),
+    /contextTightenTrailOnCaution/,
+  );
 });
 
 test('squeeze track emits plain patch metadata with shared and own keys', () => {

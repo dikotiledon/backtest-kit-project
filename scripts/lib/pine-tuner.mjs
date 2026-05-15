@@ -75,35 +75,21 @@ const FUSION_CONTEXT_KEYS = [
 const AVWAP_CONTEXT_KEYS = [
   'useAvwapContext',
   'avwapSwingPeriod',
-  'avwapReclaimFreshBars',
-  'avwapMaxDistanceAtr',
-  'avwapMaxAnchorAge',
-  'avwapRequireReclaimForEntry',
 ];
 
 const CHANNEL_CONTEXT_KEYS = [
   'useChannelContext',
   'channelDetectLength',
-  'channelCompressionThreshold',
-  'channelBreakoutFreshBars',
-  'channelEnableRetest',
-  'channelRetestFreshBars',
-  'channelHostileBlocksEntry',
 ];
 
 const CONTEXT_AGGREGATOR_KEYS = [
   'useContextAggregator',
-  'contextStrictRequireChannel',
-  'contextBoostAddsToStrength',
   'contextBoostValue',
-  'contextHostileBlocksEntry',
 ];
 
 const CONTEXT_EXIT_SHAPING_KEYS = [
   'useContextExitShaping',
-  'contextTightenTrailOnCaution',
   'contextTrailTightenFactor',
-  'contextAllowEarlySignalExit',
 ];
 
 const SQUEEZE_CONTEXT_KEYS = [
@@ -177,7 +163,7 @@ function trackFamilyAliases(name = '') {
   const normalized = String(name || '').toLowerCase();
   if (normalized.includes('squeeze')) return 'squeeze';
   if (normalized.includes('divergence')) return 'divergence';
-  if (normalized.includes('context-exit-shaping')) return 'context-exit-shaping';
+  if (normalized.includes('context-exit-shaping') || (normalized.includes('context') && normalized.includes('exit') && normalized.includes('shaping'))) return 'context-exit-shaping';
   if (normalized.includes('exit')) return 'exit-state';
   if (normalized.includes('asym')) return 'asymmetry';
   if (normalized.includes('supertrend')) return 'supertrend';
@@ -186,7 +172,6 @@ function trackFamilyAliases(name = '') {
   if (normalized.includes('avwap')) return 'avwap-context';
   if (normalized.includes('channel')) return 'channel-context';
   if (normalized.includes('aggregator')) return 'context-aggregator';
-  if (normalized.includes('context') && normalized.includes('shaping')) return 'context-exit-shaping';
   return normalized;
 }
 

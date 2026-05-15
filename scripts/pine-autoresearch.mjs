@@ -1613,8 +1613,10 @@ function offsetRegimeTradeFeatureIndexes(trade, rowOffset) {
 }
 
 function markRegimeTradeFeatureUnmatched(trade) {
-  if (!trade || typeof trade !== 'object' || Array.isArray(trade)) return trade;
-  return { ...trade, regimeFeatureUnmatched: true };
+  if (trade && typeof trade === 'object' && !Array.isArray(trade)) {
+    return { ...trade, regimeFeatureUnmatched: true };
+  }
+  return { value: trade, regimeFeatureUnmatched: true };
 }
 
 function collectAlignedRegimeAnalysis(sourceLabResults, side) {

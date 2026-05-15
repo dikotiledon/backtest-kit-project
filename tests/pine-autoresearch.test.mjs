@@ -4945,6 +4945,52 @@ test('buildScoutRegimeAnalysisArtifact leaves no-row lab trades unmatched across
   assert.equal(artifact.regimeSlices.totals.unmatchedTradeCount, 1);
 });
 
+test('buildScoutRegimeAnalysisArtifact leaves malformed no-row lab trades unmatched across later lab rows', () => {
+  const { artifact } = buildScoutRegimeAnalysisArtifact({
+    matrixId: 'pine-autoresearch',
+    runId: 'run-multi-lab-malformed-empty-row-gap',
+    selectedCandidate: {
+      challenger: { configId: 'cand-1' },
+      labResults: [
+        {
+          lab: { labId: 'primary' },
+          analysis: {
+            challenger: {
+              trades: [{ side: 'long', pnl: 1, entryIndex: 0 }],
+              rows: [{ featureCompressionState: 1 }],
+            },
+          },
+        },
+        {
+          lab: { labId: 'shadow-empty' },
+          analysis: {
+            challenger: {
+              trades: [0],
+              rows: [],
+            },
+          },
+        },
+        {
+          lab: { labId: 'shadow-expansion' },
+          analysis: {
+            challenger: {
+              trades: [{ side: 'long', pnl: 1, entryIndex: 0 }],
+              rows: [{ featureExpansionState: 1 }],
+            },
+          },
+        },
+      ],
+    },
+    matrixCandidates: [],
+  });
+
+  assert.equal(artifact.evidence.tradeCount, 3);
+  assert.equal(artifact.regimeSlices.compression.tradeCount, 1);
+  assert.equal(artifact.regimeSlices.expansion.tradeCount, 1);
+  assert.equal(artifact.regimeSlices.totals.matchedTradeCount, 2);
+  assert.equal(artifact.regimeSlices.totals.unmatchedTradeCount, 1);
+});
+
 test('buildScoutRegimeAnalysisArtifact keeps analysis output available even without qualifying trade rows', () => {
   const result = buildScoutRegimeAnalysisArtifact({
     matrixId: 'pine-autoresearch',

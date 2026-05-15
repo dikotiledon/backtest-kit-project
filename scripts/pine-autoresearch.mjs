@@ -1612,6 +1612,11 @@ function offsetRegimeTradeFeatureIndexes(trade, rowOffset) {
   return offsetTrade;
 }
 
+function markRegimeTradeFeatureUnmatched(trade) {
+  if (!trade || typeof trade !== 'object' || Array.isArray(trade)) return trade;
+  return { ...trade, regimeFeatureUnmatched: true };
+}
+
 function collectAlignedRegimeAnalysis(sourceLabResults, side) {
   const rows = [];
   const trades = [];
@@ -1623,7 +1628,10 @@ function collectAlignedRegimeAnalysis(sourceLabResults, side) {
     rows.push(...labRows);
 
     const labTrades = Array.isArray(sideAnalysis.trades) ? sideAnalysis.trades : [];
-    trades.push(...labTrades.map((trade) => offsetRegimeTradeFeatureIndexes(trade, rowOffset)));
+    const alignTrade = labRows.length > 0
+      ? (trade) => offsetRegimeTradeFeatureIndexes(trade, rowOffset)
+      : markRegimeTradeFeatureUnmatched;
+    trades.push(...labTrades.map(alignTrade));
   }
 
   return { trades, rows };

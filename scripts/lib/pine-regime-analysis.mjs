@@ -60,6 +60,7 @@ function summarizeBucket(trades) {
 }
 
 function pickFeatureRow(featureRows, trade, index) {
+  if (trade?.regimeFeatureUnmatched === true) return null;
   const candidates = [trade?.featureIndex, trade?.featureRowIndex, trade?.entryIndex, trade?.barIndex, index];
   for (const candidate of candidates) {
     const resolved = Number(candidate);

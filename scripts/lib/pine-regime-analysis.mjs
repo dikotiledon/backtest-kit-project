@@ -15,18 +15,18 @@ function sideOf(trade) {
 }
 
 function tradePnl(trade) {
-  const value = trade?.pnl ?? trade?.profit ?? trade?.returnPct ?? trade?.return ?? 0;
+  const value = trade?.returnPctExact ?? trade?.returnPct ?? trade?.pnlPct ?? trade?.pnl ?? trade?.profit ?? trade?.return ?? 0;
   return toNumber(value, 0);
 }
 
 function tradeMfe(trade) {
-  const value = trade?.mfePct ?? trade?.mfe ?? trade?.maxFavorableExcursionPct ?? trade?.maxRunupPct ?? trade?.runupPct ?? 0;
-  return Math.abs(toNumber(value, 0));
+  const value = trade?.mfePct ?? trade?.mfe ?? trade?.maxFavorableExcursionPct ?? trade?.maxRunupPct ?? trade?.runupPct ?? null;
+  return value !== null && value !== undefined ? Math.abs(toNumber(value, 0)) : null;
 }
 
 function tradeMae(trade) {
-  const value = trade?.maePct ?? trade?.mae ?? trade?.maxAdverseExcursionPct ?? trade?.drawdownPct ?? 0;
-  return Math.abs(toNumber(value, 0));
+  const value = trade?.maePct ?? trade?.mae ?? trade?.maxAdverseExcursionPct ?? trade?.drawdownPct ?? null;
+  return value !== null && value !== undefined ? Math.abs(toNumber(value, 0)) : null;
 }
 
 function summarizeBucket(trades) {
@@ -39,8 +39,12 @@ function summarizeBucket(trades) {
   const winTotal = wins.reduce((sum, trade) => sum + tradePnl(trade), 0);
   const lossTotalAbs = Math.abs(losses.reduce((sum, trade) => sum + tradePnl(trade), 0));
   const totalPnl = safeTrades.reduce((sum, trade) => sum + tradePnl(trade), 0);
-  const mfeTotal = safeTrades.reduce((sum, trade) => sum + tradeMfe(trade), 0);
-  const maeTotal = safeTrades.reduce((sum, trade) => sum + tradeMae(trade), 0);
+  const mfeValues = safeTrades.map(tradeMfe).filter(v => v !== null);
+  const maeValues = safeTrades.map(tradeMae).filter(v => v !== null);
+  const mfeTotal = mfeValues.reduce((sum, v) => sum + v, 0);
+  const maeTotal = maeValues.reduce((sum, v) => sum + v, 0);
+  const hasMfe = mfeValues.length > 0;
+  const hasMae = maeValues.length > 0;
 
   return {
     tradeCount,
@@ -50,10 +54,10 @@ function summarizeBucket(trades) {
     avgWin: winCount ? round(winTotal / winCount, 4) : 0,
     avgLoss: lossCount ? round(lossTotalAbs / lossCount, 4) : 0,
     profitFactor: lossTotalAbs === 0 ? (winTotal > 0 ? Number.POSITIVE_INFINITY : 0) : round(winTotal / lossTotalAbs, 4),
-    mfePct: tradeCount ? round(mfeTotal / tradeCount, 4) : 0,
-    maePct: tradeCount ? round(maeTotal / tradeCount, 4) : 0,
-    MFE: tradeCount ? round(mfeTotal / tradeCount, 4) : 0,
-    MAE: tradeCount ? round(maeTotal / tradeCount, 4) : 0,
+    mfePct: hasMfe ? round(mfeTotal / mfeValues.length, 4) : null,
+    maePct: hasMae ? round(maeTotal / maeValues.length, 4) : null,
+    MFE: hasMfe ? round(mfeTotal / mfeValues.length, 4) : null,
+    MAE: hasMae ? round(maeTotal / maeValues.length, 4) : null,
     avgPnl: tradeCount ? round(totalPnl / tradeCount, 4) : 0,
     totalPnl: round(totalPnl, 4),
   };
@@ -190,6 +194,12 @@ function extractThresholdSurface(metrics = {}) {
 
   const longMetric = metrics.long || {};
   const shortMetric = metrics.short || {};
+  const hasLongEvidence = toNumber(longMetric.tradeCount, 0) > 0;
+  const hasShortEvidence = toNumber(shortMetric.tradeCount, 0) > 0;
+  if (!hasLongEvidence || !hasShortEvidence) {
+    return null;
+  }
+
   const long = toNumber(longMetric.winRate ?? longMetric.profitFactor ?? longMetric.avgWin ?? longMetric.avgPnl, Number.NaN);
   const short = toNumber(shortMetric.winRate ?? shortMetric.profitFactor ?? shortMetric.avgWin ?? shortMetric.avgPnl, Number.NaN);
 
@@ -264,7 +274,10 @@ export function detectThresholdAsymmetry({ championMetrics = {}, candidateMetric
 
 function formatPct(value) {
   if (value === Infinity) return '∞';
-  return `${round(value, 2)}`;
+  if (value === null || value === undefined) return 'n/a';
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return 'n/a';
+  return `${round(numeric, 2)}`;
 }
 
 function formatSideRow(name, metrics) {

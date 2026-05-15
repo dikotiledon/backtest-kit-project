@@ -39,6 +39,36 @@ test('summarizeSideMetrics computes expectancy inputs by side', () => {
   assert.ok(summary.long.maePct > 0);
 });
 
+test('summarizeSideMetrics prefers normalized return percentage over mixed-symbol raw pnl', () => {
+  const summary = summarizeSideMetrics({
+    trades: [
+      { side: 'long', pnl: 1000, returnPctExact: 1 },
+      { side: 'long', pnl: -2000, returnPctExact: -2 },
+    ],
+  });
+
+  assert.equal(summary.long.avgWin, 1);
+  assert.equal(summary.long.avgLoss, 2);
+  assert.equal(summary.long.profitFactor, 0.5);
+});
+
+test('summarizeSideMetrics keeps missing excursion metrics null and markdown renders them n/a', () => {
+  const trades = [{ side: 'long', pnl: 1, entryIndex: 0 }];
+  const summary = summarizeSideMetrics({ trades });
+
+  assert.equal(summary.long.mfePct, null);
+  assert.equal(summary.long.maePct, null);
+
+  const artifact = buildRegimeAnalysisArtifact({
+    matrixId: 'pine-autoresearch',
+    runId: 'run-missing-excursions',
+    trades,
+    featureRows: [{}],
+  });
+
+  assert.match(artifact.markdown, /\| long \| 1 \| 100% \| 1 \| 0 \| ∞ \| n\/a \| n\/a \|/);
+});
+
 test('classifyRegimeFromFeatures maps exported features into the four regimes', () => {
   assert.equal(classifyRegimeFromFeatures(sampleFeatureRows()[0]).regime, 'compression');
   assert.equal(classifyRegimeFromFeatures(sampleFeatureRows()[1]).regime, 'trend');
@@ -97,7 +127,9 @@ test('buildRegimeAnalysisArtifact emits limited-evidence guidance when scout dat
   assert.equal(artifact.recommendation, 'limited-evidence');
   assert.equal(artifact.evidence.tradeCount, 0);
   assert.equal(artifact.evidence.featureRowCount, 0);
+  assert.equal(artifact.evidence.hasCandidateSurface, false);
   assert.match(artifact.markdown, /Evidence quality/);
   assert.match(artifact.markdown, /No qualifying trade rows/);
   assert.match(artifact.markdown, /Threshold surfaces/);
+  assert.match(artifact.markdown, /\| candidate \| n\/a \| n\/a \| n\/a \| unknown \|/);
 });

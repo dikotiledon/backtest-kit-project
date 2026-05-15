@@ -135,6 +135,25 @@ test('shared and track-owned knob lists are exposed', () => {
   ]);
 });
 
+test('advertised autoresearch families expose track-owned knob lists', () => {
+  assert.deepEqual(trackOwnKnobKeys('supertrend-tuning'), [
+    'useSupertrendFilter',
+    'useSupertrendEntryConfirm',
+    'supertrendAtrLen',
+    'supertrendFactor',
+  ]);
+
+  assert.ok(trackOwnKnobKeys('ml-core-tuning').includes('neighborsCount'));
+  assert.ok(trackOwnKnobKeys('ml-core-tuning').includes('cap'));
+  assert.ok(trackOwnKnobKeys('ml-core-tuning').includes('sampleStride'));
+
+  assert.ok(trackOwnKnobKeys('fusion').includes('useFusionV4'));
+  assert.ok(trackOwnKnobKeys('fusion').includes('fusionV4LongAtrWeight'));
+  assert.ok(trackOwnKnobKeys('avwap-context').includes('avwapSwingPeriod'));
+  assert.ok(trackOwnKnobKeys('channel-context').includes('channelDetectLength'));
+  assert.ok(trackOwnKnobKeys('context-aggregator').includes('contextBoostValue'));
+});
+
 test('squeeze track emits plain patch metadata with shared and own keys', () => {
   assertTrackBatch({ trackId: 'squeeze-context', sourceFamily: 'squeeze' }, 'squeeze');
 });

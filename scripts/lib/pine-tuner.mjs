@@ -34,86 +34,41 @@ const SHARED_TRACK_KNOB_KEYS = [
   'trailActivateR',
 ];
 
-const TRACK_OWN_KNOB_KEYS = {
-  squeeze: [
-    'useSqueezeContext',
-    'squeezeLength',
-    'squeezeBbMult',
-    'squeezeKcMult',
-    'squeezeReleaseFreshBars',
-    'squeezeBoostValue',
-  ],
-  divergence: [
-    'useDivergenceContext',
-    'divRsiLen',
-    'divPivotLeft',
-    'divPivotRight',
-    'divFreshBars',
-    'divLongBoostValue',
-    'divShortBoostValue',
-    'divCautionPenaltyValue',
-  ],
-  'exit-state': [
-    'useFailedFollowThroughTighten',
-    'followThroughBars',
-    'followThroughMinProgressAtr',
-    'followThroughTightenTrailAtrMult',
-    'useTimeStop',
-    'timeStopBars',
-    'timeStopMinUnrealizedAtr',
-    'useContextCautionTighten',
-    'contextCautionDelta',
-    'contextCautionTrailAtrMult',
-    'usePartialDerisk',
-    'partialDeriskAtR',
-    'partialDeriskClosePct',
-    'usePostEntrySqueezeCollapseTighten',
-    'postEntrySqueezeCollapseBars',
-    'postEntrySqueezeCollapseTrailAtrMult',
-    'useAdverseDivergenceTighten',
-    'adverseDivergenceBars',
-    'adverseDivergenceTrailAtrMult',
-  ],
-  asymmetry: [
-    'useRegimeFilter',
-    'regimeThreshold',
-    'adxThreshold',
-  ],
-};
+const SUPERTREND_CONTEXT_KEYS = [
+  'useSupertrendFilter',
+  'useSupertrendEntryConfirm',
+  'supertrendAtrLen',
+  'supertrendFactor',
+];
 
-function trackFamilyAliases(name = '') {
-  const normalized = String(name || '').toLowerCase();
-  if (normalized.includes('squeeze')) return 'squeeze';
-  if (normalized.includes('divergence')) return 'divergence';
-  if (normalized.includes('exit')) return 'exit-state';
-  if (normalized.includes('asym')) return 'asymmetry';
-  return normalized;
-}
+const ML_CORE_KEYS = [
+  'neighborsCount',
+  'cap',
+  'sampleStride',
+];
 
-export function sharedKnobKeys() {
-  return [...SHARED_TRACK_KNOB_KEYS];
-}
-
-export function trackOwnKnobKeys(trackId = '') {
-  return [...(TRACK_OWN_KNOB_KEYS[trackFamilyAliases(trackId)] || [])];
-}
-
-export function cartesianProduct(grid) {
-  const entries = Object.entries(grid);
-  if (!entries.length) return [{}];
-
-  let combos = [{}];
-  for (const [key, values] of entries) {
-    const next = [];
-    for (const combo of combos) {
-      for (const value of values) {
-        next.push({ ...combo, [key]: value });
-      }
-    }
-    combos = next;
-  }
-  return combos;
-}
+const FUSION_CONTEXT_KEYS = [
+  'useSignalFusion',
+  'minFusionScore',
+  'useAtrFlipConfirm',
+  'use3LineConfirm',
+  'useEngulfingConfirm',
+  'useEmaCrossConfirm',
+  'useFusionV2',
+  'fusionBonusPerSignal',
+  'fusionMaxBonus',
+  'useFusionV3',
+  'fusionPenaltyPerMissing',
+  'useFusionV4',
+  'fusionV4MinAbsPrediction',
+  'fusionV4MaxAbsPrediction',
+  'fusionV4LongAtrWeight',
+  'fusionV4LongEngulfWeight',
+  'fusionV4LongEmaWeight',
+  'fusionV4ShortAtrWeight',
+  'fusionV4ShortEngulfWeight',
+  'fusionV4ShortEmaWeight',
+];
 
 const AVWAP_CONTEXT_KEYS = [
   'avwapSwingPeriod',
@@ -173,6 +128,83 @@ const EXIT_STATE_HYPOTHESIS_KEYS = [
   'usePostEntrySqueezeCollapseTighten',
   'useAdverseDivergenceTighten',
 ];
+
+const TRACK_OWN_KNOB_KEYS = {
+  squeeze: SQUEEZE_CONTEXT_KEYS,
+  divergence: DIVERGENCE_CONTEXT_KEYS,
+  'exit-state': [
+    'useFailedFollowThroughTighten',
+    'followThroughBars',
+    'followThroughMinProgressAtr',
+    'followThroughTightenTrailAtrMult',
+    'useTimeStop',
+    'timeStopBars',
+    'timeStopMinUnrealizedAtr',
+    'useContextCautionTighten',
+    'contextCautionDelta',
+    'contextCautionTrailAtrMult',
+    'usePartialDerisk',
+    'partialDeriskAtR',
+    'partialDeriskClosePct',
+    'usePostEntrySqueezeCollapseTighten',
+    'postEntrySqueezeCollapseBars',
+    'postEntrySqueezeCollapseTrailAtrMult',
+    'useAdverseDivergenceTighten',
+    'adverseDivergenceBars',
+    'adverseDivergenceTrailAtrMult',
+  ],
+  asymmetry: [
+    'useRegimeFilter',
+    'regimeThreshold',
+    'adxThreshold',
+  ],
+  supertrend: SUPERTREND_CONTEXT_KEYS,
+  'ml-core': ML_CORE_KEYS,
+  fusion: FUSION_CONTEXT_KEYS,
+  'avwap-context': AVWAP_CONTEXT_KEYS,
+  'channel-context': CHANNEL_CONTEXT_KEYS,
+  'context-aggregator': CONTEXT_AGGREGATOR_KEYS,
+};
+
+function trackFamilyAliases(name = '') {
+  const normalized = String(name || '').toLowerCase();
+  if (normalized.includes('squeeze')) return 'squeeze';
+  if (normalized.includes('divergence')) return 'divergence';
+  if (normalized.includes('exit')) return 'exit-state';
+  if (normalized.includes('asym')) return 'asymmetry';
+  if (normalized.includes('supertrend')) return 'supertrend';
+  if (normalized.includes('ml-core') || normalized.includes('mlcore')) return 'ml-core';
+  if (normalized.includes('fusion')) return 'fusion';
+  if (normalized.includes('avwap')) return 'avwap-context';
+  if (normalized.includes('channel')) return 'channel-context';
+  if (normalized.includes('aggregator')) return 'context-aggregator';
+  return normalized;
+}
+
+export function sharedKnobKeys() {
+  return [...SHARED_TRACK_KNOB_KEYS];
+}
+
+export function trackOwnKnobKeys(trackId = '') {
+  return [...(TRACK_OWN_KNOB_KEYS[trackFamilyAliases(trackId)] || [])];
+}
+
+export function cartesianProduct(grid) {
+  const entries = Object.entries(grid);
+  if (!entries.length) return [{}];
+
+  let combos = [{}];
+  for (const [key, values] of entries) {
+    const next = [];
+    for (const combo of combos) {
+      for (const value of values) {
+        next.push({ ...combo, [key]: value });
+      }
+    }
+    combos = next;
+  }
+  return combos;
+}
 
 function deleteKeys(target, keys) {
   for (const key of keys) {

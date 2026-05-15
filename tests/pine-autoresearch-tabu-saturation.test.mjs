@@ -223,6 +223,30 @@ test('tabu saturation recovers via lowEmissionStreak escalation and tabu aging',
       (cycle5.manifest.searchEfficiency?.emittedVariantCount ?? 0) > (cycle4.manifest.searchEfficiency?.emittedVariantCount ?? 0),
       'cycle 5 emitted count should increase after tabu aging + pool widening',
     );
+
+    const recoveryManifest = cycle5.manifest;
+    assert.equal(
+      recoveryManifest.searchEfficiency?.allCandidatesTabu,
+      false,
+      'recovery cycle should prove generation is no longer fully tabu-pruned',
+    );
+    assert.ok(
+      (recoveryManifest.searchEfficiency?.emittedVariantCount ?? 0) > 0,
+      'recovery cycle should emit a non-empty executable variant batch',
+    );
+    assert.ok(
+      Array.isArray(recoveryManifest.searchPlan?.variants),
+      'recovery manifest should expose concrete emitted search variants',
+    );
+    assert.ok(
+      recoveryManifest.searchPlan.variants.length > 0,
+      'recovery manifest should include at least one emitted variant',
+    );
+    assert.equal(
+      recoveryManifest.stagnationReason,
+      'lowEmissionStreak',
+      'recovery cycle should carry the concrete low-emission recovery reason',
+    );
   } finally {
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }

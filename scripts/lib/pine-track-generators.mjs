@@ -20,6 +20,7 @@ function resolveTrackFamily(track = {}) {
   const candidate = sourceFamily || trackId;
   if (candidate.includes('squeeze')) return 'squeeze';
   if (candidate.includes('divergence')) return 'divergence';
+  if (candidate.includes('context-exit-shaping')) return 'context-exit-shaping';
   if (candidate.includes('exit')) return 'exit-state';
   if (candidate.includes('asym')) return 'asymmetry';
   if (candidate.includes('incumbent')) return 'incumbent-local';

@@ -142,16 +142,104 @@ test('advertised autoresearch families expose track-owned knob lists', () => {
     'supertrendAtrLen',
     'supertrendFactor',
   ]);
+  assert.deepEqual(trackOwnKnobKeys('ml-core-tuning'), [
+    'h',
+    'r',
+    'x',
+    'lag',
+    'neighborsCount',
+  ]);
+  assert.deepEqual(trackOwnKnobKeys('fusion'), [
+    'useSignalFusion',
+    'minFusionScore',
+    'useAtrFlipConfirm',
+    'use3LineConfirm',
+    'useEngulfingConfirm',
+    'useEmaCrossConfirm',
+    'useFusionV2',
+    'fusionBonusPerSignal',
+    'fusionMaxBonus',
+    'useFusionV3',
+    'fusionPenaltyPerMissing',
+    'useFusionV4',
+    'fusionV4MinAbsPrediction',
+    'fusionV4MaxAbsPrediction',
+    'fusionV4LongAtrWeight',
+    'fusionV4LongEngulfWeight',
+    'fusionV4LongEmaWeight',
+    'fusionV4ShortAtrWeight',
+    'fusionV4ShortEngulfWeight',
+    'fusionV4ShortEmaWeight',
+  ]);
+  assert.deepEqual(trackOwnKnobKeys('avwap-context'), [
+    'useAvwapContext',
+    'avwapSwingPeriod',
+    'avwapReclaimFreshBars',
+    'avwapMaxDistanceAtr',
+    'avwapMaxAnchorAge',
+    'avwapRequireReclaimForEntry',
+  ]);
+  assert.deepEqual(trackOwnKnobKeys('channel-context'), [
+    'useChannelContext',
+    'channelDetectLength',
+    'channelCompressionThreshold',
+    'channelBreakoutFreshBars',
+    'channelEnableRetest',
+    'channelRetestFreshBars',
+    'channelHostileBlocksEntry',
+  ]);
+  assert.deepEqual(trackOwnKnobKeys('context-aggregator'), [
+    'useContextAggregator',
+    'contextStrictRequireChannel',
+    'contextBoostAddsToStrength',
+    'contextBoostValue',
+    'contextHostileBlocksEntry',
+  ]);
+  assert.deepEqual(trackOwnKnobKeys('context-exit-shaping'), [
+    'useContextExitShaping',
+    'contextTightenTrailOnCaution',
+    'contextTrailTightenFactor',
+    'contextAllowEarlySignalExit',
+  ]);
+});
 
-  assert.ok(trackOwnKnobKeys('ml-core-tuning').includes('neighborsCount'));
-  assert.ok(trackOwnKnobKeys('ml-core-tuning').includes('cap'));
-  assert.ok(trackOwnKnobKeys('ml-core-tuning').includes('sampleStride'));
-
-  assert.ok(trackOwnKnobKeys('fusion').includes('useFusionV4'));
-  assert.ok(trackOwnKnobKeys('fusion').includes('fusionV4LongAtrWeight'));
-  assert.ok(trackOwnKnobKeys('avwap-context').includes('avwapSwingPeriod'));
-  assert.ok(trackOwnKnobKeys('channel-context').includes('channelDetectLength'));
-  assert.ok(trackOwnKnobKeys('context-aggregator').includes('contextBoostValue'));
+test('advertised autoresearch families validate representative track-owned patches', () => {
+  assert.deepEqual(validateTrackPatch({
+    trackId: 'supertrend-tuning',
+    patch: { useSupertrendFilter: true, supertrendAtrLen: 14 },
+  }), { useSupertrendFilter: true, supertrendAtrLen: 14 });
+  assert.deepEqual(validateTrackPatch({
+    trackId: 'ml-core-tuning',
+    patch: { h: 5, r: 2, x: 8, lag: 1, neighborsCount: 32 },
+  }), { h: 5, r: 2, x: 8, lag: 1, neighborsCount: 32 });
+  assert.throws(
+    () => validateTrackPatch({ trackId: 'ml-core-tuning', patch: { cap: 10 } }),
+    /cap/,
+  );
+  assert.throws(
+    () => validateTrackPatch({ trackId: 'ml-core-tuning', patch: { sampleStride: 2 } }),
+    /sampleStride/,
+  );
+  assert.deepEqual(validateTrackPatch({
+    trackId: 'fusion',
+    patch: { useFusionV4: true, fusionV4LongAtrWeight: -0.25 },
+  }), { useFusionV4: true, fusionV4LongAtrWeight: -0.25 });
+  assert.deepEqual(validateTrackPatch({
+    trackId: 'avwap-context',
+    patch: { useAvwapContext: true, avwapSwingPeriod: 34 },
+  }), { useAvwapContext: true, avwapSwingPeriod: 34 });
+  assert.deepEqual(validateTrackPatch({
+    trackId: 'channel-context',
+    patch: { useChannelContext: true, channelDetectLength: 18 },
+  }), { useChannelContext: true, channelDetectLength: 18 });
+  assert.deepEqual(validateTrackPatch({
+    trackId: 'context-aggregator',
+    patch: { useContextAggregator: true, contextBoostValue: 0.5 },
+  }), { useContextAggregator: true, contextBoostValue: 0.5 });
+  assert.deepEqual(validateTrackPatch({
+    trackId: 'context-exit-shaping',
+    patch: { useContextExitShaping: true, contextTrailTightenFactor: 0.75 },
+  }), { useContextExitShaping: true, contextTrailTightenFactor: 0.75 });
 });
 
 test('squeeze track emits plain patch metadata with shared and own keys', () => {

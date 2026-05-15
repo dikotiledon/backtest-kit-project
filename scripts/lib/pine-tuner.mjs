@@ -42,9 +42,11 @@ const SUPERTREND_CONTEXT_KEYS = [
 ];
 
 const ML_CORE_KEYS = [
+  'h',
+  'r',
+  'x',
+  'lag',
   'neighborsCount',
-  'cap',
-  'sampleStride',
 ];
 
 const FUSION_CONTEXT_KEYS = [
@@ -71,6 +73,7 @@ const FUSION_CONTEXT_KEYS = [
 ];
 
 const AVWAP_CONTEXT_KEYS = [
+  'useAvwapContext',
   'avwapSwingPeriod',
   'avwapReclaimFreshBars',
   'avwapMaxDistanceAtr',
@@ -79,6 +82,7 @@ const AVWAP_CONTEXT_KEYS = [
 ];
 
 const CHANNEL_CONTEXT_KEYS = [
+  'useChannelContext',
   'channelDetectLength',
   'channelCompressionThreshold',
   'channelBreakoutFreshBars',
@@ -88,6 +92,7 @@ const CHANNEL_CONTEXT_KEYS = [
 ];
 
 const CONTEXT_AGGREGATOR_KEYS = [
+  'useContextAggregator',
   'contextStrictRequireChannel',
   'contextBoostAddsToStrength',
   'contextBoostValue',
@@ -95,6 +100,7 @@ const CONTEXT_AGGREGATOR_KEYS = [
 ];
 
 const CONTEXT_EXIT_SHAPING_KEYS = [
+  'useContextExitShaping',
   'contextTightenTrailOnCaution',
   'contextTrailTightenFactor',
   'contextAllowEarlySignalExit',
@@ -164,12 +170,14 @@ const TRACK_OWN_KNOB_KEYS = {
   'avwap-context': AVWAP_CONTEXT_KEYS,
   'channel-context': CHANNEL_CONTEXT_KEYS,
   'context-aggregator': CONTEXT_AGGREGATOR_KEYS,
+  'context-exit-shaping': CONTEXT_EXIT_SHAPING_KEYS,
 };
 
 function trackFamilyAliases(name = '') {
   const normalized = String(name || '').toLowerCase();
   if (normalized.includes('squeeze')) return 'squeeze';
   if (normalized.includes('divergence')) return 'divergence';
+  if (normalized.includes('context-exit-shaping')) return 'context-exit-shaping';
   if (normalized.includes('exit')) return 'exit-state';
   if (normalized.includes('asym')) return 'asymmetry';
   if (normalized.includes('supertrend')) return 'supertrend';
@@ -178,6 +186,7 @@ function trackFamilyAliases(name = '') {
   if (normalized.includes('avwap')) return 'avwap-context';
   if (normalized.includes('channel')) return 'channel-context';
   if (normalized.includes('aggregator')) return 'context-aggregator';
+  if (normalized.includes('context') && normalized.includes('shaping')) return 'context-exit-shaping';
   return normalized;
 }
 

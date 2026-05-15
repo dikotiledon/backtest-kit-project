@@ -23,6 +23,12 @@ function resolveTrackFamily(track = {}) {
   if (candidate.includes('context-exit-shaping') || (candidate.includes('context') && candidate.includes('exit') && candidate.includes('shaping'))) return 'context-exit-shaping';
   if (candidate.includes('exit')) return 'exit-state';
   if (candidate.includes('asym')) return 'asymmetry';
+  if (candidate.includes('supertrend')) return 'supertrend';
+  if (candidate.includes('ml-core') || candidate.includes('mlcore')) return 'ml-core';
+  if (candidate.includes('fusion')) return 'fusion';
+  if (candidate.includes('avwap')) return 'avwap-context';
+  if (candidate.includes('channel')) return 'channel-context';
+  if (candidate.includes('aggregator')) return 'context-aggregator';
   if (candidate.includes('incumbent')) return 'incumbent-local';
   return candidate || 'incumbent-local';
 }
@@ -136,6 +142,77 @@ function divergencePatches(base) {
   ];
 }
 
+function supertrendPatches(base) {
+  return [
+    {
+      useSupertrendFilter: true,
+      supertrendAtrLen: lowerBound((base.supertrendAtrLen ?? 10) - 3, 1),
+      supertrendFactor: Math.max(0.1, numeric(base.supertrendFactor ?? 1.5) - 0.3),
+    },
+    {
+      useSupertrendFilter: true,
+      supertrendAtrLen: numeric(base.supertrendAtrLen ?? 10) + 4,
+      supertrendFactor: numeric(base.supertrendFactor ?? 1.5) + 0.5,
+    },
+    {
+      useSupertrendFilter: true,
+      useSupertrendEntryConfirm: !(base.useSupertrendEntryConfirm === true),
+      supertrendFactor: Math.max(0.1, numeric(base.supertrendFactor ?? 1.5) + 0.2),
+    },
+  ];
+}
+
+function mlCorePatches(base) {
+  return [
+    { neighborsCount: lowerBound((base.neighborsCount ?? 32) - 8, 1) },
+    { neighborsCount: numeric(base.neighborsCount ?? 32) + 16 },
+    { h: lowerBound((base.h ?? 8) - 2, 1) },
+    { h: numeric(base.h ?? 8) + 2 },
+    { r: Math.max(0.1, numeric(base.r ?? 8) - 2) },
+    { x: lowerBound((base.x ?? 25) - 5, 1) },
+    { lag: lowerBound((base.lag ?? 2) + 1, 1) },
+  ];
+}
+
+function fusionPatches(base) {
+  return [
+    { useSignalFusion: true, minFusionScore: lowerBound((base.minFusionScore ?? 1) + 1, 0) },
+    { useFusionV4: true, fusionV4MinAbsPrediction: Math.max(0, numeric(base.fusionV4MinAbsPrediction ?? 2) - 0.5) },
+    { useFusionV4: true, fusionV4MaxAbsPrediction: numeric(base.fusionV4MaxAbsPrediction ?? 4) + 0.5 },
+    {
+      useFusionV4: true,
+      fusionV4LongAtrWeight: numeric(base.fusionV4LongAtrWeight ?? -0.25) - 0.15,
+      fusionV4ShortAtrWeight: numeric(base.fusionV4ShortAtrWeight ?? -0.5) - 0.15,
+    },
+    {
+      useFusionV4: true,
+      fusionV4LongEngulfWeight: numeric(base.fusionV4LongEngulfWeight ?? -0.25) + 0.15,
+      fusionV4ShortEngulfWeight: numeric(base.fusionV4ShortEngulfWeight ?? -0.1) + 0.15,
+    },
+    {
+      useEmaCrossConfirm: true,
+      fusionV4LongEmaWeight: numeric(base.fusionV4LongEmaWeight ?? 0) + 0.15,
+      fusionV4ShortEmaWeight: numeric(base.fusionV4ShortEmaWeight ?? 0) + 0.15,
+    },
+  ];
+}
+
+function avwapContextPatches(base) {
+  return [
+    { useAvwapContext: true, avwapSwingPeriod: lowerBound((base.avwapSwingPeriod ?? 50) - 20, 2) },
+    { useAvwapContext: true, avwapSwingPeriod: numeric(base.avwapSwingPeriod ?? 50) + 20 },
+    { useAvwapContext: !(base.useAvwapContext === true), avwapSwingPeriod: lowerBound((base.avwapSwingPeriod ?? 50) - 8, 2) },
+  ];
+}
+
+function channelContextPatches(base) {
+  return [
+    { useChannelContext: true, channelDetectLength: lowerBound((base.channelDetectLength ?? 18) - 6, 2) },
+    { useChannelContext: true, channelDetectLength: numeric(base.channelDetectLength ?? 18) + 6 },
+    { useChannelContext: !(base.useChannelContext === true), channelDetectLength: lowerBound((base.channelDetectLength ?? 18) + 2, 2) },
+  ];
+}
+
 function exitStatePatches(base) {
   return [
     {
@@ -197,6 +274,11 @@ function incumbentLocalPatches(base) {
 function getPatchPool(family, base) {
   if (family === 'squeeze') return squeezePatches(base);
   if (family === 'divergence') return divergencePatches(base);
+  if (family === 'supertrend') return supertrendPatches(base);
+  if (family === 'ml-core') return mlCorePatches(base);
+  if (family === 'fusion') return fusionPatches(base);
+  if (family === 'avwap-context') return avwapContextPatches(base);
+  if (family === 'channel-context') return channelContextPatches(base);
   if (family === 'exit-state') return exitStatePatches(base);
   if (family === 'asymmetry') return asymmetryPatches(base);
   return incumbentLocalPatches(base);
@@ -239,6 +321,11 @@ function getFallbackPatchPool(families = [], base = {}, { interleave = false } =
       { minPredSum: numeric(base.minPredSum ?? 2) + 0.25, tpAtrMult: numeric(base.tpAtrMult ?? 2.5) + 0.5 },
       { minBarsBetween: numeric(base.minBarsBetween ?? 2) + 1, trailActivateR: numeric(base.trailActivateR ?? 0.5) + 0.5 },
     ],
+    'ml-core': mlCorePatches(base),
+    fusion: fusionPatches(base),
+    supertrend: supertrendPatches(base),
+    'avwap-context': avwapContextPatches(base),
+    'channel-context': channelContextPatches(base),
   };
 
   const familyPools = normalizedFamilies
@@ -376,7 +463,7 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
       const scaledPatch = scalePatch(base, clone(rawPatch), fallbackTemperature);
       let patch;
       try {
-        patch = validateTrackPatch({ trackId: 'incumbent-local', patch: scaledPatch });
+        patch = validateTrackPatch({ trackId: fallbackFamily, patch: scaledPatch });
       } catch {
         continue;
       }
@@ -388,7 +475,7 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
       }
       tabuSet.add(fingerprint);
       fallbackCandidates.push(buildMetadata({
-        trackId: 'incumbent-local',
+        trackId: fallbackFamily,
         family: fallbackFamily,
         index: fallbackCandidates.length,
         patch,

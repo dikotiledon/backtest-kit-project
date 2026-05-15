@@ -44,6 +44,38 @@ const incumbent = {
   adxThreshold: 20,
 };
 
+const expandedIncumbent = {
+  ...incumbent,
+  h: 8,
+  r: 8,
+  x: 25,
+  lag: 2,
+  neighborsCount: 32,
+  useSignalFusion: true,
+  minFusionScore: 1,
+  useAtrFlipConfirm: true,
+  use3LineConfirm: false,
+  useEngulfingConfirm: true,
+  useEmaCrossConfirm: false,
+  useFusionV4: true,
+  fusionV4MinAbsPrediction: 2,
+  fusionV4MaxAbsPrediction: 4,
+  fusionV4LongAtrWeight: -0.25,
+  fusionV4LongEngulfWeight: -0.25,
+  fusionV4LongEmaWeight: 0,
+  fusionV4ShortAtrWeight: -0.5,
+  fusionV4ShortEngulfWeight: -0.1,
+  fusionV4ShortEmaWeight: 0,
+  useSupertrendFilter: true,
+  useSupertrendEntryConfirm: false,
+  supertrendAtrLen: 10,
+  supertrendFactor: 1.5,
+  useAvwapContext: false,
+  avwapSwingPeriod: 50,
+  useChannelContext: false,
+  channelDetectLength: 18,
+};
+
 function stableValue(value) {
   if (Array.isArray(value)) return value.map((item) => stableValue(item));
   if (value && typeof value === 'object') {
@@ -250,6 +282,63 @@ test('advertised autoresearch families validate representative track-owned patch
     () => validateTrackPatch({ trackId: 'context-exit-shaping', patch: { contextTightenTrailOnCaution: true } }),
     /contextTightenTrailOnCaution/,
   );
+});
+
+test('supertrend track emits actual supertrend mutations', () => {
+  const batch = buildTrackCandidateBatch({
+    track: { trackId: 'supertrend-tuning', sourceFamily: 'supertrend' },
+    incumbent: expandedIncumbent,
+    maxConfigs: 4,
+    historyEvents: [],
+    budgetPolicy: {},
+  });
+
+  assert.equal(batch.length > 0, true);
+  assert.equal(batch.every((item) => item.family === 'supertrend'), true);
+  assert.equal(batch.some((item) => Object.hasOwn(item.patch, 'supertrendFactor')), true);
+  assert.equal(batch.some((item) => Object.hasOwn(item.patch, 'supertrendAtrLen')), true);
+  assert.ok(batch.every((item) => item.ownKeys.some((key) => key.startsWith('supertrend') || key.startsWith('useSupertrend'))));
+});
+
+test('advertised fallback families emit non-empty family-specific candidates under stagnation', () => {
+  const batch = buildTrackCandidateBatch({
+    track: { trackId: 'supertrend-tuning', sourceFamily: 'supertrend' },
+    incumbent: expandedIncumbent,
+    maxConfigs: 24,
+    historyEvents: [],
+    budgetPolicy: {
+      annealing: { enabled: true, baseTemperature: 1, growthFactor: 1, maxTemperature: 8 },
+      selfLoopEscape: {
+        enabled: true,
+        activateAfter: 1,
+        includeFallback: true,
+        fallbackFamilies: ['signal', 'risk'],
+        stagnationFallbackFamilies: ['ml-core', 'fusion', 'supertrend', 'avwap-context', 'channel-context'],
+        minFallbackConfigs: 12,
+        temperatureBoost: 1.5,
+        stagnationTemperatureBoost: 3,
+      },
+    },
+    schedulerState: { noNewCandidateStreak: 3, stagnationLevel: 2, tabuRejectedFingerprints: [] },
+  });
+
+  const fallback = batch.filter((item) => item.lane === 'self-loop-fallback');
+  const byFamily = new Map(fallback.map((item) => [item.family, item]));
+  const expectedOwnKeyByFamily = {
+    'ml-core': new Set(['h', 'r', 'x', 'lag', 'neighborsCount']),
+    fusion: new Set(trackOwnKnobKeys('fusion')),
+    supertrend: new Set(trackOwnKnobKeys('supertrend')),
+    'avwap-context': new Set(trackOwnKnobKeys('avwap-context')),
+    'channel-context': new Set(trackOwnKnobKeys('channel-context')),
+  };
+
+  for (const [family, ownKeys] of Object.entries(expectedOwnKeyByFamily)) {
+    const item = byFamily.get(family);
+    assert.ok(item, `${family} fallback should emit at least one candidate`);
+    assert.equal(item.family, family);
+    assert.equal(item.patch && Object.keys(item.patch).length > 0, true);
+    assert.equal(item.ownKeys.some((key) => ownKeys.has(key)), true, `${family} fallback should mutate a ${family} key`);
+  }
 });
 
 test('squeeze track emits plain patch metadata with shared and own keys', () => {

@@ -3462,7 +3462,7 @@ export async function runScout(config, dependencies = {}) {
   const matrixCandidates = [];
   const matrixEvaluationCache = createEvaluationCache();
   for (const candidate of paretoShortlist.slice(0, trackedConfig.searchPolicy.matrixCandidateLimit)) {
-    const { labResults, matrixDecision, holdoutVerdict } = await evaluateMatrix(trackedConfig, runId, championState, candidate, {
+    const { labResults, matrixDecision, holdoutVerdict, diagnosticShadowResults } = await evaluateMatrix(trackedConfig, runId, championState, candidate, {
       evaluationCache: matrixEvaluationCache,
       ...(dependencies.evaluateConfigOnLab ? { evaluateConfigOnLab: dependencies.evaluateConfigOnLab } : {}),
     });
@@ -3472,7 +3472,7 @@ export async function runScout(config, dependencies = {}) {
       aggregateProfitFactorDelta: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.profitFactorDelta || 0), 0),
       aggregateDrawdownDeltaPct: labResults.reduce((sum, item) => sum + (item.decision.comparisons?.drawdownDeltaPct || 0), 0),
     };
-    matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, holdoutVerdict, robustness, expectancy: labResults[0]?.decision?.expectancy || null });
+    matrixCandidates.push({ challenger: candidate, labResults, matrixDecision, holdoutVerdict, diagnosticShadowResults, robustness, expectancy: labResults[0]?.decision?.expectancy || null });
   }
 
   const selectedCandidate = selectChangedMatrixCandidate({ candidates: matrixCandidates, championState });

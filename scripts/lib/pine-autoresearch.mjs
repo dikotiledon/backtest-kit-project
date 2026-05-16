@@ -1346,6 +1346,59 @@ export function filterRequeueCandidates(entries) {
   });
 }
 
+export function buildCycleSummary(manifest = {}) {
+  const eff = manifest.searchEfficiency || {};
+  const emitted = Number(eff.emittedVariantCount) || 0;
+  const allTabu = eff.allCandidatesTabu === true;
+  const decision = manifest.matrixDecision || {};
+  const failedGates = decision.failedGates || [];
+  const diag = decision.gateDiagnostics?.primary || {};
+  const escape = manifest.stagnationEscape || {};
+  const sweep = manifest.primarySweep || {};
+
+  const outcome = emitted === 0 && (sweep.skipped === true || allTabu)
+    ? 'no-variants'
+    : decision.recommendation === 'promote'
+      ? 'promote'
+      : manifest.noNewCandidate === true
+        ? 'steady-state'
+        : 'hold';
+
+  const traceLines = [];
+  traceLines.push(`track: ${manifest.activeTrackId || 'none'}`);
+  traceLines.push(`source: ${manifest.searchBatchSource || 'unknown'}`);
+  traceLines.push(`emitted: ${emitted}, allCandidatesTabu: ${allTabu}`);
+  if (eff.exhaustedFamilies?.length) {
+    traceLines.push(`exhausted: ${eff.exhaustedFamilies.join(', ')}`);
+  }
+  if (manifest.stagnationLevel > 0) {
+    traceLines.push(`stagnation: level ${manifest.stagnationLevel}, escape: ${escape.mode || 'none'} (${escape.reason || 'n/a'})`);
+  }
+  if (sweep.skipped) {
+    traceLines.push(`sweep: skipped (${sweep.skipReason || 'unknown'})`);
+  } else if (sweep.best) {
+    traceLines.push(`sweep: ${sweep.totalCombos || 0} combos, best score ${sweep.best.score}`);
+  }
+  if (failedGates.length > 0) {
+    traceLines.push(`gates failed: ${failedGates.join(', ')}`);
+  }
+  for (const [key, value] of Object.entries(diag)) {
+    if (value !== null && value !== undefined) {
+      traceLines.push(`${key}: ${value}`);
+    }
+  }
+
+  return {
+    outcome,
+    variantsGenerated: emitted,
+    bestCandidateScore: manifest.challenger?.score ?? sweep.best?.score ?? null,
+    blockedBy: failedGates[0] || null,
+    stagnationLevel: manifest.stagnationLevel ?? 0,
+    escapeMode: escape.mode || null,
+    trace: traceLines.join(' | '),
+  };
+}
+
 export {
   buildRegimeAnalysisArtifact,
   buildRegimeAnalysisMarkdown,

@@ -24,6 +24,7 @@ import {
   selectRobustMatrixCandidate,
   shortConfigLabel,
   summarizeDigestAnnouncement,
+  buildCycleSummary,
 } from '../scripts/lib/pine-autoresearch.mjs';
 import {
   buildChampionConfigFingerprint,
@@ -7872,6 +7873,58 @@ test('decideAutoresearchOutcome still blocks ROI regression when score delta is 
 
   assert.equal(result.recommendation, 'hold');
   assert.ok(result.failedGates.includes('roi'));
+});
+
+test('buildCycleSummary includes decision trace for hold with gate diagnostics', () => {
+  const manifest = {
+    runId: 'test-run-001',
+    activeTrackId: 'supertrend-tuning',
+    searchBatchSource: 'track:supertrend-tuning',
+    searchEfficiency: { variantCount: 12, emittedVariantCount: 8, allCandidatesTabu: false, exhaustedFamilies: [] },
+    stagnationLevel: 1,
+    stagnationEscape: { mode: 'none', reason: 'not-eligible' },
+    primarySweep: { skipped: false, totalCombos: 8, best: { score: 160 } },
+    matrixDecision: {
+      recommendation: 'hold',
+      failedGates: ['primaryPromote'],
+      gateDiagnostics: { primary: { scoreDelta: 7.53, roiDeltaPct: -4.87 } },
+    },
+    challenger: { configId: 'test-challenger', score: 160 },
+    champion: { configId: 'test-champion', score: 152.47 },
+    noNewCandidate: false,
+  };
+
+  const summary = buildCycleSummary(manifest);
+
+  assert.equal(summary.outcome, 'hold');
+  assert.equal(summary.variantsGenerated, 8);
+  assert.equal(summary.bestCandidateScore, 160);
+  assert.equal(summary.blockedBy, 'primaryPromote');
+  assert.equal(typeof summary.trace, 'string');
+  assert.ok(summary.trace.includes('roiDeltaPct: -4.87'));
+});
+
+test('buildCycleSummary handles zero-variant cycle', () => {
+  const manifest = {
+    runId: 'test-run-002',
+    activeTrackId: 'supertrend-tuning',
+    searchBatchSource: 'regime-fallback',
+    searchEfficiency: { variantCount: 1, emittedVariantCount: 0, allCandidatesTabu: true, exhaustedFamilies: ['signal', 'risk'] },
+    stagnationLevel: 3,
+    stagnationEscape: { mode: 'progressive-widen', reason: 'zero-emission-exhausted' },
+    primarySweep: { skipped: true, skipReason: 'no-variants-generated' },
+    matrixDecision: { recommendation: 'hold', failedGates: ['candidateChanged'] },
+    noNewCandidate: true,
+  };
+
+  const summary = buildCycleSummary(manifest);
+
+  assert.equal(summary.outcome, 'no-variants');
+  assert.equal(summary.variantsGenerated, 0);
+  assert.equal(summary.bestCandidateScore, null);
+  assert.equal(summary.stagnationLevel, 3);
+  assert.ok(summary.trace.includes('allCandidatesTabu'));
+  assert.ok(summary.trace.includes('progressive-widen'));
 });
 
 test('decideAutoresearchOutcome blocks extreme ROI regression even with high score delta', () => {

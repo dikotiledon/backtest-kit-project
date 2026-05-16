@@ -46,6 +46,7 @@ import {
   buildBlockedChallengerEntry,
   shouldRequeueBlockedChallenger,
   filterRequeueCandidates,
+  buildCycleSummary,
 } from './lib/pine-autoresearch.mjs';
 export { isManifestPromotionReady } from './lib/pine-autoresearch.mjs';
 import { stagePinnedDatasetForLab, validatePinnedCacheComplete } from './lib/pine-dataset.mjs';
@@ -3082,6 +3083,7 @@ export async function runScout(config, dependencies = {}) {
         entryInvariance,
       });
       const finalOfflineManifest = withDuration(offlineManifest);
+      finalOfflineManifest.cycleSummary = buildCycleSummary(finalOfflineManifest);
       const finalizedArtifact = await finalizeAutoresearchManifest({
         root: trackedConfig.researchRoot,
         manifest: finalOfflineManifest,
@@ -3308,6 +3310,7 @@ export async function runScout(config, dependencies = {}) {
     });
     await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
     const finalNoLaneManifest = applySchedulerStateToManifest(withDuration(noLaneManifest), updatedSchedulerState);
+    finalNoLaneManifest.cycleSummary = buildCycleSummary(finalNoLaneManifest);
     const finalizedArtifact = await finalizeAutoresearchManifest({
       root: trackedConfig.researchRoot,
       manifest: finalNoLaneManifest,
@@ -3380,6 +3383,7 @@ export async function runScout(config, dependencies = {}) {
     });
     await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
     const finalExhaustedManifest = applySchedulerStateToManifest(withDuration(exhaustedManifest), updatedSchedulerState);
+    finalExhaustedManifest.cycleSummary = buildCycleSummary(finalExhaustedManifest);
     const finalizedArtifact = await finalizeAutoresearchManifest({
       root: trackedConfig.researchRoot,
       manifest: finalExhaustedManifest,
@@ -3586,6 +3590,7 @@ export async function runScout(config, dependencies = {}) {
   }
 
   const finalManifest = applySchedulerStateToManifest(withDuration(manifest), updatedSchedulerState);
+  finalManifest.cycleSummary = buildCycleSummary(finalManifest);
 
   const finalizedArtifact = await finalizeAutoresearchManifest({
     root: trackedConfig.researchRoot,

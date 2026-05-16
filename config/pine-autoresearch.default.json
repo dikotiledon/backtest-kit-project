@@ -57,6 +57,10 @@
       ],
       "stagnationTemperatureBoost": 4
     },
+    "gateAwareFilter": {
+      "enabled": true,
+      "slAtrMultMinRatio": 0.5
+    },
     "annealing": {
       "enabled": true,
       "baseTemperature": 0.4,

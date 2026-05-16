@@ -517,6 +517,12 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
   const limit = Math.max(0, Number(maxConfigs) || 0);
   if (limit === 0) return [];
 
+  // Gate-aware filter config
+  const gateAwareFilter = budgetPolicy?.searchPolicy?.gateAwareFilter || budgetPolicy?.gateAwareFilter || {};
+  const gateAwareEnabled = gateAwareFilter.enabled === true;
+  const slAtrMultMinRatio = Number(gateAwareFilter.slAtrMultMinRatio) || 0.5;
+  const baseSlAtrMult = Number(base.slAtrMult) || 0;
+
   const pool = getPatchPool(family, base);
   const offset = countCycles(historyEvents) % Math.max(pool.length, 1);
   const batch = [];
@@ -562,6 +568,13 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
     const patch = scalePatch(base, rawPatch, temperature);
     validateTrackPatch({ trackId, patch });
     const config = applyPatch(base, patch);
+    // Gate-aware filter: skip variants that mechanically violate promotion gates
+    if (gateAwareEnabled && baseSlAtrMult > 0) {
+      const candidateSlAtrMult = Number(config.slAtrMult);
+      if (Number.isFinite(candidateSlAtrMult) && candidateSlAtrMult < baseSlAtrMult * slAtrMultMinRatio) {
+        continue;
+      }
+    }
     const fingerprint = configFingerprint(config);
     if (tabuSet.has(fingerprint)) {
       tabuSkipped += 1;
@@ -611,6 +624,13 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
         continue;
       }
       const config = applyPatch(base, patch);
+      // Gate-aware filter: skip variants that mechanically violate promotion gates
+      if (gateAwareEnabled && baseSlAtrMult > 0) {
+        const candidateSlAtrMult = Number(config.slAtrMult);
+        if (Number.isFinite(candidateSlAtrMult) && candidateSlAtrMult < baseSlAtrMult * slAtrMultMinRatio) {
+          continue;
+        }
+      }
       const fingerprint = configFingerprint(config);
       if (tabuSet.has(fingerprint)) {
         fallbackSkipped += 1;
@@ -651,6 +671,13 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
       const patch = scalePatch(base, rawPatch, temperature);
       validateTrackPatch({ trackId: 'incumbent-local', patch });
       const config = applyPatch(base, patch);
+      // Gate-aware filter: skip variants that mechanically violate promotion gates
+      if (gateAwareEnabled && baseSlAtrMult > 0) {
+        const candidateSlAtrMult = Number(config.slAtrMult);
+        if (Number.isFinite(candidateSlAtrMult) && candidateSlAtrMult < baseSlAtrMult * slAtrMultMinRatio) {
+          continue;
+        }
+      }
       const fingerprint = configFingerprint(config);
       if (tabuSet.has(fingerprint)) {
         fallbackSkipped += 1;

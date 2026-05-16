@@ -1081,3 +1081,105 @@ test('track and fallback variants carry stable patch fingerprints', () => {
     assert.equal(typeof variant.metadata.patchFingerprint, 'string');
   }
 });
+
+test('buildTrackCandidateBatch skips variants that reduce slAtrMult below gate-aware floor', () => {
+  const base = {
+    slAtrMult: 0.5,
+    tpAtrMult: 6.85,
+    trailActivateR: 0.5,
+    trailAtrMult: 1,
+    minPredSum: 1.8,
+    minBarsBetween: 1,
+    useSqueezeContext: true,
+    squeezeLength: 20,
+    squeezeBbMult: 2.0,
+    squeezeKcMult: 1.5,
+    squeezeReleaseFreshBars: 4,
+    squeezeBoostValue: 0.25,
+  };
+
+  const result = buildTrackCandidateBatch({
+    track: { trackId: 'squeeze-context', sourceFamily: 'squeeze' },
+    incumbent: base,
+    maxConfigs: 12,
+    historyEvents: [],
+    budgetPolicy: {
+      selfLoopEscape: {
+        enabled: true,
+        includeFallback: true,
+        activateAfter: 1,
+        fallbackFamilies: ['signal', 'risk'],
+        minFallbackConfigs: 6,
+        temperatureBoost: 1.5,
+        stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion', 'supertrend', 'squeeze', 'divergence'],
+        stagnationTemperatureBoost: 4,
+      },
+      searchPolicy: {
+        gateAwareFilter: {
+          enabled: true,
+          slAtrMultMinRatio: 0.5,
+        },
+      },
+      annealing: { baseTemperature: 0.4, growthFactor: 1.8, maxTemperature: 16 },
+    },
+    schedulerState: { cycleIndex: 10, stagnationLevel: 3, noNewCandidateStreak: 3 },
+  });
+
+  // No variant should have slAtrMult < 0.25 (50% of champion's 0.5)
+  const violators = result.filter(v => {
+    const cfg = v.config || {};
+    return typeof cfg.slAtrMult === 'number' && cfg.slAtrMult < 0.25;
+  });
+
+  assert.equal(violators.length, 0,
+    `no variant should reduce slAtrMult below 50% of champion (0.25), found ${violators.length}`);
+});
+
+test('buildTrackCandidateBatch allows slAtrMult reduction when gateAwareFilter is disabled', () => {
+  const base = {
+    slAtrMult: 0.5,
+    tpAtrMult: 6.85,
+    trailActivateR: 0.5,
+    trailAtrMult: 1,
+    minPredSum: 1.8,
+    minBarsBetween: 1,
+    useSqueezeContext: true,
+    squeezeLength: 20,
+    squeezeBbMult: 2.0,
+    squeezeKcMult: 1.5,
+    squeezeReleaseFreshBars: 4,
+    squeezeBoostValue: 0.25,
+  };
+
+  const result = buildTrackCandidateBatch({
+    track: { trackId: 'squeeze-context', sourceFamily: 'squeeze' },
+    incumbent: base,
+    maxConfigs: 12,
+    historyEvents: [],
+    budgetPolicy: {
+      selfLoopEscape: {
+        enabled: true,
+        includeFallback: true,
+        activateAfter: 1,
+        fallbackFamilies: ['signal', 'risk'],
+        minFallbackConfigs: 6,
+        temperatureBoost: 1.5,
+        stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion', 'supertrend', 'squeeze', 'divergence'],
+        stagnationTemperatureBoost: 4,
+      },
+      searchPolicy: {
+        gateAwareFilter: { enabled: false },
+      },
+      annealing: { baseTemperature: 0.4, growthFactor: 1.8, maxTemperature: 16 },
+    },
+    schedulerState: { cycleIndex: 10, stagnationLevel: 3, noNewCandidateStreak: 3 },
+  });
+
+  assert.ok(result.length > 0, 'should still generate variants');
+  // With filter disabled, some variants SHOULD have slAtrMult < 0.25
+  const belowFloor = result.filter(v => {
+    const cfg = v.config || {};
+    return typeof cfg.slAtrMult === 'number' && cfg.slAtrMult < 0.25;
+  });
+  assert.ok(belowFloor.length > 0, 'without filter, variants below floor should exist');
+});

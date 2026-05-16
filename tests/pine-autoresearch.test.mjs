@@ -5962,6 +5962,10 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
       stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion', 'supertrend', 'squeeze', 'divergence', 'avwap-context', 'channel-context', 'context-aggregator', 'context-exit-shaping'],
       stagnationTemperatureBoost: 4,
     },
+    gateAwareFilter: {
+      enabled: true,
+      slAtrMultMinRatio: 0.5,
+    },
     annealing: {
       enabled: true,
       baseTemperature: 0.4,

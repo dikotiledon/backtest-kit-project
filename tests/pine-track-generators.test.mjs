@@ -972,3 +972,82 @@ test('novelty and max-cycle hard rotation use prior-cycle evidence before select
   assert.equal(maxCycle.hardRotationTrigger, 'maxCyclesPerTrack');
   assert.equal(selectActiveTrack({ tracks, state: maxCycle.activeTrackSelectionState }).trackId, 'track-a');
 });
+
+test('stagnation level activates broad fallback even before no-new-candidate streak increments', () => {
+  const incumbent = {
+    minPredSum: 1.8,
+    minBarsBetween: 1,
+    slAtrMult: 0.5,
+    tpAtrMult: 6.85,
+    useSignalFusion: true,
+    useFusionV4: true,
+    useSupertrendFilter: true,
+    useSupertrendEntryConfirm: false,
+    supertrendAtrLen: 10,
+    supertrendFactor: 1.5,
+    useTrailingStop: true,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+  };
+
+  const variants = buildTrackCandidateBatch({
+    track: { trackId: 'supertrend-tuning', sourceFamily: 'supertrend' },
+    incumbent,
+    maxConfigs: 8,
+    historyEvents: [],
+    schedulerState: {
+      noNewCandidateStreak: 0,
+      lowEmissionStreak: 0,
+      stagnationLevel: 3,
+      tabuRejectedFingerprints: [],
+    },
+    budgetPolicy: {
+      selfLoopEscape: {
+        enabled: true,
+        activateAfter: 1,
+        includeFallback: true,
+        fallbackFamilies: ['signal', 'risk'],
+        stagnationFallbackFamilies: ['ml-core', 'fusion', 'supertrend', 'context-aggregator', 'context-exit-shaping'],
+        minFallbackConfigs: 6,
+        stagnationTemperatureBoost: 4,
+      },
+      annealing: { enabled: true, maxTemperature: 16 },
+    },
+  });
+
+  assert.ok(variants.length > 0);
+  assert.ok(variants.some((variant) => variant.lane === 'self-loop-fallback'));
+  assert.ok(variants.some((variant) => ['ml-core', 'fusion', 'context-aggregator', 'context-exit-shaping'].includes(variant.family)));
+});
+
+test('track and fallback variants carry stable patch fingerprints', () => {
+  const variants = buildTrackCandidateBatch({
+    track: { trackId: 'supertrend-tuning', sourceFamily: 'supertrend' },
+    incumbent: {
+      minPredSum: 1.8,
+      minBarsBetween: 1,
+      useSupertrendFilter: true,
+      useSupertrendEntryConfirm: false,
+      supertrendAtrLen: 10,
+      supertrendFactor: 1.5,
+    },
+    maxConfigs: 4,
+    schedulerState: { stagnationLevel: 2, noNewCandidateStreak: 0 },
+    budgetPolicy: {
+      selfLoopEscape: {
+        enabled: true,
+        includeFallback: true,
+        stagnationFallbackFamilies: ['ml-core', 'fusion'],
+        minFallbackConfigs: 2,
+      },
+    },
+  });
+
+  assert.ok(variants.length > 0);
+  for (const variant of variants) {
+    assert.equal(typeof variant.patchFingerprint, 'string');
+    assert.ok(variant.patchFingerprint.length >= 32);
+    assert.equal(typeof variant.patchFingerprintVersion, 'number');
+    assert.equal(typeof variant.metadata.patchFingerprint, 'string');
+  }
+});

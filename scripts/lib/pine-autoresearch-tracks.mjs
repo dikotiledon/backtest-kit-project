@@ -99,6 +99,7 @@ function normalizeTabuPrunePolicy(policy = {}) {
   return {
     maxAgeCycles: normalizePositiveInteger(source.maxAgeCycles, 20),
     maxEntries: normalizePositiveInteger(source.maxEntries, 32),
+    maxSameCycleEntries: normalizePositiveInteger(source.maxSameCycleEntries, 24),
     dropOnChampionChange: source.dropOnChampionChange === false ? false : true,
   };
 }
@@ -160,8 +161,18 @@ export function pruneTabuFingerprints(input = {}) {
     }
   });
 
-  return [...deduped.values()]
-    .sort((left, right) => (right.addedAtCycle - left.addedAtCycle) || (right.index - left.index))
+  const ordered = [...deduped.values()]
+    .sort((left, right) => (right.addedAtCycle - left.addedAtCycle) || (right.index - left.index));
+  const sameCycleCounts = new Map();
+  const capped = [];
+  for (const entry of ordered) {
+    const cycleCount = sameCycleCounts.get(entry.addedAtCycle) ?? 0;
+    if (cycleCount >= policy.maxSameCycleEntries && stagnationLevel >= 2) continue;
+    sameCycleCounts.set(entry.addedAtCycle, cycleCount + 1);
+    capped.push(entry);
+  }
+
+  return capped
     .slice(0, policy.maxEntries)
     .sort((left, right) => (left.addedAtCycle - right.addedAtCycle) || (left.index - right.index))
     .map(({ fingerprint, addedAtCycle, championFingerprint }) => ({ fingerprint, addedAtCycle, championFingerprint }));

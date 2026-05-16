@@ -74,12 +74,36 @@ import {
   buildStagnationEscapeSearchPolicy,
   resolveSearchEfficiencyExploitExhausted,
   resolveScoutStagnationEscape,
+  resolveEffectiveSchedulerTabuPolicy,
+  shouldDeclareConvergence,
 } from '../scripts/pine-autoresearch.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 test('autoresearch exports offline data preflight builder for dataset verification parity', () => {
   assert.equal(typeof autoresearchCli.buildOfflineDataPreflight, 'function');
+});
+
+test('convergence does not fire while stagnation escape is active', () => {
+  const result = shouldDeclareConvergence({
+    noScoreImprovementStreak: 8,
+    stagnationLevel: 3,
+    stagnationEscape: { mode: 'progressive-widen', reason: 'zero-emission-exhausted' },
+    policy: { noScoreImprovementConvergeAfter: 6, requireEscapeExhaustion: true },
+  });
+
+  assert.equal(result, false, 'should not converge while escape is actively widening');
+});
+
+test('convergence fires when escape exhausted and streak exceeds threshold', () => {
+  const result = shouldDeclareConvergence({
+    noScoreImprovementStreak: 8,
+    stagnationLevel: 4,
+    stagnationEscape: { mode: 'none', reason: 'not-eligible' },
+    policy: { noScoreImprovementConvergeAfter: 6, requireEscapeExhaustion: true },
+  });
+
+  assert.equal(result, true);
 });
 
 test('runPrimarySweep returns empty leaderboard without reading the file when no variants were written', async () => {
@@ -2898,6 +2922,31 @@ test('decideMatrixPromotion passes shadow gates when zero shadows and zero thres
   assert.equal(result.skipped, null);
 });
 
+test('matrix hold explains high-score candidate rejected by ROI floor', () => {
+  const champion = { score: 152.47, roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261 };
+  const challenger = { score: 186.97, roiPct: 86.83, profitFactor: 9.63, maxDrawdownPct: 1.25, tradeCount: 265 };
+  const decision = decideMatrixPromotion({
+    champion,
+    challenger,
+    labResults: [{
+      lab: { labId: 'xrp-primary' },
+      incumbent: champion,
+      challenger,
+      decision: {
+        recommendation: 'hold',
+        gates: { primaryPromote: false },
+        failedGates: ['primaryPromote'],
+      },
+    }],
+    policy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0 },
+  });
+
+  assert.equal(decision.recommendation, 'hold');
+  assert.equal(decision.gateDiagnostics.primary.roiDeltaPct, -4.87);
+  assert.equal(decision.gateDiagnostics.primary.profitFactorDelta, 6.07);
+  assert.equal(decision.gateDiagnostics.primary.scoreDelta, 34.5);
+});
+
 test('decideAutoPromotionAction requires matrix pass, change, cooldown, and quota', () => {
   const result = decideAutoPromotionAction({
     latestManifest: {
@@ -5150,6 +5199,37 @@ test('mergeSchedulerTabuFingerprints prunes stale old-champion object entries', 
   ]);
 });
 
+test('mergeSchedulerTabuFingerprints preserves bootstrapped tabu ages instead of stamping every reject as current cycle', () => {
+  const championFingerprint = 'champion-fp';
+  const state = {
+    cycleIndex: 24,
+    stagnationLevel: 3,
+    tabuRejectedFingerprints: [
+      { fingerprint: 'current-a', addedAtCycle: 23, championFingerprint },
+    ],
+  };
+
+  const merged = mergeSchedulerTabuFingerprints({
+    schedulerState: state,
+    recentRejectedFingerprints: [
+      { fingerprint: 'old-a', addedAtCycle: 18, championFingerprint },
+      { fingerprint: 'old-b', addedAtCycle: 19, championFingerprint },
+      { fingerprint: 'current-a', addedAtCycle: 20, championFingerprint },
+    ],
+    currentCycle: 24,
+    championFingerprint,
+    policy: { maxAgeCycles: 20, maxEntries: 128, dropOnChampionChange: true },
+  });
+
+  const byFingerprint = new Map(
+    merged.tabuRejectedFingerprints.map((entry) => [entry.fingerprint, entry]),
+  );
+
+  assert.equal(byFingerprint.get('current-a').addedAtCycle, 23);
+  assert.equal(byFingerprint.has('old-a'), false, 'stagnation level 3 should age-prune old rejects');
+  assert.equal(byFingerprint.has('old-b'), false, 'stagnation level 3 should not restamp old rejects as fresh');
+});
+
 test('resolveTrackSelectionState advances cycle index when no-change rotation clears the active track', () => {
   const { hardRotationTrigger, activeTrackSelectionState } = resolveTrackSelectionState({
     schedulerState: {
@@ -5213,7 +5293,38 @@ test('resolveTrackSelectionState pre-rotates on prior novelty and max-cycle evid
   assert.equal(maxCycle.activeTrackSelectionState.cycleIndex, 10);
 });
 
+test('resolveTrackSelectionState rotates after repeated zero-emission cycle on same active track', () => {
+  const state = {
+    activeTrackId: 'supertrend-tuning',
+    cycleIndex: 24,
+    sameTrackCycleStreak: 4,
+    noScoreImprovementStreak: 4,
+    lowEmissionStreak: 1,
+    stagnationLevel: 3,
+  };
 
+  const previousCycle = {
+    activeTrackId: 'supertrend-tuning',
+    promotionEligible: false,
+    searchBatchSource: 'regime-fallback',
+    searchEfficiency: { emittedVariantCount: 0, allCandidatesTabu: true },
+  };
+
+  const result = resolveTrackSelectionState({
+    schedulerState: state,
+    rotationPolicy: { zeroEmissionRotateAfter: 1, maxCyclesPerTrack: 8 },
+    researchTracks: [
+      { trackId: 'supertrend-tuning', enabled: true },
+      { trackId: 'ml-core-tuning', enabled: true },
+      { trackId: 'fusion-tuning', enabled: true },
+    ],
+    previousCycle,
+  });
+
+  assert.equal(result.hardRotationTrigger, 'zeroEmissionStagnation');
+  assert.equal(result.activeTrackSelectionState.activeTrackId, null);
+  assert.ok(result.activeTrackSelectionState.cycleIndex > state.cycleIndex);
+});
 
 test('buildScoutOrchestrationState persists candidate and champion lineage keys', () => {
   const championState = {
@@ -5716,9 +5827,9 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
       activateAfter: 1,
       includeFallback: true,
       fallbackFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion'],
-      minFallbackConfigs: 3,
+      minFallbackConfigs: 6,
       temperatureBoost: 1.5,
-      stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion', 'supertrend', 'squeeze', 'divergence', 'avwap-context', 'channel-context'],
+      stagnationFallbackFamilies: ['signal', 'risk', 'exit-state', 'ml-core', 'fusion', 'supertrend', 'squeeze', 'divergence', 'avwap-context', 'channel-context', 'context-aggregator', 'context-exit-shaping'],
       stagnationTemperatureBoost: 4,
     },
     annealing: {
@@ -5730,6 +5841,7 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     tabuPolicy: {
       maxAgeCycles: 20,
       maxEntries: 40,
+      maxSameCycleEntries: 24,
       dropOnChampionChange: true,
     },
   });
@@ -7703,4 +7815,15 @@ test('shortConfigLabel produces readable short label', () => {
   assert.equal(short, shortConfigLabel(full)); // deterministic
 });
 
-
+test('resolveEffectiveSchedulerTabuPolicy honors searchPolicy.tabuPolicy before rotation tabuLimit', () => {
+  assert.deepEqual(resolveEffectiveSchedulerTabuPolicy({
+    searchPolicy: {
+      tabuPolicy: { maxAgeCycles: 7, maxEntries: 40, dropOnChampionChange: true },
+    },
+    rotationPolicy: { tabuLimit: 1000 },
+  }), {
+    maxAgeCycles: 7,
+    maxEntries: 40,
+    dropOnChampionChange: true,
+  });
+});

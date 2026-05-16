@@ -777,6 +777,22 @@ export function decideAutoresearchOutcome({
   };
 }
 
+function roundDelta(value, digits = 2) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return null;
+  return Number(numeric.toFixed(digits));
+}
+
+function buildPrimaryGateDiagnostics({ champion, challenger } = {}) {
+  return {
+    scoreDelta: roundDelta((challenger?.score ?? 0) - (champion?.score ?? 0), 2),
+    roiDeltaPct: roundDelta((challenger?.roiPct ?? 0) - (champion?.roiPct ?? 0), 2),
+    profitFactorDelta: roundDelta((challenger?.profitFactor ?? 0) - (champion?.profitFactor ?? 0), 2),
+    maxDrawdownDeltaPct: roundDelta((challenger?.maxDrawdownPct ?? 0) - (champion?.maxDrawdownPct ?? 0), 2),
+    tradeCountDelta: roundDelta((challenger?.tradeCount ?? 0) - (champion?.tradeCount ?? 0), 0),
+  };
+}
+
 export function decideMatrixPromotion({ labResults = [], policy = {}, champion, challenger, shadowsEvaluated = true }) {
   const primary = labResults[0] || null;
   const shadowLabs = labResults.slice(1);
@@ -842,6 +858,9 @@ export function decideMatrixPromotion({ labResults = [], policy = {}, champion, 
       minShadowPassCount,
       minShadowPassRatio,
       requireCandidateChange,
+    },
+    gateDiagnostics: {
+      primary: buildPrimaryGateDiagnostics({ champion, challenger }),
     },
   };
 }

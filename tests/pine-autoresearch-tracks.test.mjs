@@ -847,6 +847,30 @@ test('pruneTabuFingerprints still applies maxEntries cap after stagnation-adjust
   assert.deepEqual(pruned.map((entry) => entry.fingerprint), ['fp-b', 'fp-a']);
 });
 
+test('pruneTabuFingerprints caps same-cycle flood during severe stagnation', () => {
+  const entries = Array.from({ length: 111 }, (_, index) => ({
+    fingerprint: `fp-${index}`,
+    addedAtCycle: 23,
+    championFingerprint: 'champion',
+  }));
+
+  const pruned = pruneTabuFingerprints({
+    entries,
+    currentCycle: 24,
+    currentChampionFingerprint: 'champion',
+    stagnationLevel: 3,
+    policy: {
+      maxAgeCycles: 20,
+      maxEntries: 128,
+      maxSameCycleEntries: 24,
+      dropOnChampionChange: true,
+    },
+  });
+
+  assert.equal(pruned.length, 24);
+  assert.ok(pruned.every((entry) => entry.addedAtCycle === 23));
+});
+
 test('nextTrackState records rejected candidate fingerprints in a bounded tabu list', () => {
   const next = nextTrackState({
     state: {

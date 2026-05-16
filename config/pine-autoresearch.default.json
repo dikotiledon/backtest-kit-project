@@ -39,7 +39,7 @@
         "ml-core",
         "fusion"
       ],
-      "minFallbackConfigs": 3,
+      "minFallbackConfigs": 6,
       "temperatureBoost": 1.5,
       "stagnationFallbackFamilies": [
         "signal",
@@ -51,7 +51,9 @@
         "squeeze",
         "divergence",
         "avwap-context",
-        "channel-context"
+        "channel-context",
+        "context-aggregator",
+        "context-exit-shaping"
       ],
       "stagnationTemperatureBoost": 4
     },
@@ -64,6 +66,7 @@
     "tabuPolicy": {
       "maxAgeCycles": 20,
       "maxEntries": 40,
+      "maxSameCycleEntries": 24,
       "dropOnChampionChange": true
     }
   },
@@ -155,13 +158,14 @@
   "rotationPolicy": {
     "noChangeStreakRotateAfter": 4,
     "noNoveltyRotateAfter": 3,
+    "zeroEmissionRotateAfter": 1,
     "maxCyclesPerTrack": 8,
     "similarityRotateAbove": 0.99,
     "similarityRotateMinEmitted": 6,
     "preferCurrentChampionUntil": 4,
     "cooldownCyclesAfterPromote": 1,
     "tabuLimit": 1000,
-    "tabuBootstrapManifestLimit": 200,
+    "tabuBootstrapManifestLimit": 48,
     "stagnation": {
       "enabled": true,
       "noNewCandidateEscalateAfter": 2,
@@ -169,7 +173,9 @@
       "highSimilarityThreshold": 0.8,
       "maxStagnationLevel": 4,
       "lowEmissionEscalateAfter": 3,
-      "lowEmissionThreshold": 3
+      "lowEmissionThreshold": 3,
+      "noScoreImprovementConvergeAfter": 6,
+      "requireEscapeExhaustion": true
     }
   },
   "noveltyPolicy": {

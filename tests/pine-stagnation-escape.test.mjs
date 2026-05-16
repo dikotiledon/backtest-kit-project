@@ -83,6 +83,21 @@ test('decideStagnationEscapePlan reaches progressive-widen at level 3', () => {
   assert.equal(result.multiKeyMutationCount, 3);
 });
 
+test('decideStagnationEscapePlan treats zero-emission exploit exhaustion as eligible at level 2+', () => {
+  assert.deepEqual(decideStagnationEscapePlan({
+    stagnationLevel: 3,
+    generatedLanesExhausted: false,
+    exploitExhausted: true,
+    zeroEmissionExhausted: true,
+  }), {
+    mode: 'progressive-widen',
+    reason: 'zero-emission-exhausted',
+    allowArchitectureKeys: true,
+    multiKeyMutationCount: 3,
+    ladderScale: 2,
+  });
+});
+
 test('decideStagnationEscapePlan tolerates malformed inputs', () => {
   assert.deepEqual(decideStagnationEscapePlan('bad'), { mode: 'none', reason: 'not-eligible' });
   assert.deepEqual(decideStagnationEscapePlan({ stagnationLevel: '3', generatedLanesExhausted: 1, exploitExhausted: 1 }), {

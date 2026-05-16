@@ -1196,6 +1196,46 @@ function resolveTabuMergePolicy({ policy = null, tabuLimit = 128 } = {}) {
   return { maxAgeCycles: 20, maxEntries: 32, dropOnChampionChange: true };
 }
 
+export function shouldDeclareConvergence({
+  noScoreImprovementStreak = 0,
+  stagnationLevel = 0,
+  stagnationEscape = {},
+  policy = {},
+} = {}) {
+  const threshold = Math.max(1, Number(policy.noScoreImprovementConvergeAfter) || 6);
+  const requireEscapeExhaustion = policy.requireEscapeExhaustion !== false;
+
+  if (noScoreImprovementStreak < threshold) return false;
+
+  if (requireEscapeExhaustion) {
+    if (stagnationEscape?.mode && stagnationEscape.mode !== 'none') return false;
+    const maxLevel = Number(policy.maxStagnationLevel) || 4;
+    if (stagnationLevel < maxLevel) return false;
+  }
+
+  return true;
+}
+
+export function resolveEffectiveSchedulerTabuPolicy(config = {}) {
+  const candidates = [
+    config?.searchPolicy?.tabu,
+    config?.searchPolicy?.tabuPolicy,
+    config?.rotationPolicy?.tabu,
+    config?.rotationPolicy?.tabuPolicy,
+  ];
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate)) return candidate;
+  }
+  if (Number.isFinite(Number(config?.rotationPolicy?.tabuLimit))) {
+    return {
+      maxAgeCycles: 20,
+      maxEntries: Math.max(1, Math.floor(Number(config.rotationPolicy.tabuLimit))),
+      dropOnChampionChange: true,
+    };
+  }
+  return { maxAgeCycles: 20, maxEntries: 32, dropOnChampionChange: true };
+}
+
 export function mergeSchedulerTabuFingerprints({
   schedulerState = {},
   recentRejectedFingerprints = [],
@@ -1231,7 +1271,17 @@ export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy
   const noChangeStreakRotateAfter = rotationPolicy.noChangeStreakRotateAfter ?? 3;
   const similarityRotateAbove = rotationPolicy.similarityRotateAbove ?? 0.85;
   const maxCyclesPerTrack = rotationPolicy.maxCyclesPerTrack ?? 8;
-  const hardRotationTrigger = (schedulerState.noChangeStreak >= noChangeStreakRotateAfter ? 'noChangeStreak' : null)
+  const zeroEmissionRotateAfter = rotationPolicy.zeroEmissionRotateAfter ?? 2;
+  const previousZeroEmission = previousCycle?.promotionEligible === false
+    && previousCycle?.activeTrackId
+    && previousCycle.activeTrackId === schedulerState.activeTrackId
+    && Number(previousCycle?.searchEfficiency?.emittedVariantCount) === 0;
+  const zeroEmissionTrigger = previousZeroEmission
+    && (schedulerState.lowEmissionStreak ?? 0) >= zeroEmissionRotateAfter
+    ? 'zeroEmissionStagnation'
+    : null;
+  const hardRotationTrigger = zeroEmissionTrigger
+    ?? (schedulerState.noChangeStreak >= noChangeStreakRotateAfter ? 'noChangeStreak' : null)
     ?? (Number.isFinite(previousCycle?.topCandidateSimilarity) && previousCycle.topCandidateSimilarity > similarityRotateAbove ? 'noveltySimilarity' : null)
     ?? (schedulerState.sameTrackCycleStreak > maxCyclesPerTrack && previousCycle?.promotionEligible === false ? 'maxCyclesPerTrack' : null);
 
@@ -1345,10 +1395,13 @@ export function resolveScoutStagnationEscape({ schedulerState = {}, championStat
     && exhaustedLanes.includes('exitRegime');
   const previousSearchEfficiency = latestManifest?.searchEfficiency ?? null;
   const exploitExhausted = resolveSearchEfficiencyExploitExhausted(previousSearchEfficiency);
+  const zeroEmissionExhausted = Number(previousSearchEfficiency?.emittedVariantCount) === 0
+    && previousSearchEfficiency?.allCandidatesTabu === true;
   return decideStagnationEscapePlan({
     stagnationLevel: schedulerState?.stagnationLevel ?? 0,
     generatedLanesExhausted,
     exploitExhausted,
+    zeroEmissionExhausted,
   });
 }
 
@@ -1587,6 +1640,9 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
 export function applySchedulerStateToManifest(manifest = {}, schedulerState = {}) {
   return {
     ...manifest,
+    schedulerCycleIndex: Number.isFinite(Number(schedulerState?.cycleIndex))
+      ? Math.floor(Number(schedulerState.cycleIndex))
+      : manifest?.schedulerCycleIndex ?? null,
     noNewCandidateStreak: schedulerState?.noNewCandidateStreak ?? manifest?.noNewCandidateStreak ?? 0,
     lowEmissionStreak: schedulerState?.lowEmissionStreak ?? manifest?.lowEmissionStreak ?? 0,
     laneBudgetDebt: schedulerState?.budgetDebt ?? manifest?.laneBudgetDebt ?? null,
@@ -2392,19 +2448,48 @@ function inferRejectedCandidateFingerprint(manifest) {
   return candidateFingerprint && candidateFingerprint !== championFingerprint ? candidateFingerprint : null;
 }
 
-async function collectRecentRejectedCandidateFingerprints(config, limit = 16) {
+
+function manifestSchedulerCycleIndex(manifest, fallbackCycle) {
+  const candidates = [
+    manifest?.schedulerCycleIndex,
+    manifest?.cycleIndex,
+    manifest?.checkpointState?.schedulerCycleIndex,
+    manifest?.checkpointState?.cycleIndex,
+  ];
+  for (const value of candidates) {
+    const numeric = Number(value);
+    if (Number.isFinite(numeric) && numeric >= 0) return Math.floor(numeric);
+  }
+  return Math.max(0, Math.floor(Number(fallbackCycle) || 0));
+}
+
+async function collectRecentRejectedCandidateTabuEntries(config, { limit = 16, currentCycle = 0, championFingerprint = null } = {}) {
   const files = (await listManifestFiles(config)).slice(-Math.max(0, limit));
-  const fingerprints = [];
-  for (const fileName of files) {
+  const entries = [];
+  const oldestFallbackCycle = Math.max(0, Math.floor(Number(currentCycle) || 0) - files.length);
+
+  for (const [index, fileName] of files.entries()) {
     try {
       const manifest = await readJson(path.join(manifestsDir(config), fileName));
       const fingerprint = inferRejectedCandidateFingerprint(manifest);
-      if (fingerprint) fingerprints.push(fingerprint);
+      if (!fingerprint) continue;
+      const manifestChampionFingerprint = manifest?.championFingerprint ?? championFingerprint ?? null;
+      entries.push({
+        fingerprint,
+        addedAtCycle: manifestSchedulerCycleIndex(manifest, oldestFallbackCycle + index),
+        championFingerprint: manifestChampionFingerprint,
+      });
     } catch {
       // Ignore corrupt or concurrently-pruned manifests; current cycle can still proceed.
     }
   }
-  return [...new Set(fingerprints)];
+
+  const deduped = new Map();
+  for (const entry of entries) {
+    const existing = deduped.get(entry.fingerprint);
+    if (!existing || entry.addedAtCycle > existing.addedAtCycle) deduped.set(entry.fingerprint, entry);
+  }
+  return [...deduped.values()];
 }
 
 async function loadHistoryEvents(config) {
@@ -3034,17 +3119,18 @@ export async function runScout(config, dependencies = {}) {
     loadedSchedulerState.laneExhaustions = {};
     loadedSchedulerState.lastLaneExhaustion = null;
     await writeSchedulerState(schedulerStatePath, loadedSchedulerState);
+    try {
+      await fs.unlink(path.join(config.researchRoot, 'state', 'converged.json'));
+    } catch { /* no convergence marker to remove */ }
   }
-  const schedulerTabuPolicy = config.searchPolicy?.tabu
-    ?? config.rotationPolicy?.tabu
-    ?? {
-      maxAgeCycles: 20,
-      maxEntries: config.rotationPolicy?.tabuLimit ?? 32,
-      dropOnChampionChange: true,
-    };
+  const schedulerTabuPolicy = resolveEffectiveSchedulerTabuPolicy(config);
   const schedulerState = mergeSchedulerTabuFingerprints({
     schedulerState: loadedSchedulerState,
-    recentRejectedFingerprints: await collectRecentRejectedCandidateFingerprints(config, config.rotationPolicy?.tabuBootstrapManifestLimit ?? 16),
+    recentRejectedFingerprints: await collectRecentRejectedCandidateTabuEntries(config, {
+      limit: config.rotationPolicy?.tabuBootstrapManifestLimit ?? 16,
+      currentCycle: loadedSchedulerState.cycleIndex ?? 0,
+      championFingerprint: schedulerChampionFingerprint,
+    }),
     currentCycle: loadedSchedulerState.cycleIndex ?? 0,
     championFingerprint: schedulerChampionFingerprint,
     policy: schedulerTabuPolicy,
@@ -3473,9 +3559,18 @@ export async function runScout(config, dependencies = {}) {
   };
   await writeSchedulerState(schedulerStatePath, updatedSchedulerState);
 
-  // Write convergence marker when noScoreImprovementStreak reaches threshold
-  const convergenceThreshold = config.rotationPolicy?.stagnation?.noScoreImprovementConvergeAfter ?? 4;
-  if ((updatedSchedulerState.noScoreImprovementStreak ?? 0) >= convergenceThreshold) {
+  // Write convergence marker when recovery mechanisms are exhausted and no improvement found
+  const convergencePolicy = {
+    noScoreImprovementConvergeAfter: config.rotationPolicy?.stagnation?.noScoreImprovementConvergeAfter ?? 6,
+    requireEscapeExhaustion: config.rotationPolicy?.stagnation?.requireEscapeExhaustion !== false,
+    maxStagnationLevel: config.rotationPolicy?.stagnation?.maxStagnationLevel ?? 4,
+  };
+  if (shouldDeclareConvergence({
+    noScoreImprovementStreak: updatedSchedulerState.noScoreImprovementStreak ?? 0,
+    stagnationLevel: updatedSchedulerState.stagnationLevel ?? 0,
+    stagnationEscape: stagnationEscape ?? {},
+    policy: convergencePolicy,
+  })) {
     const convergencePath = path.join(config.researchRoot, 'state', 'converged.json');
     await fs.mkdir(path.dirname(convergencePath), { recursive: true });
     await fs.writeFile(convergencePath, JSON.stringify({

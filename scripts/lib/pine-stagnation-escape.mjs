@@ -11,16 +11,28 @@ export function decideStagnationEscapePlan(input = {}) {
     stagnationLevel = 0,
     generatedLanesExhausted = false,
     exploitExhausted = false,
+    zeroEmissionExhausted = false,
   } = normalizeInput(input);
 
   const level = Number(stagnationLevel);
   const safeLevel = Number.isFinite(level) ? level : 0;
   const generatedExhausted = isTruthy(generatedLanesExhausted);
   const exploitDone = isTruthy(exploitExhausted);
+  const zeroEmissionDone = isTruthy(zeroEmissionExhausted);
 
-  if (safeLevel < 2 || !generatedExhausted) {
-    return { mode: 'none', reason: 'not-eligible' };
+  if (safeLevel < 2) return { mode: 'none', reason: 'not-eligible' };
+
+  if (!generatedExhausted && zeroEmissionDone) {
+    return {
+      mode: 'progressive-widen',
+      reason: 'zero-emission-exhausted',
+      allowArchitectureKeys: true,
+      multiKeyMutationCount: 3,
+      ladderScale: 2,
+    };
   }
+
+  if (!generatedExhausted) return { mode: 'none', reason: 'not-eligible' };
 
   // Level 2 + both exhausted → allow architecture mutation
   if (safeLevel === 2 && exploitDone) {

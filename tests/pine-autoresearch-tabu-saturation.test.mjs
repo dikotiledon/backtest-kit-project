@@ -253,3 +253,57 @@ test('tabu saturation recovers via lowEmissionStreak escalation and tabu aging',
     await fs.rm(tmpRoot, { recursive: true, force: true });
   }
 });
+
+test('severe no-score stagnation does not rebuild an all-current-cycle tabu wall', async () => {
+  const { tmpRoot, config } = await setupFixture();
+  try {
+    config.maxConfigs = 8;
+    config.searchPolicy.selfLoopEscape = {
+      enabled: true,
+      activateAfter: 1,
+      includeFallback: true,
+      fallbackFamilies: ['signal', 'risk'],
+      stagnationFallbackFamilies: ['ml-core', 'fusion', 'supertrend', 'squeeze', 'divergence', 'context-aggregator', 'context-exit-shaping'],
+      minFallbackConfigs: 6,
+      temperatureBoost: 1.5,
+      stagnationTemperatureBoost: 4,
+    };
+    config.searchPolicy.tabu = {
+      maxAgeCycles: 20,
+      maxEntries: 128,
+      maxSameCycleEntries: 24,
+      dropOnChampionChange: true,
+    };
+    config.rotationPolicy.stagnation.noScoreImprovementEscalateAfter = 1;
+    config.rotationPolicy.stagnation.maxStagnationLevel = 4;
+    config.rotationPolicy.stagnation.noScoreImprovementConvergeAfter = 99;
+
+    const cycles = [];
+    for (let cycleIndex = 1; cycleIndex <= 6; cycleIndex += 1) {
+      const result = await runScout(config, {
+        evaluateConfigOnLab: gateFailingEvaluator(),
+        runPrimarySweep: async (trackedConfig, runId, { variantFilePath }) => fakePrimarySweep({
+          runDir: path.join(tmpRoot, 'pine', 'sweeps', `stagnation-${cycleIndex}`),
+          variantFilePath,
+          cycleIndex,
+        }),
+      });
+      const schedulerState = JSON.parse(await fs.readFile(schedulerStatePath(config), 'utf8'));
+      cycles.push({ manifest: result.manifest, schedulerState });
+    }
+
+    const last = cycles.at(-1);
+    assert.ok(last.manifest.stagnationLevel >= 2);
+    assert.equal(last.manifest.searchEfficiency.allCandidatesTabu, false);
+    assert.ok(last.manifest.searchEfficiency.emittedVariantCount > 0);
+    assert.notEqual(last.manifest.searchBatchSource, 'regime-fallback');
+
+    const tabuByCycle = new Map();
+    for (const entry of last.schedulerState.tabuRejectedFingerprints || []) {
+      tabuByCycle.set(entry.addedAtCycle, (tabuByCycle.get(entry.addedAtCycle) || 0) + 1);
+    }
+    assert.ok(Math.max(...tabuByCycle.values()) <= 24, 'same-cycle tabu flood should be capped');
+  } finally {
+    await fs.rm(tmpRoot, { recursive: true, force: true });
+  }
+});

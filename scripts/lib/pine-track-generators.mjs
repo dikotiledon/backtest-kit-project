@@ -1,6 +1,7 @@
 import { sharedKnobKeys as tunerSharedKnobKeys, trackOwnKnobKeys as tunerTrackOwnKnobKeys } from './pine-tuner.mjs';
-import { buildCanonicalConfigFingerprint } from './pine-global-search.mjs';
+import { buildCanonicalConfigFingerprint, buildChampionConfigFingerprint } from './pine-global-search.mjs';
 import { computeAnnealingState, normalizeTabuFingerprintSet } from './pine-search-policy.mjs';
+import { buildLanePatchFingerprint, LANE_PATCH_FINGERPRINT_VERSION } from './pine-lane-novelty.mjs';
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
@@ -91,23 +92,34 @@ function scalePatch(base, patch, temperature) {
   }));
 }
 
-function buildMetadata({ trackId, family, index, patch, config, lane, temperature = 1, tabuSkipped = 0 }) {
+function buildMetadata({ trackId, family, index, patch, config, baseConfig, lane, temperature = 1, tabuSkipped = 0 }) {
   const shared = sharedKnobKeys();
   const own = trackOwnKnobKeys(family);
   const patchKeys = Object.keys(patch);
+  const patchFingerprint = buildLanePatchFingerprint({
+    championConfigFingerprint: buildChampionConfigFingerprint(baseConfig || config || {}),
+    lane,
+    mutationFamily: family,
+    patch,
+  });
   const metadata = {
     variantId: `${String(family || trackId)}-${String(index + 1).padStart(2, '0')}`,
     family,
     lane,
     patch: clone(patch),
+    patchFingerprint,
+    patchFingerprintVersion: LANE_PATCH_FINGERPRINT_VERSION,
     sharedKeys: patchKeys.filter((key) => shared.includes(key)),
     ownKeys: patchKeys.filter((key) => own.includes(key)),
     temperature,
     tabuSkipped,
-    config,
   };
   if (lane === 'self-loop-fallback') metadata.trackId = trackId;
-  return metadata;
+  return {
+    ...metadata,
+    config,
+    metadata,
+  };
 }
 
 function squeezePatches(base) {
@@ -459,10 +471,17 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
   const selfLoopEscape = budgetPolicy.selfLoopEscape || {};
   const includeSelfLoopFallback = selfLoopEscape.includeFallback === true || budgetPolicy.includeFallback === true;
   const includeFallback = budgetPolicy.includeFallback === true;
-  const escapeActive = selfLoopEscape.enabled === true
-    && (schedulerState.noNewCandidateStreak ?? 0) >= (selfLoopEscape.activateAfter ?? 1);
   const rawStagnationLevel = Number(schedulerState?.stagnationLevel ?? 0);
   const stagnationLevel = Number.isFinite(rawStagnationLevel) ? Math.max(0, Math.floor(rawStagnationLevel)) : 0;
+  const noNewCandidateStreak = Math.max(0, Number(schedulerState.noNewCandidateStreak ?? 0) || 0);
+  const lowEmissionStreak = Math.max(0, Number(schedulerState.lowEmissionStreak ?? 0) || 0);
+  const activateAfter = Math.max(1, Number(selfLoopEscape.activateAfter ?? 1) || 1);
+  const escapeActive = selfLoopEscape.enabled === true
+    && (
+      noNewCandidateStreak >= activateAfter
+      || lowEmissionStreak >= activateAfter
+      || stagnationLevel >= 1
+    );
   const configuredFallbackFamilies = Array.isArray(selfLoopEscape.fallbackFamilies) && selfLoopEscape.fallbackFamilies.length > 0
     ? selfLoopEscape.fallbackFamilies
     : ['signal', 'risk'];
@@ -480,7 +499,7 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
   const trackLimit = Math.max(0, Math.min(limit, pool.length));
   const tabuSet = new Set([
     ...normalizeTabuFingerprintSet(schedulerState.tabuRejectedFingerprints),
-    ...normalizeTabuFingerprintSet(budgetPolicy.testedCandidateFingerprints),
+    ...(stagnationLevel >= 2 ? [] : normalizeTabuFingerprintSet(budgetPolicy.testedCandidateFingerprints)),
   ]);
   let tabuSkipped = 0;
 
@@ -504,6 +523,7 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
       temperature,
       tabuSkipped,
       config,
+      baseConfig: base,
     }));
     tabuSkipped = 0;
   }
@@ -552,6 +572,7 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
         temperature: fallbackTemperature,
         tabuSkipped: fallbackSkipped,
         config,
+        baseConfig: base,
       }));
       fallbackSkipped = 0;
     }
@@ -591,6 +612,7 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
         temperature,
         tabuSkipped: fallbackSkipped,
         config,
+        baseConfig: base,
       }));
       fallbackSkipped = 0;
     }

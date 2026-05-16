@@ -444,9 +444,39 @@ test('exit-state track emits plain patch metadata with shared and own keys', () 
   const candidate = batch[2];
 
   assert.equal(candidate.variantId, 'exit-state-03');
-  assert.deepEqual(candidate.patch, { useTimeStop: true, timeStopBars: 12 });
+  assert.deepEqual(candidate.patch, { useTimeStop: true, timeStopBars: 12, timeStopMinUnrealizedAtr: 0.75 });
   assert.deepEqual(candidate.sharedKeys, []);
-  assert.deepEqual(candidate.ownKeys, ['useTimeStop', 'timeStopBars']);
+  assert.ok(candidate.ownKeys.includes('useTimeStop'));
+  assert.ok(candidate.ownKeys.includes('timeStopBars'));
+  assert.ok(candidate.ownKeys.includes('timeStopMinUnrealizedAtr'));
+});
+
+test('exit-state patches cover multiple feature families with at least 13 variants', () => {
+  const batch = buildTrackCandidateBatch({
+    track: { trackId: 'exit-state-context', sourceFamily: 'exit-state' },
+    incumbent,
+    maxConfigs: 20,
+    historyEvents: [],
+    budgetPolicy: {},
+  });
+
+  // At least 13 variants (was 3 before expansion)
+  assert.ok(batch.length >= 13, `Expected >= 13 variants, got ${batch.length}`);
+
+  // Collect feature families represented
+  const featureFamilies = new Set();
+  for (const item of batch) {
+    const patch = item.patch;
+    if (patch.useTimeStop) featureFamilies.add('timeStop');
+    if (patch.useFailedFollowThroughTighten) featureFamilies.add('failedFollowThrough');
+    if (patch.usePartialDerisk) featureFamilies.add('partialDerisk');
+    if (patch.useContextCautionTighten) featureFamilies.add('contextCaution');
+    if (patch.usePostEntrySqueezeCollapseTighten) featureFamilies.add('postEntrySqueeze');
+    if (patch.useAdverseDivergenceTighten) featureFamilies.add('adverseDivergence');
+  }
+
+  // At least 4 different feature families
+  assert.ok(featureFamilies.size >= 4, `Expected >= 4 feature families, got ${featureFamilies.size}: ${[...featureFamilies].join(', ')}`);
 });
 
 test('asymmetry track emits plain patch metadata with shared and own keys', () => {

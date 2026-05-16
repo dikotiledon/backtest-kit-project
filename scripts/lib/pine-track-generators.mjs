@@ -292,17 +292,71 @@ function contextExitShapingPatches(base) {
 
 function exitStatePatches(base) {
   return [
+    // Time stop variations
+    { useTimeStop: true, timeStopBars: 8, timeStopMinUnrealizedAtr: 0.5 },
+    { useTimeStop: true, timeStopBars: 16, timeStopMinUnrealizedAtr: 0.25 },
+    { useTimeStop: true, timeStopBars: 12, timeStopMinUnrealizedAtr: 0.75 },
+
+    // Failed follow-through tighten
     {
-      useTimeStop: true,
-      timeStopBars: 8,
+      useFailedFollowThroughTighten: true,
+      followThroughBars: lowerBound((base.followThroughBars ?? 4) - 1, 1),
+      followThroughMinProgressAtr: Math.max(0, numeric(base.followThroughMinProgressAtr ?? 0.75) - 0.25),
+      followThroughTightenTrailAtrMult: Math.max(0.1, numeric(base.followThroughTightenTrailAtrMult ?? 0.75) - 0.15),
     },
     {
-      useTimeStop: true,
-      timeStopBars: 16,
+      useFailedFollowThroughTighten: true,
+      followThroughBars: numeric(base.followThroughBars ?? 4) + 2,
+      followThroughMinProgressAtr: numeric(base.followThroughMinProgressAtr ?? 0.75) + 0.5,
+      followThroughTightenTrailAtrMult: numeric(base.followThroughTightenTrailAtrMult ?? 0.75) + 0.1,
+    },
+
+    // Partial de-risk
+    {
+      usePartialDerisk: true,
+      partialDeriskAtR: Math.max(0, numeric(base.partialDeriskAtR ?? 1.0) - 0.5),
+      partialDeriskClosePct: numeric(base.partialDeriskClosePct ?? 50) + 10,
     },
     {
-      useTimeStop: true,
-      timeStopBars: 12,
+      usePartialDerisk: true,
+      partialDeriskAtR: numeric(base.partialDeriskAtR ?? 1.0) + 0.5,
+      partialDeriskClosePct: Math.max(0, numeric(base.partialDeriskClosePct ?? 50) - 15),
+    },
+
+    // Context caution tighten
+    {
+      useContextCautionTighten: true,
+      contextCautionDelta: numeric(base.contextCautionDelta ?? 0.5) + 0.25,
+      contextCautionTrailAtrMult: Math.max(0.1, numeric(base.contextCautionTrailAtrMult ?? 0.75) - 0.15),
+    },
+    {
+      useContextCautionTighten: true,
+      contextCautionDelta: Math.max(0, numeric(base.contextCautionDelta ?? 0.5) - 0.25),
+      contextCautionTrailAtrMult: numeric(base.contextCautionTrailAtrMult ?? 0.75) + 0.1,
+    },
+
+    // Post-entry squeeze collapse tighten
+    {
+      usePostEntrySqueezeCollapseTighten: true,
+      postEntrySqueezeCollapseBars: lowerBound((base.postEntrySqueezeCollapseBars ?? 4) - 1, 1),
+      postEntrySqueezeCollapseTrailAtrMult: Math.max(0.1, numeric(base.postEntrySqueezeCollapseTrailAtrMult ?? 0.75) - 0.15),
+    },
+    {
+      usePostEntrySqueezeCollapseTighten: true,
+      postEntrySqueezeCollapseBars: numeric(base.postEntrySqueezeCollapseBars ?? 4) + 2,
+      postEntrySqueezeCollapseTrailAtrMult: numeric(base.postEntrySqueezeCollapseTrailAtrMult ?? 0.75) + 0.1,
+    },
+
+    // Adverse divergence tighten
+    {
+      useAdverseDivergenceTighten: true,
+      adverseDivergenceBars: lowerBound((base.adverseDivergenceBars ?? 6) - 2, 1),
+      adverseDivergenceTrailAtrMult: Math.max(0.1, numeric(base.adverseDivergenceTrailAtrMult ?? 0.75) - 0.15),
+    },
+    {
+      useAdverseDivergenceTighten: true,
+      adverseDivergenceBars: numeric(base.adverseDivergenceBars ?? 6) + 3,
+      adverseDivergenceTrailAtrMult: numeric(base.adverseDivergenceTrailAtrMult ?? 0.75) + 0.1,
     },
   ];
 }

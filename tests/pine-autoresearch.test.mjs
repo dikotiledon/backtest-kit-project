@@ -7949,3 +7949,63 @@ test('decideAutoresearchOutcome blocks extreme ROI regression even with high sco
   assert.equal(result.recommendation, 'hold');
   assert.ok(result.failedGates.includes('roi'));
 });
+
+test('tiered ROI relaxation applies when PF improves >2x AND DD improves AND ROI regression within 20%', () => {
+  const result = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'inc', score: 152.47, roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261 }),
+    challenger: makeResult({ configId: 'chal', score: 172.33, roiPct: 76.41, profitFactor: 9.14, maxDrawdownPct: 1.19, tradeCount: 270 }),
+    thresholds: {
+      minScoreDelta: 0.1,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      roiRelaxation: {
+        enabled: true,
+        minScoreDeltaToRelax: 12,
+        maxRoiRegressionPct: 10,
+        tieredRelaxation: {
+          enabled: true,
+          pfMultiplierThreshold: 2,
+          ddImprovementRequired: true,
+          maxRoiRegressionPct: 20,
+        },
+      },
+    },
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.equal(result.comparisons.roiRelaxationApplied, true);
+  assert.equal(result.comparisons.roiRelaxationTier, 'tiered');
+});
+
+test('tiered ROI relaxation rejects when ROI regression exceeds hard floor (20%)', () => {
+  const result = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'inc', score: 152.47, roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261 }),
+    challenger: makeResult({ configId: 'chal', score: 180.0, roiPct: 68.0, profitFactor: 10.0, maxDrawdownPct: 1.0, tradeCount: 270 }),
+    thresholds: {
+      minScoreDelta: 0.1,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      roiRelaxation: {
+        enabled: true,
+        minScoreDeltaToRelax: 12,
+        maxRoiRegressionPct: 10,
+        tieredRelaxation: {
+          enabled: true,
+          pfMultiplierThreshold: 2,
+          ddImprovementRequired: true,
+          maxRoiRegressionPct: 20,
+        },
+      },
+    },
+  });
+
+  // ROI regression is 91.7 - 68.0 = -23.7%, exceeds 20% hard floor
+  assert.equal(result.recommendation, 'hold');
+  assert.ok(result.failedGates.includes('roi'));
+});

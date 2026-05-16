@@ -603,11 +603,33 @@ export function decideAutoresearchOutcome({
 
   const roiRelaxation = thresholds.roiRelaxation || {};
   const roiRelaxationEnabled = roiRelaxation.enabled === true;
-  const roiRelaxed = roiRelaxationEnabled
+  const tieredRelaxation = roiRelaxation.tieredRelaxation || {};
+  const tieredEnabled = tieredRelaxation.enabled === true && roiRelaxationEnabled;
+
+  // Standard relaxation: score delta exceeds threshold AND roi regression within standard cap
+  const standardRelaxed = roiRelaxationEnabled
     && comparisons.scoreDelta >= (roiRelaxation.minScoreDeltaToRelax ?? Infinity)
     && comparisons.roiDeltaPct >= -(roiRelaxation.maxRoiRegressionPct ?? 0);
+
+  // Tiered relaxation: PF improved by >Nx AND DD improved → allow wider ROI regression
+  const pfMultiplier = (incumbent.metrics?.profitFactor ?? 0) > 0
+    ? (challenger.metrics?.profitFactor ?? 0) / (incumbent.metrics?.profitFactor ?? 1)
+    : 0;
+  const ddImproved = comparisons.drawdownDeltaPct < 0;
+  const pfThresholdMet = pfMultiplier >= (tieredRelaxation.pfMultiplierThreshold ?? 2);
+  const ddRequirementMet = tieredRelaxation.ddImprovementRequired !== true || ddImproved;
+  const tieredMaxRegression = tieredRelaxation.maxRoiRegressionPct ?? 20;
+
+  const tieredRelaxed = tieredEnabled
+    && comparisons.scoreDelta >= (roiRelaxation.minScoreDeltaToRelax ?? Infinity)
+    && pfThresholdMet
+    && ddRequirementMet
+    && comparisons.roiDeltaPct >= -tieredMaxRegression;
+
+  const roiRelaxed = standardRelaxed || tieredRelaxed;
   const effectiveRoiPass = comparisons.roiDeltaPct >= adjustedThresholds.minRoiDeltaPct || roiRelaxed;
   comparisons.roiRelaxationApplied = roiRelaxed && comparisons.roiDeltaPct < adjustedThresholds.minRoiDeltaPct;
+  comparisons.roiRelaxationTier = tieredRelaxed ? 'tiered' : standardRelaxed ? 'standard' : null;
 
   if (isSteadyStateCandidate(incumbent, challenger)) {
     return {

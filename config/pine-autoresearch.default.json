@@ -259,8 +259,14 @@
       },
       "roiRelaxation": {
         "enabled": true,
-        "minScoreDeltaToRelax": 20,
-        "maxRoiRegressionPct": 10
+        "minScoreDeltaToRelax": 12,
+        "maxRoiRegressionPct": 10,
+        "tieredRelaxation": {
+          "enabled": true,
+          "pfMultiplierThreshold": 2,
+          "ddImprovementRequired": true,
+          "maxRoiRegressionPct": 20
+        }
       }
     }
   },

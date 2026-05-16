@@ -360,7 +360,8 @@
     "requirePrimaryPromote": true,
     "minShadowPassCount": 3,
     "minShadowPassRatio": 0.6,
-    "requireCandidateChange": true
+    "requireCandidateChange": true,
+    "diagnosticShadowEvaluation": true
   },
   "autoPromotion": {
     "enabled": true,

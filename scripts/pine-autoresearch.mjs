@@ -1632,6 +1632,12 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       championFingerprint: trackState.championFingerprint ?? null,
       championFamilyKey: buildCandidateFamilyKey({ config: championState?.config, familyKeys: config.autoPromotion?.lineagePolicy?.familyKeys }),
       robustness: selectedCandidate?.robustness ?? null,
+      diagnosticShadowResults: selectedCandidate?.diagnosticShadowResults?.map(r => ({
+        labId: r.labId ?? r.lab?.labId,
+        recommendation: r.decision?.recommendation,
+        scoreDelta: r.decision?.comparisons?.scoreDelta,
+        roiDeltaPct: r.decision?.comparisons?.roiDeltaPct,
+      })) ?? null,
       labSetId: trackState.labSetId ?? null,
       gridName: trackState.gridName ?? config.grid ?? null,
       ...compactRegimeExitManifest,
@@ -2953,16 +2959,31 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
   const requiresPrimaryPromote = config.matrixPolicy?.requirePrimaryPromote !== false;
   if (requiresPrimaryPromote && primaryResult.decision.recommendation !== 'promote') {
     const labResults = [primaryResult];
+    const matrixDecision = decideMatrixPromotion({
+      labResults,
+      shadowsEvaluated: false,
+      policy: config.matrixPolicy,
+      champion: championState,
+      challenger: challengerSummary,
+    });
+
+    // Diagnostic shadow evaluation: collect cross-asset data even on primary failure
+    let diagnosticShadowResults = null;
+    if (config.matrixPolicy?.diagnosticShadowEvaluation === true && labs.length > 1) {
+      const shadowConcurrency = config.regimeExitResearch?.resource?.maxConcurrentLabWorkers ?? 3;
+      try {
+        diagnosticShadowResults = await mapWithConcurrency(labs.slice(1), shadowConcurrency, evaluateLabPair);
+      } catch {
+        // Diagnostic evaluation is best-effort; do not fail the cycle
+        diagnosticShadowResults = null;
+      }
+    }
+
     return {
       labResults,
       holdoutVerdict: null,
-      matrixDecision: decideMatrixPromotion({
-        labResults,
-        shadowsEvaluated: false,
-        policy: config.matrixPolicy,
-        champion: championState,
-        challenger: challengerSummary,
-      }),
+      matrixDecision,
+      diagnosticShadowResults,
     };
   }
 

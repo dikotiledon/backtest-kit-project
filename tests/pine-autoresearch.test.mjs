@@ -721,6 +721,135 @@ test('evaluateMatrix short-circuit marks shadow gates as not_evaluated', async (
   assert.deepEqual(result.matrixDecision.skipped, { reason: 'primary_hold' });
 });
 
+test('evaluateMatrix evaluates shadow labs diagnostically when primary fails and diagnosticShadowEvaluation is enabled', async () => {
+  const champion = makeResult({
+    configId: 'champion',
+    score: 100,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.4,
+    maxDrawdownPct: 5,
+    config: { minPredSum: 2 },
+  });
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 85,
+    tradeCount: 210,
+    roiPct: 20,
+    profitFactor: 1.1,
+    maxDrawdownPct: 5.1,
+    config: { minPredSum: 1.8 },
+  });
+  const calls = [];
+  const result = await evaluateMatrix({
+    primaryLab: {
+      labId: 'primary',
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 100,
+        minTradeRatioVsIncumbent: 0.75,
+        significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+      },
+    },
+    shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
+    blindHoldoutLabs: [],
+    matrixPolicy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 0,
+      minShadowPassRatio: 0,
+      requireCandidateChange: true,
+      diagnosticShadowEvaluation: true,
+    },
+    expectancyPolicy: { enabled: false },
+    regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
+  }, 'run-diagnostic-shadow', champion, challenger, {
+    evaluateConfigOnLab: async ({ lab, variantKey, candidate }) => {
+      calls.push(`${lab.labId}:${variantKey}`);
+      return candidate;
+    },
+  });
+
+  // Primary still fails
+  assert.equal(result.labResults[0].decision.recommendation, 'hold');
+  assert.equal(result.matrixDecision.recommendation, 'hold');
+  assert.equal(result.matrixDecision.gates.primaryPromote, false);
+
+  // Shadow labs were evaluated diagnostically
+  assert.ok(result.diagnosticShadowResults !== null, 'diagnosticShadowResults should not be null');
+  assert.equal(result.diagnosticShadowResults.length, 2);
+
+  // Verify shadow lab calls happened
+  assert.ok(calls.includes('shadow-one:champion'));
+  assert.ok(calls.includes('shadow-one:challenger'));
+  assert.ok(calls.includes('shadow-two:champion'));
+  assert.ok(calls.includes('shadow-two:challenger'));
+});
+
+test('evaluateMatrix does not evaluate diagnostic shadows when option is disabled', async () => {
+  const champion = makeResult({
+    configId: 'champion',
+    score: 100,
+    tradeCount: 200,
+    roiPct: 40,
+    profitFactor: 1.4,
+    maxDrawdownPct: 5,
+    config: { minPredSum: 2 },
+  });
+  const challenger = makeResult({
+    configId: 'challenger',
+    score: 85,
+    tradeCount: 210,
+    roiPct: 20,
+    profitFactor: 1.1,
+    maxDrawdownPct: 5.1,
+    config: { minPredSum: 1.8 },
+  });
+  const calls = [];
+  const result = await evaluateMatrix({
+    primaryLab: {
+      labId: 'primary',
+      thresholds: {
+        minScoreDelta: 0.25,
+        minRoiDeltaPct: 0,
+        minProfitFactorDelta: 0,
+        maxDrawdownDeltaPct: 0.75,
+        minTradeCount: 100,
+        minTradeRatioVsIncumbent: 0.75,
+        significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+      },
+    },
+    shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
+    blindHoldoutLabs: [],
+    matrixPolicy: {
+      requirePrimaryPromote: true,
+      minShadowPassCount: 0,
+      minShadowPassRatio: 0,
+      requireCandidateChange: true,
+      diagnosticShadowEvaluation: false,
+    },
+    expectancyPolicy: { enabled: false },
+    regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
+  }, 'run-no-diagnostic', champion, challenger, {
+    evaluateConfigOnLab: async ({ lab, variantKey, candidate }) => {
+      calls.push(`${lab.labId}:${variantKey}`);
+      return candidate;
+    },
+  });
+
+  // Primary still fails
+  assert.equal(result.labResults[0].decision.recommendation, 'hold');
+  assert.equal(result.matrixDecision.recommendation, 'hold');
+
+  // No shadow evaluation
+  assert.equal(result.diagnosticShadowResults, null);
+
+  // Only primary calls
+  assert.deepEqual(calls, ['primary:champion', 'primary:challenger']);
+});
+
 test('evaluateMatrix still evaluates shadow labs after primary hold when primary promote is optional', async () => {
   const thresholds = {
     minScoreDelta: 0.25,

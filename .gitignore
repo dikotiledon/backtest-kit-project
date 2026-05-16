@@ -9,3 +9,5 @@ coverage/
 .DS_Store
 Thumbs.db
 .worktrees/
+graphify-out/
+test-output.txt

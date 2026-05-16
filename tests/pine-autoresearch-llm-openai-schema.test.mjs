@@ -29,38 +29,58 @@ test('buildCandidateJsonSchema supports repo default array allowlist and exclude
 
   assert.equal(schema.type, 'object');
   assert.deepEqual(Object.keys(schema.properties.params.properties).sort(), [
+    'adxThreshold',
+    'divFreshBars',
+    'divLongBoostValue',
+    'divPivotLeft',
+    'divPivotRight',
     'divRsiLen',
+    'divShortBoostValue',
+    'fusionV4LongAtrWeight',
+    'fusionV4LongEngulfWeight',
+    'fusionV4MaxAbsPrediction',
+    'fusionV4MinAbsPrediction',
+    'fusionV4ShortAtrWeight',
+    'fusionV4ShortEngulfWeight',
+    'minBarsBetween',
     'minPredSum',
-    'riskRewardRatio',
-    'stopLossPct',
+    'slAtrMult',
+    'supertrendAtrLen',
+    'supertrendFactor',
+    'tpAtrMult',
+    'trailActivateR',
+    'trailAtrMult',
   ]);
   assert.deepEqual(schema.properties.params.properties.minPredSum, {
     type: 'number',
-    minimum: 0,
-    maximum: 5,
+    minimum: 0.5,
+    maximum: 4.0,
     multipleOf: 0.1,
   });
   assert.deepEqual(schema.properties.params.properties.divRsiLen, {
     type: 'integer',
-    minimum: 5,
+    minimum: 7,
     maximum: 50,
     multipleOf: 1,
   });
-  assert.deepEqual(schema.properties.params.properties.riskRewardRatio, {
-    type: 'number',
-    minimum: 0.5,
-    maximum: 5,
-    multipleOf: 0.1,
-  });
-  assert.deepEqual(schema.properties.params.properties.stopLossPct, {
+  assert.deepEqual(schema.properties.params.properties.slAtrMult, {
     type: 'number',
     minimum: 0.1,
-    maximum: 10,
+    maximum: 2.0,
+    multipleOf: 0.05,
+  });
+  assert.deepEqual(schema.properties.params.properties.tpAtrMult, {
+    type: 'number',
+    minimum: 3.0,
+    maximum: 12.0,
     multipleOf: 0.1,
   });
   assert.equal(schema.properties.params.properties.useSignalFusion, undefined);
   assert.equal(schema.properties.params.properties.useFusionV4, undefined);
   assert.equal(schema.properties.params.properties.useTrailingStop, undefined);
+  assert.equal(schema.properties.params.properties.useSupertrendFilter, undefined);
+  assert.equal(schema.properties.params.properties.useStopsTP, undefined);
+  assert.equal(schema.properties.params.properties.useDivergenceContext, undefined);
 });
 
 test('buildCandidateJsonSchema creates one strict candidate object schema', () => {

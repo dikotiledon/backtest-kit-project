@@ -1,68 +1,34 @@
 {
-  "version": 1,
+  "version": 2,
   "freezeArchitecture": true,
   "maxChangedParams": 4,
   "parameters": [
-    {
-      "key": "minPredSum",
-      "type": "float",
-      "min": 0,
-      "max": 5,
-      "step": 0.1,
-      "mutability": "tunable",
-      "family": "signal",
-      "rationale": "Entry score threshold tunes selectivity without changing architecture."
-    },
-    {
-      "key": "divRsiLen",
-      "type": "int",
-      "min": 5,
-      "max": 50,
-      "step": 1,
-      "mutability": "tunable",
-      "family": "divergence",
-      "rationale": "Divergence lookback is a bounded scalar sensitivity parameter."
-    },
-    {
-      "key": "riskRewardRatio",
-      "type": "float",
-      "min": 0.5,
-      "max": 5,
-      "step": 0.1,
-      "mutability": "tunable",
-      "family": "risk",
-      "rationale": "Risk/reward scalar adjusts trade management without architecture change."
-    },
-    {
-      "key": "stopLossPct",
-      "type": "float",
-      "min": 0.1,
-      "max": 10,
-      "step": 0.1,
-      "mutability": "tunable",
-      "family": "risk",
-      "rationale": "Stop-loss sizing remains a bounded risk-control scalar."
-    },
-    {
-      "key": "useSignalFusion",
-      "type": "bool",
-      "mutability": "forbidden",
-      "family": "architecture",
-      "rationale": "Signal fusion changes architecture and is frozen for this lane."
-    },
-    {
-      "key": "useFusionV4",
-      "type": "bool",
-      "mutability": "forbidden",
-      "family": "architecture",
-      "rationale": "Fusion V4 toggles architecture and stays locked."
-    },
-    {
-      "key": "useTrailingStop",
-      "type": "bool",
-      "mutability": "forbidden",
-      "family": "architecture",
-      "rationale": "Trailing stop behavior is excluded to keep architecture frozen."
-    }
+    { "key": "minPredSum", "type": "float", "min": 0.5, "max": 4.0, "step": 0.1, "mutability": "tunable", "family": "signal", "rationale": "Entry score threshold tunes selectivity without changing architecture." },
+    { "key": "adxThreshold", "type": "int", "min": 10, "max": 40, "step": 1, "mutability": "tunable", "family": "signal", "rationale": "ADX filter threshold controls trend strength requirement." },
+    { "key": "minBarsBetween", "type": "int", "min": 1, "max": 10, "step": 1, "mutability": "tunable", "family": "signal", "rationale": "Minimum bars between entries prevents overtrading." },
+    { "key": "slAtrMult", "type": "float", "min": 0.1, "max": 2.0, "step": 0.05, "mutability": "tunable", "family": "risk", "rationale": "Stop-loss ATR multiplier controls risk per trade." },
+    { "key": "tpAtrMult", "type": "float", "min": 3.0, "max": 12.0, "step": 0.1, "mutability": "tunable", "family": "risk", "rationale": "Take-profit ATR multiplier controls reward target." },
+    { "key": "trailAtrMult", "type": "float", "min": 0.5, "max": 3.0, "step": 0.1, "mutability": "tunable", "family": "risk", "rationale": "Trailing stop ATR multiplier controls exit tightness." },
+    { "key": "trailActivateR", "type": "float", "min": 0.2, "max": 2.0, "step": 0.1, "mutability": "tunable", "family": "risk", "rationale": "Trailing stop activation R-multiple controls when trailing begins." },
+    { "key": "supertrendAtrLen", "type": "int", "min": 5, "max": 30, "step": 1, "mutability": "tunable", "family": "supertrend", "rationale": "Supertrend ATR lookback period." },
+    { "key": "supertrendFactor", "type": "float", "min": 1.0, "max": 4.0, "step": 0.1, "mutability": "tunable", "family": "supertrend", "rationale": "Supertrend factor controls band width." },
+    { "key": "divFreshBars", "type": "int", "min": 3, "max": 20, "step": 1, "mutability": "tunable", "family": "divergence", "rationale": "Divergence freshness window in bars." },
+    { "key": "divPivotLeft", "type": "int", "min": 1, "max": 10, "step": 1, "mutability": "tunable", "family": "divergence", "rationale": "Divergence pivot left lookback." },
+    { "key": "divPivotRight", "type": "int", "min": 1, "max": 10, "step": 1, "mutability": "tunable", "family": "divergence", "rationale": "Divergence pivot right lookback." },
+    { "key": "divRsiLen", "type": "int", "min": 7, "max": 50, "step": 1, "mutability": "tunable", "family": "divergence", "rationale": "RSI length for divergence detection." },
+    { "key": "divLongBoostValue", "type": "float", "min": 0.1, "max": 2.0, "step": 0.1, "mutability": "tunable", "family": "divergence", "rationale": "Long divergence signal boost magnitude." },
+    { "key": "divShortBoostValue", "type": "float", "min": 0.1, "max": 2.0, "step": 0.1, "mutability": "tunable", "family": "divergence", "rationale": "Short divergence signal boost magnitude." },
+    { "key": "fusionV4MinAbsPrediction", "type": "float", "min": 0.5, "max": 5.0, "step": 0.25, "mutability": "tunable", "family": "fusion", "rationale": "Minimum absolute prediction for fusion V4 entry." },
+    { "key": "fusionV4MaxAbsPrediction", "type": "float", "min": 2.0, "max": 8.0, "step": 0.25, "mutability": "tunable", "family": "fusion", "rationale": "Maximum absolute prediction for fusion V4 entry." },
+    { "key": "fusionV4LongAtrWeight", "type": "float", "min": -1.0, "max": 1.0, "step": 0.05, "mutability": "tunable", "family": "fusion", "rationale": "ATR confirmation weight for long fusion signals." },
+    { "key": "fusionV4LongEngulfWeight", "type": "float", "min": -1.0, "max": 1.0, "step": 0.05, "mutability": "tunable", "family": "fusion", "rationale": "Engulfing confirmation weight for long fusion signals." },
+    { "key": "fusionV4ShortAtrWeight", "type": "float", "min": -1.0, "max": 1.0, "step": 0.05, "mutability": "tunable", "family": "fusion", "rationale": "ATR confirmation weight for short fusion signals." },
+    { "key": "fusionV4ShortEngulfWeight", "type": "float", "min": -1.0, "max": 1.0, "step": 0.05, "mutability": "tunable", "family": "fusion", "rationale": "Engulfing confirmation weight for short fusion signals." },
+    { "key": "useSignalFusion", "type": "bool", "mutability": "forbidden", "family": "architecture", "rationale": "Signal fusion changes architecture and is frozen for this lane." },
+    { "key": "useFusionV4", "type": "bool", "mutability": "forbidden", "family": "architecture", "rationale": "Fusion V4 toggles architecture and stays locked." },
+    { "key": "useTrailingStop", "type": "bool", "mutability": "forbidden", "family": "architecture", "rationale": "Trailing stop behavior is excluded to keep architecture frozen." },
+    { "key": "useSupertrendFilter", "type": "bool", "mutability": "forbidden", "family": "architecture", "rationale": "Supertrend filter is a structural decision, not a tuning knob." },
+    { "key": "useStopsTP", "type": "bool", "mutability": "forbidden", "family": "architecture", "rationale": "Stop/TP mode is architectural." },
+    { "key": "useDivergenceContext", "type": "bool", "mutability": "forbidden", "family": "architecture", "rationale": "Divergence context is a structural feature toggle." }
   ]
 }

@@ -95,10 +95,35 @@ test('buildChatCompletionsRequest supports repo default array allowlist', () => 
   });
 
   const params = request.response_format.json_schema.schema.properties.params.properties;
-  assert.deepEqual(Object.keys(params).sort(), ['divRsiLen', 'minPredSum', 'riskRewardRatio', 'stopLossPct']);
+  assert.deepEqual(Object.keys(params).sort(), [
+    'adxThreshold',
+    'divFreshBars',
+    'divLongBoostValue',
+    'divPivotLeft',
+    'divPivotRight',
+    'divRsiLen',
+    'divShortBoostValue',
+    'fusionV4LongAtrWeight',
+    'fusionV4LongEngulfWeight',
+    'fusionV4MaxAbsPrediction',
+    'fusionV4MinAbsPrediction',
+    'fusionV4ShortAtrWeight',
+    'fusionV4ShortEngulfWeight',
+    'minBarsBetween',
+    'minPredSum',
+    'slAtrMult',
+    'supertrendAtrLen',
+    'supertrendFactor',
+    'tpAtrMult',
+    'trailActivateR',
+    'trailAtrMult',
+  ]);
   assert.equal(params.useSignalFusion, undefined);
   assert.equal(params.useFusionV4, undefined);
   assert.equal(params.useTrailingStop, undefined);
+  assert.equal(params.useSupertrendFilter, undefined);
+  assert.equal(params.useStopsTP, undefined);
+  assert.equal(params.useDivergenceContext, undefined);
 });
 
 test('extractChatCompletionsText extracts first message content and rejects bad finish reasons', () => {

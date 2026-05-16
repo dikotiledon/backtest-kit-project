@@ -1557,3 +1557,43 @@ test('detectRotationTrigger preserves explicit manifest.rotationTrigger regardle
   });
   assert.equal(trigger, 'noChangeStreak');
 });
+
+test('nextTrackState does NOT reset noScoreImprovementStreak when bestScoreDelta > 0 but primaryLabPassed is false', () => {
+  const baseState = {
+    ...defaultSchedulerState(),
+    noScoreImprovementStreak: 3,
+  };
+  const next = nextTrackState({
+    state: baseState,
+    policy: { stagnation: { enabled: true, noScoreImprovementEscalateAfter: 99, noNewCandidateEscalateAfter: 99, lowEmissionEscalateAfter: 99, holdEscalateAfter: 99 } },
+    manifest: {
+      bestScoreDelta: 5,
+      promotionEligible: false,
+      primaryLabPassed: false,
+      searchEfficiency: { emittedVariantCount: 10 },
+    },
+  });
+
+  // Score improved but primary lab rejected it — not real progress
+  assert.equal(next.noScoreImprovementStreak, 4);
+});
+
+test('nextTrackState DOES reset noScoreImprovementStreak when primaryLabPassed is true', () => {
+  const baseState = {
+    ...defaultSchedulerState(),
+    noScoreImprovementStreak: 3,
+  };
+  const next = nextTrackState({
+    state: baseState,
+    policy: { stagnation: { enabled: true, noScoreImprovementEscalateAfter: 99, noNewCandidateEscalateAfter: 99, lowEmissionEscalateAfter: 99, holdEscalateAfter: 99 } },
+    manifest: {
+      bestScoreDelta: 5,
+      promotionEligible: false,
+      primaryLabPassed: true,
+      searchEfficiency: { emittedVariantCount: 10 },
+    },
+  });
+
+  // Primary lab passed — real progress, streak resets
+  assert.equal(next.noScoreImprovementStreak, 0);
+});

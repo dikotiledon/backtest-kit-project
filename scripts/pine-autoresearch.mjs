@@ -1614,6 +1614,7 @@ export function buildScoutOrchestrationState({ config, runId, championState, his
       sameTrackCycleStreak,
       topCandidateSimilarity: topCandidateSimilaritySummary.topCandidateSimilarity,
       promotionEligible,
+      primaryLabPassed: labResults?.[0]?.decision?.recommendation === 'promote',
       promotionReady,
       promotionEligibleReason,
       holdoutGate,

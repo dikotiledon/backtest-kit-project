@@ -175,7 +175,11 @@
       "lowEmissionEscalateAfter": 3,
       "lowEmissionThreshold": 3,
       "noScoreImprovementConvergeAfter": 12,
-      "requireEscapeExhaustion": true
+      "requireEscapeExhaustion": true,
+      "deescalation": {
+        "enabled": true,
+        "consecutiveHealthyCycles": 2
+      }
     }
   },
   "noveltyPolicy": {

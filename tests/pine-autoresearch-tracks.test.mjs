@@ -1597,3 +1597,91 @@ test('nextTrackState DOES reset noScoreImprovementStreak when primaryLabPassed i
   // Primary lab passed — real progress, streak resets
   assert.equal(next.noScoreImprovementStreak, 0);
 });
+
+test('nextStagnationState de-escalates when all streaks are 0 for consecutiveHealthyCycles', () => {
+  const result = nextStagnationState({
+    previousLevel: 3,
+    noNewCandidateStreak: 0,
+    noScoreImprovementStreak: 0,
+    noChangeStreak: 0,
+    lowEmissionStreak: 0,
+    promotionEligible: false,
+    topCandidateSimilarity: 0.5,
+    policy: {
+      enabled: true,
+      noNewCandidateEscalateAfter: 2,
+      noScoreImprovementEscalateAfter: 2,
+      holdEscalateAfter: 3,
+      lowEmissionEscalateAfter: 3,
+      highSimilarityThreshold: 0.8,
+      maxStagnationLevel: 6,
+      deescalation: {
+        enabled: true,
+        consecutiveHealthyCycles: 2,
+      },
+      _healthyCycleCount: 2,
+    },
+  });
+
+  assert.equal(result.stagnationLevel, 2,
+    'should de-escalate from 3 to 2 after 2 consecutive healthy cycles');
+  assert.equal(result.stagnationReason, 'deescalation');
+});
+
+test('nextStagnationState does NOT de-escalate when healthy cycles below threshold', () => {
+  const result = nextStagnationState({
+    previousLevel: 3,
+    noNewCandidateStreak: 0,
+    noScoreImprovementStreak: 0,
+    noChangeStreak: 0,
+    lowEmissionStreak: 0,
+    promotionEligible: false,
+    topCandidateSimilarity: 0.5,
+    policy: {
+      enabled: true,
+      noNewCandidateEscalateAfter: 2,
+      noScoreImprovementEscalateAfter: 2,
+      holdEscalateAfter: 3,
+      lowEmissionEscalateAfter: 3,
+      highSimilarityThreshold: 0.8,
+      maxStagnationLevel: 6,
+      deescalation: {
+        enabled: true,
+        consecutiveHealthyCycles: 2,
+      },
+      _healthyCycleCount: 1,
+    },
+  });
+
+  assert.equal(result.stagnationLevel, 3,
+    'should NOT de-escalate: only 1 healthy cycle, need 2');
+});
+
+test('nextStagnationState does NOT de-escalate below 0', () => {
+  const result = nextStagnationState({
+    previousLevel: 0,
+    noNewCandidateStreak: 0,
+    noScoreImprovementStreak: 0,
+    noChangeStreak: 0,
+    lowEmissionStreak: 0,
+    promotionEligible: false,
+    topCandidateSimilarity: 0.5,
+    policy: {
+      enabled: true,
+      noNewCandidateEscalateAfter: 2,
+      noScoreImprovementEscalateAfter: 2,
+      holdEscalateAfter: 3,
+      lowEmissionEscalateAfter: 3,
+      highSimilarityThreshold: 0.8,
+      maxStagnationLevel: 6,
+      deescalation: {
+        enabled: true,
+        consecutiveHealthyCycles: 2,
+      },
+      _healthyCycleCount: 5,
+    },
+  });
+
+  assert.equal(result.stagnationLevel, 0,
+    'should stay at 0, never go negative');
+});

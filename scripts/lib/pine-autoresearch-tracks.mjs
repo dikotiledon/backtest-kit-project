@@ -60,6 +60,7 @@ const STAGNATION_POLICY_KEYS = new Set([
   'maxStagnationLevel',
   'lowEmissionEscalateAfter',
   'lowEmissionThreshold',
+  'deescalation',
 ]);
 
 function hasStagnationPolicyKeys(value) {
@@ -346,6 +347,7 @@ export function defaultSchedulerState() {
     lastEscalatedAt: null,
     blockedPromotionFingerprints: [],
     tabuRejectedFingerprints: [],
+    _healthyCycleCount: 0,
     laneExhaustions: {},
     lastLaneExhaustion: null,
   };
@@ -480,6 +482,27 @@ export function nextStagnationState(input = {}) {
     Math.floor(Number.isFinite(Number(noScoreImprovementStreak)) ? Number(noScoreImprovementStreak) : 0),
   );
 
+  // De-escalation: if all escalation streaks are 0 and we've been healthy for N cycles, reduce level by 1
+  const deescalationPolicy = isPlainObject(sourcePolicy.deescalation) ? sourcePolicy.deescalation : {};
+  const deescalationEnabled = deescalationPolicy.enabled === true;
+  const consecutiveHealthyCycles = normalizeNumericPolicyInteger(
+    deescalationPolicy.consecutiveHealthyCycles ?? deescalationPolicy.deescalateAfter,
+    { fallback: 2, min: 1 },
+  );
+  const healthyCycleCount = normalizeNonNegativeInteger(sourcePolicy._healthyCycleCount, 0);
+  const allStreaksZero = normalizedNoNewCandidateStreak === 0
+    && normalizedNoScoreImprovementStreak === 0
+    && normalizedNoChangeStreak === 0
+    && normalizedLowEmissionStreak === 0;
+
+  if (deescalationEnabled && normalizedPreviousLevel > 0 && allStreaksZero && healthyCycleCount >= consecutiveHealthyCycles) {
+    return {
+      stagnationLevel: normalizedPreviousLevel - 1,
+      stagnationReason: 'deescalation',
+      lastEscalatedAt: sourcePolicy.lastEscalatedAt ?? null,
+    };
+  }
+
   const candidates = [
     {
       reason: 'noScoreImprovementStreak',
@@ -599,6 +622,14 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     : Number.isFinite(emittedVariantCount) && emittedVariantCount <= lowEmissionThreshold
       ? previous.lowEmissionStreak + 1
       : 0;
+
+  const allCurrentStreaksZero = noNewCandidateStreak === 0
+    && noScoreImprovementStreak === 0
+    && noChangeStreak === 0
+    && lowEmissionStreak === 0;
+  const previousHealthyCycleCount = normalizeNonNegativeInteger(previous._healthyCycleCount, 0);
+  const healthyCycleCount = allCurrentStreaksZero ? previousHealthyCycleCount + 1 : 0;
+
   const stagnationState = configuredStagnationPolicy.enabled === false
     ? {
         stagnationLevel: previous.stagnationLevel ?? 0,
@@ -617,6 +648,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
           ...configuredStagnationPolicy,
           currentReason: previous.stagnationReason,
           lastEscalatedAt: previous.lastEscalatedAt,
+          _healthyCycleCount: healthyCycleCount,
         },
         now: manifest.generatedAt ?? null,
       });
@@ -667,6 +699,7 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     noScoreImprovementStreak,
     lowEmissionStreak,
     sameTrackCycleStreak,
+    _healthyCycleCount: healthyCycleCount,
     lastNoveltySignature: noveltySignature,
     lastChampionFingerprint: championFingerprint ?? previous.lastChampionFingerprint,
     lastCandidateFingerprint: candidateFingerprint ?? previous.lastCandidateFingerprint,
@@ -724,6 +757,7 @@ function normalizeSchedulerState(state = {}) {
     tabuRejectedFingerprints: Array.isArray(state.tabuRejectedFingerprints)
       ? [...state.tabuRejectedFingerprints]
       : base.tabuRejectedFingerprints,
+    _healthyCycleCount: normalizeNonNegativeInteger(state._healthyCycleCount, base._healthyCycleCount),
     laneExhaustions: normalizeLaneExhaustions(state.laneExhaustions),
     lastLaneExhaustion: isPlainObject(state.lastLaneExhaustion) ? clone(state.lastLaneExhaustion) : base.lastLaneExhaustion,
   };

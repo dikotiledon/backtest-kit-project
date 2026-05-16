@@ -482,7 +482,10 @@ export function nextStagnationState(input = {}) {
     Math.floor(Number.isFinite(Number(noScoreImprovementStreak)) ? Number(noScoreImprovementStreak) : 0),
   );
 
-  // De-escalation: if all escalation streaks are 0 and we've been healthy for N cycles, reduce level by 1
+  // De-escalation: if the system has been productive for N cycles, reduce level by 1.
+  // "Productive" means emitting variants, finding new candidates, and not stuck in low-emission.
+  // noScoreImprovementStreak is excluded because it increments when the system IS working
+  // but candidates can't pass the promotion gate — that's a gate mismatch, not stagnation.
   const deescalationPolicy = isPlainObject(sourcePolicy.deescalation) ? sourcePolicy.deescalation : {};
   const deescalationEnabled = deescalationPolicy.enabled === true;
   const consecutiveHealthyCycles = normalizeNumericPolicyInteger(
@@ -490,12 +493,11 @@ export function nextStagnationState(input = {}) {
     { fallback: 2, min: 1 },
   );
   const healthyCycleCount = normalizeNonNegativeInteger(sourcePolicy._healthyCycleCount, 0);
-  const allStreaksZero = normalizedNoNewCandidateStreak === 0
-    && normalizedNoScoreImprovementStreak === 0
+  const productiveStreaksZero = normalizedNoNewCandidateStreak === 0
     && normalizedNoChangeStreak === 0
     && normalizedLowEmissionStreak === 0;
 
-  if (deescalationEnabled && normalizedPreviousLevel > 0 && allStreaksZero && healthyCycleCount >= consecutiveHealthyCycles) {
+  if (deescalationEnabled && normalizedPreviousLevel > 0 && productiveStreaksZero && healthyCycleCount >= consecutiveHealthyCycles) {
     return {
       stagnationLevel: normalizedPreviousLevel - 1,
       stagnationReason: 'deescalation',
@@ -623,12 +625,17 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
       ? previous.lowEmissionStreak + 1
       : 0;
 
-  const allCurrentStreaksZero = noNewCandidateStreak === 0
-    && noScoreImprovementStreak === 0
+  // A cycle is "healthy" for de-escalation if the system is productive:
+  // - Emitting variants (not stuck in zero-emission)
+  // - Finding new candidates (not repeating the same config)
+  // noScoreImprovementStreak is excluded because it increments when the system
+  // IS generating candidates but they can't pass the promotion gate — that's
+  // not stagnation, it's a gate mismatch that de-escalation should help resolve.
+  const productiveCycle = noNewCandidateStreak === 0
     && noChangeStreak === 0
     && lowEmissionStreak === 0;
   const previousHealthyCycleCount = normalizeNonNegativeInteger(previous._healthyCycleCount, 0);
-  const healthyCycleCount = allCurrentStreaksZero ? previousHealthyCycleCount + 1 : 0;
+  const healthyCycleCount = productiveCycle ? previousHealthyCycleCount + 1 : 0;
 
   const stagnationState = configuredStagnationPolicy.enabled === false
     ? {

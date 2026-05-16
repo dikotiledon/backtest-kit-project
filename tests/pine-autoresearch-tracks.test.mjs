@@ -1685,3 +1685,62 @@ test('nextStagnationState does NOT de-escalate below 0', () => {
   assert.equal(result.stagnationLevel, 0,
     'should stay at 0, never go negative');
 });
+
+test('nextStagnationState de-escalates even when noScoreImprovementStreak > 0 (productive but gate-blocked)', () => {
+  const result = nextStagnationState({
+    previousLevel: 3,
+    noNewCandidateStreak: 0,
+    noScoreImprovementStreak: 5,
+    noChangeStreak: 0,
+    lowEmissionStreak: 0,
+    promotionEligible: false,
+    topCandidateSimilarity: 0.5,
+    policy: {
+      enabled: true,
+      noNewCandidateEscalateAfter: 2,
+      noScoreImprovementEscalateAfter: 2,
+      holdEscalateAfter: 3,
+      lowEmissionEscalateAfter: 3,
+      highSimilarityThreshold: 0.8,
+      maxStagnationLevel: 6,
+      deescalation: {
+        enabled: true,
+        consecutiveHealthyCycles: 2,
+      },
+      _healthyCycleCount: 3,
+    },
+  });
+
+  assert.equal(result.stagnationLevel, 2,
+    'should de-escalate: system is productive (emitting, finding candidates) even though score streak is high');
+  assert.equal(result.stagnationReason, 'deescalation');
+});
+
+test('nextStagnationState does NOT de-escalate when noNewCandidateStreak > 0 (truly stuck)', () => {
+  const result = nextStagnationState({
+    previousLevel: 3,
+    noNewCandidateStreak: 2,
+    noScoreImprovementStreak: 0,
+    noChangeStreak: 0,
+    lowEmissionStreak: 0,
+    promotionEligible: false,
+    topCandidateSimilarity: 0.5,
+    policy: {
+      enabled: true,
+      noNewCandidateEscalateAfter: 2,
+      noScoreImprovementEscalateAfter: 2,
+      holdEscalateAfter: 3,
+      lowEmissionEscalateAfter: 3,
+      highSimilarityThreshold: 0.8,
+      maxStagnationLevel: 6,
+      deescalation: {
+        enabled: true,
+        consecutiveHealthyCycles: 2,
+      },
+      _healthyCycleCount: 5,
+    },
+  });
+
+  assert.ok(result.stagnationLevel >= 3,
+    'should NOT de-escalate: noNewCandidateStreak > 0 means truly stuck');
+});

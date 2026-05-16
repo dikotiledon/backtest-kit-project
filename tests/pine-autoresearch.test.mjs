@@ -7817,7 +7817,7 @@ test('shortConfigLabel produces readable short label', () => {
 
 test('resolveEffectiveSchedulerTabuPolicy honors searchPolicy.tabuPolicy before rotation tabuLimit', () => {
   assert.deepEqual(resolveEffectiveSchedulerTabuPolicy({
-    searchPolicy: {
+     searchPolicy: {
       tabuPolicy: { maxAgeCycles: 7, maxEntries: 40, dropOnChampionChange: true },
     },
     rotationPolicy: { tabuLimit: 1000 },
@@ -7826,4 +7826,73 @@ test('resolveEffectiveSchedulerTabuPolicy honors searchPolicy.tabuPolicy before 
     maxEntries: 40,
     dropOnChampionChange: true,
   });
+});
+
+test('decideAutoresearchOutcome allows negative ROI delta when composite score delta exceeds relaxation threshold', () => {
+  const result = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'inc', score: 152.47, roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261 }),
+    challenger: makeResult({ configId: 'chal', score: 186.97, roiPct: 86.83, profitFactor: 9.63, maxDrawdownPct: 1.25, tradeCount: 265 }),
+    thresholds: {
+      minScoreDelta: 0.1,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      roiRelaxation: {
+        enabled: true,
+        minScoreDeltaToRelax: 20,
+        maxRoiRegressionPct: 10,
+      },
+    },
+  });
+
+  assert.equal(result.recommendation, 'promote');
+  assert.ok(!result.failedGates.includes('roi'));
+});
+
+test('decideAutoresearchOutcome still blocks ROI regression when score delta is below relaxation threshold', () => {
+  const result = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'inc', score: 152.47, roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261 }),
+    challenger: makeResult({ configId: 'chal', score: 155.0, roiPct: 86.83, profitFactor: 4.0, maxDrawdownPct: 2.5, tradeCount: 250 }),
+    thresholds: {
+      minScoreDelta: 0.1,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      roiRelaxation: {
+        enabled: true,
+        minScoreDeltaToRelax: 20,
+        maxRoiRegressionPct: 10,
+      },
+    },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.ok(result.failedGates.includes('roi'));
+});
+
+test('decideAutoresearchOutcome blocks extreme ROI regression even with high score delta', () => {
+  const result = decideAutoresearchOutcome({
+    incumbent: makeResult({ configId: 'inc', score: 152.47, roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261 }),
+    challenger: makeResult({ configId: 'chal', score: 200.0, roiPct: 70.0, profitFactor: 15.0, maxDrawdownPct: 0.5, tradeCount: 270 }),
+    thresholds: {
+      minScoreDelta: 0.1,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: 0,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      roiRelaxation: {
+        enabled: true,
+        minScoreDeltaToRelax: 20,
+        maxRoiRegressionPct: 10,
+      },
+    },
+  });
+
+  assert.equal(result.recommendation, 'hold');
+  assert.ok(result.failedGates.includes('roi'));
 });

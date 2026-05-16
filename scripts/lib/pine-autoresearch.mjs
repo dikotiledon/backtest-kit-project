@@ -601,6 +601,14 @@ export function decideAutoresearchOutcome({
     penalizedProfitFactorDelta: round(((challenger.metrics?.profitFactor ?? 0) - (incumbent.metrics?.profitFactor ?? 0)) - complexity.profitFactorPenalty, 4),
   };
 
+  const roiRelaxation = thresholds.roiRelaxation || {};
+  const roiRelaxationEnabled = roiRelaxation.enabled === true;
+  const roiRelaxed = roiRelaxationEnabled
+    && comparisons.scoreDelta >= (roiRelaxation.minScoreDeltaToRelax ?? Infinity)
+    && comparisons.roiDeltaPct >= -(roiRelaxation.maxRoiRegressionPct ?? 0);
+  const effectiveRoiPass = comparisons.roiDeltaPct >= adjustedThresholds.minRoiDeltaPct || roiRelaxed;
+  comparisons.roiRelaxationApplied = roiRelaxed && comparisons.roiDeltaPct < adjustedThresholds.minRoiDeltaPct;
+
   if (isSteadyStateCandidate(incumbent, challenger)) {
     return {
       recommendation: 'hold',
@@ -627,7 +635,7 @@ export function decideAutoresearchOutcome({
 
   const gates = {
     score: comparisons.scoreDelta >= adjustedThresholds.minScoreDelta,
-    roi: comparisons.roiDeltaPct >= adjustedThresholds.minRoiDeltaPct,
+    roi: effectiveRoiPass,
     profitFactor: comparisons.profitFactorDelta >= adjustedThresholds.minProfitFactorDelta,
     drawdown: comparisons.drawdownDeltaPct <= maxDrawdownDeltaPct,
     tradeFloor: (challenger.metrics?.tradeCount ?? 0) >= minTradeCount,

@@ -171,10 +171,10 @@
       "noNewCandidateEscalateAfter": 2,
       "holdEscalateAfter": 3,
       "highSimilarityThreshold": 0.8,
-      "maxStagnationLevel": 4,
+      "maxStagnationLevel": 6,
       "lowEmissionEscalateAfter": 3,
       "lowEmissionThreshold": 3,
-      "noScoreImprovementConvergeAfter": 6,
+      "noScoreImprovementConvergeAfter": 12,
       "requireEscapeExhaustion": true
     }
   },
@@ -256,6 +256,11 @@
       "significance": {
         "minRelativeScoreDelta": 0.003,
         "minTradeCount": 150
+      },
+      "roiRelaxation": {
+        "enabled": true,
+        "minScoreDeltaToRelax": 20,
+        "maxRoiRegressionPct": 10
       }
     }
   },

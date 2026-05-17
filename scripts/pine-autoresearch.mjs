@@ -2026,6 +2026,9 @@ function getThresholds(raw = {}) {
   if (raw.significance != null) {
     thresholds.significance = raw.significance;
   }
+  if (raw.roiRelaxation != null) {
+    thresholds.roiRelaxation = raw.roiRelaxation;
+  }
   return thresholds;
 }
 

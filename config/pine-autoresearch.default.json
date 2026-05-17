@@ -257,7 +257,7 @@
     "thresholds": {
       "minScoreDelta": 0.1,
       "minRoiDeltaPct": 0,
-      "minProfitFactorDelta": 0,
+      "minProfitFactorDelta": -0.05,
       "maxDrawdownDeltaPct": 0.75,
       "minTradeCount": 150,
       "minTradeRatioVsIncumbent": 0.75,

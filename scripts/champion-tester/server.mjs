@@ -1,4 +1,5 @@
 import express from 'express';
+import { WebSocketServer } from 'ws';
 import path from 'node:path';
 import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
@@ -141,8 +142,10 @@ app.post('/api/test/run', async (req, res) => {
       });
     }
 
+    broadcast('test:start', { symbol, timeframe });
     const result = await runChampionTest({ matrixId, dataset, slice: slice || {} });
     await store.save(result);
+    broadcast('test:complete', result);
     res.json(result);
   } catch (err) {
     if (err.code === 'RUN_IN_PROGRESS') {
@@ -206,7 +209,8 @@ app.post('/api/sweep/run', async (req, res) => {
       return { exchange: parsed.exchange, symbol: parsed.symbol, timeframe: d.timeframe };
     });
 
-    const result = await runSweep({ matrixId, datasets: parsedDatasets, dataDir: DATA_DIR });
+    const onProgress = (progressData) => broadcast('sweep:progress', progressData);
+    const result = await runSweep({ matrixId, datasets: parsedDatasets, dataDir: DATA_DIR, onProgress });
 
     // Save successful results to store
     if (result.results) {
@@ -251,10 +255,25 @@ if (process.env.NODE_ENV === 'production') {
 const PORT = parseInt(process.env.CHAMPION_TESTER_PORT || '3847', 10);
 
 await startupCleanup();
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`\n  ⚡ Champion Tester running at http://localhost:${PORT}`);
   console.log(`  📁 Data: ${DATA_DIR}`);
   console.log(`  📁 Results: ${RESULTS_DIR}\n`);
 });
 
+// ─── WebSocket Server ─────────────────────────────────────────────────────────
+
+const wss = new WebSocketServer({ server, path: '/ws' });
+wss.on('connection', (ws) => {
+  ws.send(JSON.stringify({ type: 'connected', data: { service: 'champion-tester' } }));
+});
+
+function broadcast(type, data) {
+  const msg = JSON.stringify({ type, data });
+  for (const client of wss.clients) {
+    if (client.readyState === 1) client.send(msg);
+  }
+}
+
+export { broadcast };
 export default app;

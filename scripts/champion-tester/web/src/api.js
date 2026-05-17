@@ -32,6 +32,9 @@ const api = {
   getResults: (params = {}) =>
     request('GET', `/results?${new URLSearchParams(params)}`),
   deleteResult: (runId) => request('DELETE', `/results/${runId}`),
+  runSweep: (matrixId, datasets) => request('POST', '/sweep/run', { matrixId, datasets }),
+  getSweepStatus: () => request('GET', '/sweep/status'),
+  cancelSweep: () => request('POST', '/sweep/cancel'),
 };
 
 export { api };

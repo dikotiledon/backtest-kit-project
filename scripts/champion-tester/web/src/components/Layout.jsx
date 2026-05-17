@@ -1,6 +1,7 @@
 const TABS = [
   { id: 'datasets', label: 'Datasets' },
   { id: 'test', label: 'Test' },
+  { id: 'sweep', label: 'Sweep' },
   { id: 'results', label: 'Results' },
 ];
 

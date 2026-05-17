@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useDatasets } from '../hooks/useDatasets.js';
 import { useChampions } from '../hooks/useChampions.js';
+import { useWebSocket } from '../hooks/useWebSocket.js';
 import api from '../api.js';
 import MetricsCard from './MetricsCard.jsx';
 
@@ -14,8 +15,21 @@ export default function SweepPanel() {
 
   const { champions } = useChampions();
   const { datasets } = useDatasets();
+  const { connected, subscribe } = useWebSocket();
 
-  // Polling for sweep status
+  // WebSocket subscription for real-time sweep progress
+  useEffect(() => {
+    const unsub = subscribe('sweep:progress', (data) => {
+      setProgress(data);
+      if (!data.running) {
+        setRunning(false);
+        setResults(data.results || []);
+      }
+    });
+    return unsub;
+  }, [subscribe]);
+
+  // Fallback polling at reduced interval (5s)
   useEffect(() => {
     if (!running) return;
     const interval = setInterval(async () => {
@@ -32,7 +46,7 @@ export default function SweepPanel() {
         setRunning(false);
         clearInterval(interval);
       }
-    }, 2000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [running]);
 
@@ -159,13 +173,19 @@ export default function SweepPanel() {
       </div>
 
       {/* Run Sweep Button */}
-      <button
-        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 rounded font-medium transition-colors"
-        disabled={running || !selectedChampion || selectedDatasets.size === 0}
-        onClick={handleRunSweep}
-      >
-        {running ? 'Running Sweep...' : 'Run Sweep'}
-      </button>
+      <div className="flex items-center gap-3">
+        <button
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 rounded font-medium transition-colors"
+          disabled={running || !selectedChampion || selectedDatasets.size === 0}
+          onClick={handleRunSweep}
+        >
+          {running ? 'Running Sweep...' : 'Run Sweep'}
+        </button>
+        <span
+          className={`inline-block w-2.5 h-2.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
+          title={connected ? 'WebSocket connected' : 'WebSocket disconnected'}
+        />
+      </div>
 
       {/* Error Display */}
       {error && (

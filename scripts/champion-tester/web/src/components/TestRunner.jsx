@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useDatasets } from '../hooks/useDatasets.js';
 import { useChampions } from '../hooks/useChampions.js';
+import { useWebSocket } from '../hooks/useWebSocket.js';
 import api from '../api.js';
 import MetricsCard from './MetricsCard.jsx';
 
@@ -10,9 +11,45 @@ export default function TestRunner() {
   const [running, setRunning] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [phase, setPhase] = useState('idle');
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   const { champions } = useChampions();
   const { datasets } = useDatasets();
+  const { connected, subscribe } = useWebSocket();
+  const intervalRef = useRef(null);
+
+  // Subscribe to WebSocket events
+  useEffect(() => {
+    const unsubStart = subscribe('test:start', () => {
+      setPhase('executing');
+      setElapsedMs(0);
+      intervalRef.current = setInterval(() => {
+        setElapsedMs((prev) => prev + 500);
+      }, 500);
+    });
+
+    const unsubComplete = subscribe('test:complete', (data) => {
+      setPhase('complete');
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+      if (data.result) {
+        setResult(data.result);
+      }
+      setRunning(false);
+    });
+
+    return () => {
+      unsubStart();
+      unsubComplete();
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current);
+        intervalRef.current = null;
+      }
+    };
+  }, [subscribe]);
 
   const handleRun = async () => {
     if (!selectedChampion || !selectedDataset) return;
@@ -20,6 +57,8 @@ export default function TestRunner() {
     setRunning(true);
     setResult(null);
     setError(null);
+    setPhase('starting');
+    setElapsedMs(0);
 
     try {
       const dataset = datasets.find((d) => d.id === selectedDataset);
@@ -73,13 +112,24 @@ export default function TestRunner() {
       </div>
 
       {/* Run Button */}
-      <button
-        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 rounded font-medium transition-colors"
-        disabled={running || !selectedChampion || !selectedDataset}
-        onClick={handleRun}
-      >
-        {running ? 'Running...' : 'Run Test'}
-      </button>
+      <div className="flex items-center gap-3">
+        <button
+          className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-700 disabled:text-gray-500 rounded font-medium transition-colors"
+          disabled={running || !selectedChampion || !selectedDataset}
+          onClick={handleRun}
+        >
+          {running ? 'Running...' : 'Run Test'}
+        </button>
+        <span
+          className={`inline-block w-2.5 h-2.5 rounded-full ${connected ? 'bg-green-500' : 'bg-red-500'}`}
+          title={connected ? 'WebSocket connected' : 'WebSocket disconnected'}
+        />
+        {phase !== 'idle' && phase !== 'complete' && (
+          <span className="text-sm text-gray-400">
+            {phase === 'starting' ? 'Starting...' : `Executing... ${(elapsedMs / 1000).toFixed(1)}s`}
+          </span>
+        )}
+      </div>
 
       {/* Error Display */}
       {error && (

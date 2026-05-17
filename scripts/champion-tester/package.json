@@ -1,0 +1,26 @@
+{
+  "name": "champion-tester",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "node --watch server.mjs",
+    "dev:web": "vite",
+    "build": "vite build",
+    "start": "node server.mjs",
+    "test": "node --test tests/"
+  },
+  "dependencies": {
+    "express": "^4.21.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.4.0",
+    "concurrently": "^9.1.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwindcss": "^4.0.0",
+    "vite": "^6.0.0"
+  }
+}

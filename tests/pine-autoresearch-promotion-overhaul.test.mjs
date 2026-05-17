@@ -249,3 +249,59 @@ describe('Issue #4: track rotation off-by-one', () => {
       'Expected activeTrackId to remain set (no rotation) when streak is below max');
   });
 });
+
+describe('Issue #6: scoreImproved circular dependency', () => {
+  const baseState = {
+    activeTrackId: 'track-A',
+    sameTrackCycleStreak: 2,
+    noChangeStreak: 0,
+    noNewCandidateStreak: 0,
+    lowEmissionStreak: 0,
+    noScoreImprovementStreak: 4,
+    cycleIndex: 10,
+    tabuRejectedFingerprints: [],
+  };
+
+  const basePolicy = {
+    maxCyclesPerTrack: 99,
+    noChangeStreakRotateAfter: 99,
+    similarityRotateAbove: 0.99,
+    zeroEmissionRotateAfter: 99,
+  };
+
+  it('should reset noScoreImprovementStreak when best candidate beats champion score even if primary lab holds', () => {
+    const result = nextTrackState({
+      state: baseState,
+      policy: basePolicy,
+      manifest: {
+        promotionEligible: false,
+        primaryLabPassed: false,
+        activeTrackId: 'track-A',
+        topCandidateSimilarity: 0.1,
+        searchEfficiency: { emittedVariantCount: 10 },
+        bestScoreDelta: 5.2, // positive: candidate beats champion
+      },
+    });
+
+    assert.equal(result.noScoreImprovementStreak, 0,
+      'Expected noScoreImprovementStreak to reset to 0 when bestScoreDelta > 0 regardless of primaryLabPassed');
+  });
+
+  it('should increment noScoreImprovementStreak when no candidate beats champion score', () => {
+    const result = nextTrackState({
+      state: baseState,
+      policy: basePolicy,
+      manifest: {
+        promotionEligible: false,
+        primaryLabPassed: false,
+        activeTrackId: 'track-A',
+        topCandidateSimilarity: 0.1,
+        searchEfficiency: { emittedVariantCount: 10 },
+        bestScoreDelta: -1.3, // negative: no improvement
+      },
+    });
+
+    assert.equal(result.noScoreImprovementStreak, 5,
+      'Expected noScoreImprovementStreak to increment from 4 to 5 when bestScoreDelta <= 0');
+  });
+});

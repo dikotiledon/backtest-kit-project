@@ -1558,7 +1558,7 @@ test('detectRotationTrigger preserves explicit manifest.rotationTrigger regardle
   assert.equal(trigger, 'noChangeStreak');
 });
 
-test('nextTrackState does NOT reset noScoreImprovementStreak when bestScoreDelta > 0 but primaryLabPassed is false', () => {
+test('nextTrackState DOES reset noScoreImprovementStreak when bestScoreDelta > 0 even if primaryLabPassed is false', () => {
   const baseState = {
     ...defaultSchedulerState(),
     noScoreImprovementStreak: 3,
@@ -1574,8 +1574,8 @@ test('nextTrackState does NOT reset noScoreImprovementStreak when bestScoreDelta
     },
   });
 
-  // Score improved but primary lab rejected it — not real progress
-  assert.equal(next.noScoreImprovementStreak, 4);
+  // Raw score improved — real progress regardless of primary lab gate
+  assert.equal(next.noScoreImprovementStreak, 0);
 });
 
 test('nextTrackState DOES reset noScoreImprovementStreak when primaryLabPassed is true', () => {

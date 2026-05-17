@@ -604,8 +604,8 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
   // Only count score improvement as real progress if the candidate passed primary lab
   // or actually promoted. A high-scoring candidate that fails primaryPromote is not progress.
   const primaryLabPassed = manifest.primaryLabPassed === true;
-  const scoreImproved = manifest.promotionEligible === true
-    || (primaryLabPassed && bestScoreDelta !== null && bestScoreDelta > 0);
+  const rawScoreImproved = bestScoreDelta !== null && bestScoreDelta > 0;
+  const scoreImproved = manifest.promotionEligible === true || rawScoreImproved;
   const scoreStagnant = bestScoreDelta !== null && !scoreImproved && manifest.promotionEligible !== true;
   const noScoreImprovementStreak = rotationHappened || scoreImproved
     ? 0

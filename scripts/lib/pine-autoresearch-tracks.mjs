@@ -417,7 +417,7 @@ export function detectRotationTrigger({ state = defaultSchedulerState(), policy 
     return 'noveltySimilarity';
   }
 
-  if ((state?.sameTrackCycleStreak ?? 0) > maxCyclesPerTrack && manifest.promotionEligible === false) {
+  if ((state?.sameTrackCycleStreak ?? 0) >= maxCyclesPerTrack && manifest.promotionEligible === false) {
     return 'maxCyclesPerTrack';
   }
 

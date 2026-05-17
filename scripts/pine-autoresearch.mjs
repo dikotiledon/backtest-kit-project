@@ -1284,7 +1284,7 @@ export function resolveTrackSelectionState({ schedulerState = {}, rotationPolicy
   const hardRotationTrigger = zeroEmissionTrigger
     ?? (schedulerState.noChangeStreak >= noChangeStreakRotateAfter ? 'noChangeStreak' : null)
     ?? (Number.isFinite(previousCycle?.topCandidateSimilarity) && previousCycle.topCandidateSimilarity > similarityRotateAbove ? 'noveltySimilarity' : null)
-    ?? (schedulerState.sameTrackCycleStreak > maxCyclesPerTrack && previousCycle?.promotionEligible === false ? 'maxCyclesPerTrack' : null);
+    ?? (schedulerState.sameTrackCycleStreak >= maxCyclesPerTrack && previousCycle?.promotionEligible === false ? 'maxCyclesPerTrack' : null);
 
   if (!hardRotationTrigger) {
     return { hardRotationTrigger: null, activeTrackSelectionState: schedulerState };

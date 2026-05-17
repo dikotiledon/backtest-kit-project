@@ -104,6 +104,8 @@ describe('Promotion Overhaul - roiRelaxation passthrough', () => {
   });
 });
 
+import { nextTrackState } from '../scripts/lib/pine-autoresearch-tracks.mjs';
+
 describe('PF Gate Calibration - minProfitFactorDelta tolerance', () => {
   const incumbentPF = {
     configId: 'pf-incumbent',
@@ -183,5 +185,67 @@ describe('PF Gate Calibration - minProfitFactorDelta tolerance', () => {
     // PF delta is -0.10, threshold is -0.05, so gate fails
     assert.equal(result.gates.profitFactor, false,
       'Expected PF gate to fail with regression exceeding tolerance');
+  });
+});
+
+describe('Issue #4: track rotation off-by-one', () => {
+  it('should trigger rotation when sameTrackCycleStreak equals maxCyclesPerTrack', () => {
+    const result = nextTrackState({
+      state: {
+        activeTrackId: 'track-A',
+        sameTrackCycleStreak: 8,
+        noChangeStreak: 0,
+        noNewCandidateStreak: 0,
+        lowEmissionStreak: 0,
+        noScoreImprovementStreak: 0,
+        cycleIndex: 10,
+        tabuRejectedFingerprints: [],
+      },
+      policy: {
+        maxCyclesPerTrack: 8,
+        noChangeStreakRotateAfter: 99,
+        similarityRotateAbove: 0.99,
+        zeroEmissionRotateAfter: 99,
+      },
+      manifest: {
+        promotionEligible: false,
+        activeTrackId: 'track-A',
+        topCandidateSimilarity: 0.1,
+        searchEfficiency: { emittedVariantCount: 10 },
+      },
+    });
+
+    assert.equal(result.activeTrackId, null,
+      'Expected activeTrackId to be null (rotation triggered) when streak equals max');
+  });
+
+  it('should NOT trigger rotation when streak is below max', () => {
+    const result = nextTrackState({
+      state: {
+        activeTrackId: 'track-A',
+        sameTrackCycleStreak: 7,
+        noChangeStreak: 0,
+        noNewCandidateStreak: 0,
+        lowEmissionStreak: 0,
+        noScoreImprovementStreak: 0,
+        cycleIndex: 10,
+        tabuRejectedFingerprints: [],
+      },
+      policy: {
+        maxCyclesPerTrack: 8,
+        noChangeStreakRotateAfter: 99,
+        similarityRotateAbove: 0.99,
+        zeroEmissionRotateAfter: 99,
+      },
+      manifest: {
+        promotionEligible: false,
+        activeTrackId: 'track-A',
+        topCandidateSimilarity: 0.1,
+        searchEfficiency: { emittedVariantCount: 10 },
+      },
+    });
+
+    assert.notEqual(result.activeTrackId, null,
+      'Expected activeTrackId to remain set (no rotation) when streak is below max');
   });
 });

@@ -18,7 +18,8 @@ async function request(method, path, body = null) {
   return data;
 }
 
-export const api = {
+const api = {
+  ApiError,
   getTimeframes: () => request('GET', '/timeframes'),
   getDatasets: () => request('GET', '/datasets'),
   fetchDataset: (symbol, timeframe, initialLimit) =>
@@ -32,3 +33,6 @@ export const api = {
     request('GET', `/results?${new URLSearchParams(params)}`),
   deleteResult: (runId) => request('DELETE', `/results/${runId}`),
 };
+
+export { api };
+export default api;

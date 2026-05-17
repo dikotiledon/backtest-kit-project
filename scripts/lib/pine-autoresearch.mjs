@@ -748,7 +748,8 @@ export function decideAutoresearchOutcome({
   }
 
   let profitabilityFloor = null;
-  if (failedGates.length === 0 && promotionPolicy) {
+  const skipProfitabilityFloor = comparisons.roiRelaxationApplied === true;
+  if (failedGates.length === 0 && promotionPolicy && !skipProfitabilityFloor) {
     profitabilityFloor = evaluateProfitabilityFloor({ incumbent, challenger, policy: promotionPolicy });
     if (!profitabilityFloor.passed) {
       return {

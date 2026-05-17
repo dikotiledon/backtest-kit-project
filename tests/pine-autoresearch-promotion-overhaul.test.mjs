@@ -693,3 +693,96 @@ describe('Issue #5: Shadow labs activation (end-to-end)', () => {
       'Should fail primaryPromote gate');
   });
 });
+
+describe('Promotion Overhaul - profitabilityFloor vs tiered relaxation', () => {
+  const incumbent = {
+    configId: 'incumbent-floor-test',
+    score: 152.47,
+    metrics: {
+      roiPct: 91.7,
+      profitFactor: 3.56,
+      maxDrawdownPct: 2.88,
+      tradeCount: 261,
+    },
+  };
+
+  const thresholds = {
+    minScoreDelta: 0.1,
+    minRoiDeltaPct: 0,
+    minProfitFactorDelta: 0,
+    maxDrawdownDeltaPct: 0.75,
+    minTradeCount: 150,
+    minTradeRatioVsIncumbent: 0.75,
+    roiRelaxation: {
+      enabled: true,
+      minScoreDeltaToRelax: 12,
+      maxRoiRegressionPct: 12,
+      tieredRelaxation: {
+        enabled: true,
+        pfMultiplierThreshold: 2,
+        ddImprovementRequired: true,
+        maxRoiRegressionPct: 12,
+      },
+    },
+  };
+
+  const promotionPolicy = {
+    minRoiDeltaPct: 3,
+    minProfitFactorDelta: 0.1,
+    minTradeCount: 60,
+  };
+
+  it('should promote when tiered relaxation applied — skip profitabilityFloor', () => {
+    const challenger = {
+      configId: 'challenger-relaxed',
+      score: 165.0,
+      metrics: {
+        roiPct: 80.0,
+        profitFactor: 8.0,
+        maxDrawdownPct: 1.5,
+        tradeCount: 250,
+      },
+    };
+
+    const result = decideAutoresearchOutcome({
+      incumbent,
+      challenger,
+      thresholds,
+      promotionPolicy,
+    });
+
+    assert.equal(result.comparisons.roiRelaxationApplied, true,
+      'Expected roiRelaxationApplied to be true');
+    assert.equal(result.comparisons.roiRelaxationTier, 'tiered',
+      'Expected tiered relaxation tier');
+    assert.equal(result.recommendation, 'promote',
+      'Should promote — profitabilityFloor must be skipped when tiered relaxation fires');
+  });
+
+  it('should still apply profitabilityFloor when relaxation NOT applied', () => {
+    const challenger = {
+      configId: 'challenger-no-relaxation',
+      score: 156.0,
+      metrics: {
+        roiPct: 92.5,
+        profitFactor: 3.58,
+        maxDrawdownPct: 2.85,
+        tradeCount: 265,
+      },
+    };
+
+    const result = decideAutoresearchOutcome({
+      incumbent,
+      challenger,
+      thresholds: { ...thresholds, significance: { minRelativeScoreDelta: 0 } },
+      promotionPolicy,
+    });
+
+    assert.equal(result.comparisons.roiRelaxationApplied, false,
+      'Expected roiRelaxationApplied to be false — ROI improved, no relaxation needed');
+    assert.equal(result.recommendation, 'hold',
+      'Should hold — ROI delta +0.8 < minRoiDeltaPct 3, profitabilityFloor blocks');
+    assert.ok(result.failedGates?.includes('profitabilityFloor'),
+      'Should fail profitabilityFloor gate');
+  });
+});

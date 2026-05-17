@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useResults } from '../hooks/useResults.js';
 import { exportResultsCsv } from '../utils/exportCsv.js';
 import api from '../api.js';
+import ResultDetail from './ResultDetail.jsx';
 
 function formatDuration(ms) {
   if (ms == null) return '—';
@@ -15,6 +16,7 @@ function formatDuration(ms) {
 export default function ResultsTable() {
   const { results, loading, refresh } = useResults();
   const [toast, setToast] = useState(null);
+  const [selectedResult, setSelectedResult] = useState(null);
 
   function showToast(msg, type = 'success') {
     setToast({ msg, type });
@@ -91,7 +93,8 @@ export default function ResultsTable() {
               {results.map((result) => (
                 <tr
                   key={result.runId}
-                  className="border-t border-zinc-700 hover:bg-zinc-800/50"
+                  className="border-t border-zinc-700 hover:bg-gray-700/50 cursor-pointer"
+                  onClick={() => setSelectedResult(result)}
                 >
                   <td className="px-4 py-2 font-mono">
                     {result.dataset.symbol}
@@ -127,6 +130,14 @@ export default function ResultsTable() {
             </tbody>
           </table>
         </div>
+      )}
+
+      {/* Result Detail Modal */}
+      {selectedResult && (
+        <ResultDetail
+          result={selectedResult}
+          onClose={() => setSelectedResult(null)}
+        />
       )}
     </div>
   );

@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { decideAutoresearchOutcome } from '../scripts/lib/pine-autoresearch.mjs';
+import { decideAutoresearchOutcome, decideMatrixPromotion } from '../scripts/lib/pine-autoresearch.mjs';
 import { loadConfig } from '../scripts/pine-autoresearch.mjs';
 import { buildTrackCandidateBatch } from '../scripts/lib/pine-track-generators.mjs';
 import path from 'node:path';
@@ -460,5 +460,236 @@ describe('Issue #8: gateAwareFilter compatibility with tiered relaxation', () =>
       v.config && Number.isFinite(v.config.slAtrMult) && v.config.slAtrMult < 0.075
     );
     assert.equal(hasDegenerateSl, false, 'Should filter degenerate slAtrMult below 0.075');
+  });
+});
+
+describe('Issue #5: Shadow labs activation (end-to-end)', () => {
+  it('full pipeline: tiered relaxation + shadows = promotion', () => {
+    const incumbent = {
+      configId: 'original-153-champion',
+      score: 152.47,
+      config: { slAtrMult: 0.5, minBarsBetween: 1 },
+      metrics: {
+        roiPct: 91.7,
+        profitFactor: 3.56,
+        maxDrawdownPct: 2.88,
+        tradeCount: 261,
+        winRatePct: 42.53,
+        avgWin: 1.15,
+        avgLoss: 0.24,
+      },
+    };
+    const challenger = {
+      configId: 'challenger-tight-stop',
+      score: 172.33,
+      config: { slAtrMult: 0.1, minBarsBetween: 7 },
+      metrics: {
+        roiPct: 76.41,
+        profitFactor: 9.14,
+        maxDrawdownPct: 1.19,
+        tradeCount: 245,
+        winRatePct: 29.39,
+        avgWin: 1.19,
+        avgLoss: 0.05,
+      },
+    };
+    const thresholds = {
+      minScoreDelta: 0.1,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: -0.05,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      roiRelaxation: {
+        enabled: true,
+        minScoreDeltaToRelax: 12,
+        maxRoiRegressionPct: 10,
+        tieredRelaxation: {
+          enabled: true,
+          pfMultiplierThreshold: 2,
+          ddImprovementRequired: true,
+          maxRoiRegressionPct: 20,
+        },
+      },
+    };
+
+    // Step 1: Primary lab decision
+    const primaryDecision = decideAutoresearchOutcome({ incumbent, challenger, thresholds });
+    assert.equal(primaryDecision.recommendation, 'promote',
+      `Primary should promote via tiered relaxation. Failed: ${primaryDecision.failedGates?.join(', ')}`);
+    assert.equal(primaryDecision.comparisons.roiRelaxationApplied, true);
+    assert.equal(primaryDecision.comparisons.roiRelaxationTier, 'tiered');
+
+    // Step 2: Matrix decision with shadows (3/5 pass = 60%)
+    const labResults = [
+      { lab: { labId: 'primary' }, decision: primaryDecision },
+      { lab: { labId: 'shadow-1' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-2' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-3' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-4' }, decision: { recommendation: 'hold' } },
+      { lab: { labId: 'shadow-5' }, decision: { recommendation: 'hold' } },
+    ];
+    const matrixResult = decideMatrixPromotion({
+      labResults,
+      policy: {
+        requirePrimaryPromote: true,
+        minShadowPassCount: 3,
+        minShadowPassRatio: 0.6,
+        requireCandidateChange: true,
+      },
+      champion: incumbent,
+      challenger,
+      shadowsEvaluated: true,
+    });
+    assert.equal(matrixResult.recommendation, 'promote',
+      `Matrix should promote. Failed: ${matrixResult.failedGates?.join(', ')}`);
+  });
+
+  it('should hold when shadows do not meet minimum pass count', () => {
+    const incumbent = {
+      configId: 'original-153-champion',
+      score: 152.47,
+      config: { slAtrMult: 0.5, minBarsBetween: 1 },
+      metrics: {
+        roiPct: 91.7,
+        profitFactor: 3.56,
+        maxDrawdownPct: 2.88,
+        tradeCount: 261,
+        winRatePct: 42.53,
+        avgWin: 1.15,
+        avgLoss: 0.24,
+      },
+    };
+    const challenger = {
+      configId: 'challenger-tight-stop',
+      score: 172.33,
+      config: { slAtrMult: 0.1, minBarsBetween: 7 },
+      metrics: {
+        roiPct: 76.41,
+        profitFactor: 9.14,
+        maxDrawdownPct: 1.19,
+        tradeCount: 245,
+        winRatePct: 29.39,
+        avgWin: 1.19,
+        avgLoss: 0.05,
+      },
+    };
+    const thresholds = {
+      minScoreDelta: 0.1,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: -0.05,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+      roiRelaxation: {
+        enabled: true,
+        minScoreDeltaToRelax: 12,
+        maxRoiRegressionPct: 10,
+        tieredRelaxation: {
+          enabled: true,
+          pfMultiplierThreshold: 2,
+          ddImprovementRequired: true,
+          maxRoiRegressionPct: 20,
+        },
+      },
+    };
+
+    const primaryDecision = decideAutoresearchOutcome({ incumbent, challenger, thresholds });
+    assert.equal(primaryDecision.recommendation, 'promote');
+
+    // Only 2/5 shadows pass (below minShadowPassCount: 3)
+    const labResults = [
+      { lab: { labId: 'primary' }, decision: primaryDecision },
+      { lab: { labId: 'shadow-1' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-2' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-3' }, decision: { recommendation: 'hold' } },
+      { lab: { labId: 'shadow-4' }, decision: { recommendation: 'hold' } },
+      { lab: { labId: 'shadow-5' }, decision: { recommendation: 'hold' } },
+    ];
+    const matrixResult = decideMatrixPromotion({
+      labResults,
+      policy: {
+        requirePrimaryPromote: true,
+        minShadowPassCount: 3,
+        minShadowPassRatio: 0.6,
+        requireCandidateChange: true,
+      },
+      champion: incumbent,
+      challenger,
+      shadowsEvaluated: true,
+    });
+    assert.equal(matrixResult.recommendation, 'hold');
+    assert.ok(
+      matrixResult.failedGates?.includes('shadowPassCount') || matrixResult.failedGates?.includes('shadowPassRatio'),
+      'Should fail shadow gate'
+    );
+  });
+
+  it('should hold when primary does not promote (no relaxation)', () => {
+    const incumbent = {
+      configId: 'original-153-champion',
+      score: 152.47,
+      config: { slAtrMult: 0.5, minBarsBetween: 1 },
+      metrics: {
+        roiPct: 91.7,
+        profitFactor: 3.56,
+        maxDrawdownPct: 2.88,
+        tradeCount: 261,
+        winRatePct: 42.53,
+        avgWin: 1.15,
+        avgLoss: 0.24,
+      },
+    };
+    const challenger = {
+      configId: 'challenger-tight-stop',
+      score: 172.33,
+      config: { slAtrMult: 0.1, minBarsBetween: 7 },
+      metrics: {
+        roiPct: 76.41,
+        profitFactor: 9.14,
+        maxDrawdownPct: 1.19,
+        tradeCount: 245,
+        winRatePct: 29.39,
+        avgWin: 1.19,
+        avgLoss: 0.05,
+      },
+    };
+    // No roiRelaxation → primary holds
+    const thresholds = {
+      minScoreDelta: 0.1,
+      minRoiDeltaPct: 0,
+      minProfitFactorDelta: -0.05,
+      maxDrawdownDeltaPct: 0.75,
+      minTradeCount: 150,
+      minTradeRatioVsIncumbent: 0.75,
+    };
+
+    const primaryDecision = decideAutoresearchOutcome({ incumbent, challenger, thresholds });
+    assert.equal(primaryDecision.recommendation, 'hold');
+
+    // Even if all shadows would pass, matrix should hold because primary holds
+    const labResults = [
+      { lab: { labId: 'primary' }, decision: primaryDecision },
+      { lab: { labId: 'shadow-1' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-2' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-3' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-4' }, decision: { recommendation: 'promote' } },
+      { lab: { labId: 'shadow-5' }, decision: { recommendation: 'promote' } },
+    ];
+    const matrixResult = decideMatrixPromotion({
+      labResults,
+      policy: {
+        requirePrimaryPromote: true,
+        minShadowPassCount: 3,
+        minShadowPassRatio: 0.6,
+        requireCandidateChange: true,
+      },
+      champion: incumbent,
+      challenger,
+      shadowsEvaluated: true,
+    });
+    assert.equal(matrixResult.recommendation, 'hold');
+    assert.ok(matrixResult.failedGates?.includes('primaryPromote'),
+      'Should fail primaryPromote gate');
   });
 });

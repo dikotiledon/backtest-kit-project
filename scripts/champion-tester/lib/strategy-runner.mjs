@@ -12,6 +12,10 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { sliceDataset } from './dataset-manager.mjs';
 import { loadChampion, getScriptPath } from './champion-loader.mjs';
+import {
+  createIncrementalTradeSimulator,
+  iterateJsonlRows,
+} from '../../lib/pine-streaming-metrics.mjs';
 
 const PROJECT_ROOT = path.resolve(import.meta.dirname, '..', '..', '..');
 
@@ -265,6 +269,45 @@ export async function runChampionTest({
       analysis = { metrics: {}, score: 0, breakdown: {}, diagnostics: {}, rowCount: 0 };
     }
 
+    // Extract trades and build equity curve from the streaming analysis.
+    // analyzeJsonlFileStreaming uses createIncrementalTradeSimulator which
+    // produces full trade objects via buildTrade(). We re-run the simulator
+    // to capture the trades array (analyzeJsonlFileStreaming doesn't expose it
+    // in its return value — it only passes trades to calculateMetrics).
+    let trades = [];
+    let equityCurve = [];
+    try {
+      const tradeSimulator = createIncrementalTradeSimulator({ minTrades: 1 });
+      let lastRow = null;
+      for await (const row of iterateJsonlRows(cleanedPath)) {
+        if (row && row.timestamp && Number.isFinite(row.Close)) {
+          lastRow = row;
+        }
+        tradeSimulator.push(row);
+      }
+      const simResult = tradeSimulator.finalize(lastRow);
+      trades = simResult.trades.map(t => ({
+        entryTime: t.entryTime,
+        exitTime: t.exitTime,
+        side: t.side,
+        entryPrice: t.entryPrice,
+        exitPrice: t.exitPrice,
+        pnl: t.pnl,
+        barsHeld: t.holdBars,
+      }));
+
+      // Build equity curve: cumulative PnL at each trade exit
+      let cumPnl = 0;
+      equityCurve = trades.map(t => {
+        cumPnl += t.pnl;
+        return { timestamp: t.exitTime, equity: cumPnl };
+      });
+    } catch {
+      // If trade extraction fails, leave empty arrays
+      trades = [];
+      equityCurve = [];
+    }
+
     // Cleanup temp files
     await safeUnlink(tempScriptPath);
     await safeUnlink(tempScriptPath.replace(/\.pine$/, '.flattened.pine'));
@@ -302,6 +345,8 @@ export async function runChampionTest({
       breakdown: analysis.breakdown || {},
       diagnostics: analysis.diagnostics || {},
       rowCount: analysis.rowCount || 0,
+      trades,
+      equityCurve,
     };
   } catch (err) {
     // Cleanup on failure
@@ -322,6 +367,8 @@ export async function runChampionTest({
         timeframe: dataset.timeframe,
         candlesUsed: candles.length,
       },
+      trades: [],
+      equityCurve: [],
     };
   }
   } finally {

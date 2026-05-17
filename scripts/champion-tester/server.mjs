@@ -9,6 +9,7 @@ import {
 } from './lib/dataset-manager.mjs';
 import { listChampionSources, loadChampion } from './lib/champion-loader.mjs';
 import { runChampionTest, getRunStatus } from './lib/strategy-runner.mjs';
+import { runSweep, getSweepStatus, cancelSweep } from './lib/sweep-runner.mjs';
 import { ResultsStore } from './lib/results-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -186,6 +187,51 @@ app.delete('/api/results/:runId', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: err.message });
   }
+});
+
+// ─── Sweep API ──────────────────────────────────────────────────────────────
+
+app.post('/api/sweep/run', async (req, res) => {
+  try {
+    const { matrixId, datasets } = req.body;
+    if (!matrixId) {
+      return res.status(400).json({ ok: false, error: 'matrixId is required', code: 'VALIDATION_ERROR' });
+    }
+    if (!Array.isArray(datasets) || datasets.length === 0) {
+      return res.status(400).json({ ok: false, error: 'datasets array is required and must not be empty', code: 'VALIDATION_ERROR' });
+    }
+
+    const parsedDatasets = datasets.map(d => {
+      const parsed = parseSymbol(d.symbol);
+      return { exchange: parsed.exchange, symbol: parsed.symbol, timeframe: d.timeframe };
+    });
+
+    const result = await runSweep({ matrixId, datasets: parsedDatasets, dataDir: DATA_DIR });
+
+    // Save successful results to store
+    if (result.results) {
+      for (const r of result.results) {
+        if (r.ok) await store.save(r);
+      }
+    }
+
+    res.json({ ok: true, sweepId: result.sweepId, total: result.total, message: 'Sweep started' });
+  } catch (err) {
+    if (err.code === 'SWEEP_IN_PROGRESS' || err.code === 'RUN_IN_PROGRESS') {
+      return res.status(409).json({ ok: false, error: err.message, code: err.code });
+    }
+    res.status(500).json({ ok: false, error: err.message, code: 'EXECUTION_ERROR' });
+  }
+});
+
+app.get('/api/sweep/status', (req, res) => {
+  const status = getSweepStatus();
+  res.json(status);
+});
+
+app.post('/api/sweep/cancel', (req, res) => {
+  cancelSweep();
+  res.json({ ok: true });
 });
 
 // ─── Static Serving (Production) ────────────────────────────────────────────

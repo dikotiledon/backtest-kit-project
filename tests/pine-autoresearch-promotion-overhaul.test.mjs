@@ -892,3 +892,77 @@ describe('Task 11: Tightened tiered relaxation cap + aligned profitabilityFloor'
       'Should hold — ROI gate fails without relaxation');
   });
 });
+
+describe('Issue #9: production scenario replay', () => {
+  it('06:30 cycle: scoreDelta +1.16, ROI +0.69, PF +0.02 — should promote with aligned floor', () => {
+    const incumbent = {
+      configId: 'original-153-champion', score: 152.47,
+      config: { slAtrMult: 0.5 },
+      metrics: { roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261, winRatePct: 42.53, avgWin: 1.15, avgLoss: 0.24 },
+    };
+    const challenger = {
+      configId: 'challenger-0630', score: 153.63,
+      config: { slAtrMult: 0.5, useTimeStop: true },
+      metrics: { roiPct: 92.39, profitFactor: 3.58, maxDrawdownPct: 2.85, tradeCount: 261, winRatePct: 42.6, avgWin: 1.15, avgLoss: 0.24 },
+    };
+    const thresholds = {
+      minScoreDelta: 0.1, minRoiDeltaPct: 0, minProfitFactorDelta: -0.05,
+      maxDrawdownDeltaPct: 0.75, minTradeCount: 150, minTradeRatioVsIncumbent: 0.75,
+      significance: { minRelativeScoreDelta: 0.003, minTradeCount: 150 },
+      roiRelaxation: { enabled: true, minScoreDeltaToRelax: 12, maxRoiRegressionPct: 10,
+        tieredRelaxation: { enabled: true, pfMultiplierThreshold: 2, ddImprovementRequired: true, maxRoiRegressionPct: 12 } },
+    };
+    const promotionPolicy = { minRoiDeltaPct: 0, minProfitFactorDelta: -0.05, minTradeCount: 60 };
+    const result = decideAutoresearchOutcome({ incumbent, challenger, thresholds, promotionPolicy });
+    assert.equal(result.recommendation, 'promote',
+      `06:30 scenario should promote. Failed: ${result.failedGates?.join(', ')}`);
+  });
+
+  it('11:00 cycle: scoreDelta +2.11, ROI +1.16, PF +0.08 — should promote with aligned floor', () => {
+    const incumbent = {
+      configId: 'original-153-champion', score: 152.47,
+      config: { slAtrMult: 0.5 },
+      metrics: { roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261, winRatePct: 42.53, avgWin: 1.15, avgLoss: 0.24 },
+    };
+    const challenger = {
+      configId: 'challenger-1100', score: 154.58,
+      config: { slAtrMult: 0.5, useTimeStop: true, timeStopBars: 8 },
+      metrics: { roiPct: 92.86, profitFactor: 3.64, maxDrawdownPct: 2.88, tradeCount: 261, winRatePct: 43.0, avgWin: 1.15, avgLoss: 0.24 },
+    };
+    const thresholds = {
+      minScoreDelta: 0.1, minRoiDeltaPct: 0, minProfitFactorDelta: -0.05,
+      maxDrawdownDeltaPct: 0.75, minTradeCount: 150, minTradeRatioVsIncumbent: 0.75,
+      significance: { minRelativeScoreDelta: 0.003, minTradeCount: 150 },
+      roiRelaxation: { enabled: true, minScoreDeltaToRelax: 12, maxRoiRegressionPct: 10,
+        tieredRelaxation: { enabled: true, pfMultiplierThreshold: 2, ddImprovementRequired: true, maxRoiRegressionPct: 12 } },
+    };
+    const promotionPolicy = { minRoiDeltaPct: 0, minProfitFactorDelta: -0.05, minTradeCount: 60 };
+    const result = decideAutoresearchOutcome({ incumbent, challenger, thresholds, promotionPolicy });
+    assert.equal(result.recommendation, 'promote',
+      `11:00 scenario should promote. Failed: ${result.failedGates?.join(', ')}`);
+  });
+
+  it('10:00 cycle: scoreDelta +19.86, ROI -15.29 — should HOLD (exceeds tightened -12% cap)', () => {
+    const incumbent = {
+      configId: 'original-153-champion', score: 152.47,
+      config: { slAtrMult: 0.5 },
+      metrics: { roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261, winRatePct: 42.53, avgWin: 1.15, avgLoss: 0.24 },
+    };
+    const challenger = {
+      configId: 'challenger-1000', score: 172.33,
+      config: { slAtrMult: 0.1, minBarsBetween: 7 },
+      metrics: { roiPct: 76.41, profitFactor: 9.14, maxDrawdownPct: 1.19, tradeCount: 245, winRatePct: 29.39, avgWin: 1.19, avgLoss: 0.05 },
+    };
+    const thresholds = {
+      minScoreDelta: 0.1, minRoiDeltaPct: 0, minProfitFactorDelta: -0.05,
+      maxDrawdownDeltaPct: 0.75, minTradeCount: 150, minTradeRatioVsIncumbent: 0.75,
+      roiRelaxation: { enabled: true, minScoreDeltaToRelax: 12, maxRoiRegressionPct: 10,
+        tieredRelaxation: { enabled: true, pfMultiplierThreshold: 2, ddImprovementRequired: true, maxRoiRegressionPct: 12 } },
+    };
+    const result = decideAutoresearchOutcome({ incumbent, challenger, thresholds });
+    // ROI delta = -15.29, exceeds both standard (-10) and tiered (-12) caps
+    assert.equal(result.recommendation, 'hold');
+    assert.ok(result.failedGates?.includes('roi'));
+    assert.equal(result.comparisons.roiRelaxationApplied, false);
+  });
+});

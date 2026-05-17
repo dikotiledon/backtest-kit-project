@@ -202,7 +202,7 @@
     "minShadowPassRatio": 0.5,
     "minScoreDelta": 0,
     "minRoiDeltaPct": 0,
-    "minProfitFactorDelta": 0,
+    "minProfitFactorDelta": -0.05,
     "maxDrawdownDeltaPct": 0,
     "minTradeCount": 0,
     "minTradeRatioVsIncumbent": 0

@@ -103,3 +103,85 @@ describe('Promotion Overhaul - roiRelaxation passthrough', () => {
       'Expected tieredRelaxation.enabled to be true');
   });
 });
+
+describe('PF Gate Calibration - minProfitFactorDelta tolerance', () => {
+  const incumbentPF = {
+    configId: 'pf-incumbent',
+    score: 152.47,
+    metrics: {
+      roiPct: 91.7,
+      profitFactor: 3.56,
+      maxDrawdownPct: 2.88,
+      tradeCount: 261,
+      winRate: 42.53,
+      avgWin: 1.15,
+      avgLoss: 0.24,
+    },
+  };
+
+  const thresholdsPFTolerant = {
+    minScoreDelta: 0.1,
+    minRoiDeltaPct: 0,
+    minProfitFactorDelta: -0.05,
+    maxDrawdownDeltaPct: 0.75,
+    minTradeCount: 150,
+    minTradeRatioVsIncumbent: 0.75,
+    significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+  };
+
+  it('promotes candidate with marginal PF regression (-0.02) within tolerance', () => {
+    const challengerMarginal = {
+      configId: 'pf-challenger-marginal',
+      score: 153.32,
+      metrics: {
+        roiPct: 92.84,
+        profitFactor: 3.54,
+        maxDrawdownPct: 3.12,
+        tradeCount: 268,
+        winRate: 42.54,
+        avgWin: 1.14,
+        avgLoss: 0.24,
+      },
+    };
+
+    const result = decideAutoresearchOutcome({
+      incumbent: incumbentPF,
+      challenger: challengerMarginal,
+      thresholds: thresholdsPFTolerant,
+    });
+
+    assert.equal(result.recommendation, 'promote',
+      `Expected promote but got ${result.recommendation}: ${result.summary}`);
+    // PF delta is -0.02, threshold is -0.05, so gate passes
+    assert.equal(result.gates.profitFactor, true,
+      'Expected PF gate to pass with marginal regression within tolerance');
+  });
+
+  it('holds candidate with PF regression exceeding tolerance (-0.10)', () => {
+    const challengerExcessive = {
+      configId: 'pf-challenger-excessive',
+      score: 153.0,
+      metrics: {
+        roiPct: 92.0,
+        profitFactor: 3.46,
+        maxDrawdownPct: 3.0,
+        tradeCount: 270,
+        winRate: 41.0,
+        avgWin: 1.12,
+        avgLoss: 0.24,
+      },
+    };
+
+    const result = decideAutoresearchOutcome({
+      incumbent: incumbentPF,
+      challenger: challengerExcessive,
+      thresholds: thresholdsPFTolerant,
+    });
+
+    assert.equal(result.recommendation, 'hold',
+      `Expected hold but got ${result.recommendation}: ${result.summary}`);
+    // PF delta is -0.10, threshold is -0.05, so gate fails
+    assert.equal(result.gates.profitFactor, false,
+      'Expected PF gate to fail with regression exceeding tolerance');
+  });
+});

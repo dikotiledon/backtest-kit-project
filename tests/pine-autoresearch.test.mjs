@@ -6011,8 +6011,8 @@ test('default regime-exit promotion keeps profitability floor', async () => {
   const configPath = path.resolve('config/pine-autoresearch.default.json');
   const raw = JSON.parse(await fs.readFile(configPath, 'utf8'));
 
-  assert.equal(raw.regimeExitResearch.promotion.minRoiDeltaPct, 3);
-  assert.equal(raw.regimeExitResearch.promotion.minProfitFactorDelta, 0.1);
+  assert.equal(raw.regimeExitResearch.promotion.minRoiDeltaPct, 0);
+  assert.equal(raw.regimeExitResearch.promotion.minProfitFactorDelta, -0.05);
   assert.equal(raw.regimeExitResearch.promotion.requireBlindHoldoutVerdict, true);
 });
 

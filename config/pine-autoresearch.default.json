@@ -273,7 +273,7 @@
           "enabled": true,
           "pfMultiplierThreshold": 2,
           "ddImprovementRequired": true,
-          "maxRoiRegressionPct": 20
+          "maxRoiRegressionPct": 12
         }
       }
     }
@@ -471,8 +471,8 @@
     "promotion": {
       "allowAutomaticRegimeSwitching": false,
       "requireGlobalChampionAnchor": true,
-      "minRoiDeltaPct": 3,
-      "minProfitFactorDelta": 0.1,
+      "minRoiDeltaPct": 0,
+      "minProfitFactorDelta": -0.05,
       "minTradeCount": 60,
       "requireBlindHoldoutVerdict": true
     }

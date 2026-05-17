@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { decideAutoresearchOutcome } from '../scripts/lib/pine-autoresearch.mjs';
 import { loadConfig } from '../scripts/pine-autoresearch.mjs';
+import { buildTrackCandidateBatch } from '../scripts/lib/pine-track-generators.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -408,5 +409,56 @@ describe('Issue #7: de-escalation yo-yo prevention', () => {
     });
     assert.equal(result.stagnationLevel, 3,
       'Should de-escalate when noScoreImprovementStreak is low');
+  });
+});
+
+describe('Issue #8: gateAwareFilter compatibility with tiered relaxation', () => {
+  const incumbent = {
+    slAtrMult: 0.5,
+    minBarsBetween: 1,
+    minPredSum: 1.8,
+    tpAtrMult: 6.85,
+    trailAtrMult: 1,
+    trailActivateR: 0.5,
+    useSupertrendFilter: true,
+    supertrendAtrLen: 10,
+    supertrendFactor: 1.5,
+  };
+
+  it('should generate candidates with slAtrMultMinRatio 0.15', () => {
+    const batch = buildTrackCandidateBatch({
+      track: { trackId: 'risk-tuning', sourceFamily: 'incumbent-local' },
+      incumbent,
+      maxConfigs: 12,
+      historyEvents: [],
+      budgetPolicy: {
+        searchPolicy: {
+          gateAwareFilter: { enabled: true, slAtrMultMinRatio: 0.15 },
+        },
+        selfLoopEscape: { enabled: false },
+      },
+      schedulerState: { cycleIndex: 0, tabuRejectedFingerprints: [] },
+    });
+    assert.ok(batch.length > 0, 'Should generate candidates with ratio 0.15');
+  });
+
+  it('should filter degenerate slAtrMult below floor (champion * 0.15)', () => {
+    const batch = buildTrackCandidateBatch({
+      track: { trackId: 'risk-tuning', sourceFamily: 'incumbent-local' },
+      incumbent,
+      maxConfigs: 12,
+      historyEvents: [],
+      budgetPolicy: {
+        searchPolicy: {
+          gateAwareFilter: { enabled: true, slAtrMultMinRatio: 0.15 },
+        },
+        selfLoopEscape: { enabled: false },
+      },
+      schedulerState: { cycleIndex: 0, tabuRejectedFingerprints: [] },
+    });
+    const hasDegenerateSl = batch.some(v =>
+      v.config && Number.isFinite(v.config.slAtrMult) && v.config.slAtrMult < 0.075
+    );
+    assert.equal(hasDegenerateSl, false, 'Should filter degenerate slAtrMult below 0.075');
   });
 });

@@ -5964,7 +5964,7 @@ test('default autoresearch config enables incumbent-local shortlist policy', asy
     },
     gateAwareFilter: {
       enabled: true,
-      slAtrMultMinRatio: 0.5,
+      slAtrMultMinRatio: 0.15,
     },
     annealing: {
       enabled: true,

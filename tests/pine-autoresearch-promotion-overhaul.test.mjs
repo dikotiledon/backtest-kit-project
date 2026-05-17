@@ -364,3 +364,49 @@ describe('Issue #6: scoreImproved circular dependency', () => {
       'Expected noScoreImprovementStreak to increment from 4 to 5 when bestScoreDelta <= 0');
   });
 });
+
+import { nextStagnationState } from '../scripts/lib/pine-autoresearch-tracks.mjs';
+
+describe('Issue #7: de-escalation yo-yo prevention', () => {
+  it('should NOT de-escalate when noScoreImprovementStreak exceeds threshold', () => {
+    const result = nextStagnationState({
+      previousLevel: 4,
+      noNewCandidateStreak: 0,
+      noScoreImprovementStreak: 3,
+      noChangeStreak: 0,
+      lowEmissionStreak: 0,
+      promotionEligible: false,
+      topCandidateSimilarity: 0.5,
+      policy: {
+        enabled: true,
+        maxStagnationLevel: 6,
+        noScoreImprovementEscalateAfter: 2,
+        deescalation: { enabled: true, consecutiveHealthyCycles: 2 },
+        _healthyCycleCount: 3,
+      },
+    });
+    assert.equal(result.stagnationLevel, 4,
+      'Should NOT de-escalate while noScoreImprovementStreak is high');
+  });
+
+  it('should de-escalate when noScoreImprovementStreak is below threshold', () => {
+    const result = nextStagnationState({
+      previousLevel: 4,
+      noNewCandidateStreak: 0,
+      noScoreImprovementStreak: 1,
+      noChangeStreak: 0,
+      lowEmissionStreak: 0,
+      promotionEligible: false,
+      topCandidateSimilarity: 0.5,
+      policy: {
+        enabled: true,
+        maxStagnationLevel: 6,
+        noScoreImprovementEscalateAfter: 2,
+        deescalation: { enabled: true, consecutiveHealthyCycles: 2 },
+        _healthyCycleCount: 3,
+      },
+    });
+    assert.equal(result.stagnationLevel, 3,
+      'Should de-escalate when noScoreImprovementStreak is low');
+  });
+});

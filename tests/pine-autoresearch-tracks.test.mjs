@@ -1686,7 +1686,7 @@ test('nextStagnationState does NOT de-escalate below 0', () => {
     'should stay at 0, never go negative');
 });
 
-test('nextStagnationState de-escalates even when noScoreImprovementStreak > 0 (productive but gate-blocked)', () => {
+test('nextStagnationState does NOT de-escalate when noScoreImprovementStreak >= threshold (gate-stuck yo-yo prevention)', () => {
   const result = nextStagnationState({
     previousLevel: 3,
     noNewCandidateStreak: 0,
@@ -1711,9 +1711,9 @@ test('nextStagnationState de-escalates even when noScoreImprovementStreak > 0 (p
     },
   });
 
-  assert.equal(result.stagnationLevel, 2,
-    'should de-escalate: system is productive (emitting, finding candidates) even though score streak is high');
-  assert.equal(result.stagnationReason, 'deescalation');
+  assert.notEqual(result.stagnationLevel, 2,
+    'should NOT de-escalate when noScoreImprovementStreak >= noScoreImprovementEscalateAfter (yo-yo prevention)');
+  assert.notEqual(result.stagnationReason, 'deescalation');
 });
 
 test('nextStagnationState does NOT de-escalate when noNewCandidateStreak > 0 (truly stuck)', () => {

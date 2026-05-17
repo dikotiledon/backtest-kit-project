@@ -497,7 +497,8 @@ export function nextStagnationState(input = {}) {
     && normalizedNoChangeStreak === 0
     && normalizedLowEmissionStreak === 0;
 
-  if (deescalationEnabled && normalizedPreviousLevel > 0 && productiveStreaksZero && healthyCycleCount >= consecutiveHealthyCycles) {
+  const scoreStagnationBlocksDeescalation = normalizedNoScoreImprovementStreak >= noScoreImprovementEscalateAfter;
+  if (deescalationEnabled && normalizedPreviousLevel > 0 && productiveStreaksZero && healthyCycleCount >= consecutiveHealthyCycles && !scoreStagnationBlocksDeescalation) {
     return {
       stagnationLevel: normalizedPreviousLevel - 1,
       stagnationReason: 'deescalation',

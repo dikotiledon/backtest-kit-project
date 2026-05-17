@@ -3,6 +3,7 @@ const TABS = [
   { id: 'test', label: 'Test' },
   { id: 'sweep', label: 'Sweep' },
   { id: 'results', label: 'Results' },
+  { id: 'compare', label: 'Compare' },
 ];
 
 export default function Layout({ activeTab, onTabChange, children }) {

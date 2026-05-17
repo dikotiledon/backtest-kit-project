@@ -4,6 +4,7 @@ import DatasetPanel from './components/DatasetPanel.jsx';
 import TestRunner from './components/TestRunner.jsx';
 import ResultsTable from './components/ResultsTable.jsx';
 import SweepPanel from './components/SweepPanel.jsx';
+import CompareView from './components/CompareView.jsx';
 
 export default function App() {
   const [tab, setTab] = useState('datasets');
@@ -14,6 +15,7 @@ export default function App() {
       {tab === 'test' && <TestRunner />}
       {tab === 'sweep' && <SweepPanel />}
       {tab === 'results' && <ResultsTable />}
+      {tab === 'compare' && <CompareView />}
     </Layout>
   );
 }

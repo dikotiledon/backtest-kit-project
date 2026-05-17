@@ -13,6 +13,7 @@ import { randomUUID } from 'node:crypto';
 import { sliceDataset } from './dataset-manager.mjs';
 import { loadChampion, getScriptPath } from './champion-loader.mjs';
 import {
+  analyzeJsonlFileStreaming,
   createIncrementalTradeSimulator,
   iterateJsonlRows,
 } from '../../lib/pine-streaming-metrics.mjs';
@@ -256,11 +257,7 @@ export async function runChampionTest({
       return { stdout: '{}', stderr: '' };
     });
 
-    // Feed payload via a temp file approach since worker reads stdin
-    // Actually, let's use the streaming metrics directly
-    const { analyzeJsonlFileStreaming } = await import(
-      path.resolve(PROJECT_ROOT, 'scripts', 'lib', 'pine-streaming-metrics.mjs')
-    );
+    // Use the streaming metrics (statically imported above)
 
     let analysis;
     try {

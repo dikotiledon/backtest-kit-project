@@ -966,3 +966,31 @@ describe('Issue #9: production scenario replay', () => {
     assert.equal(result.comparisons.roiRelaxationApplied, false);
   });
 });
+
+// Recommendation from code quality review: backward compatibility test
+describe('Issue #9: backward compatibility — roiRelaxationApplied undefined', () => {
+  it('should apply profitabilityFloor normally when comparisons lacks roiRelaxationApplied', () => {
+    // Simulates older comparisons object where roiRelaxationApplied field doesn't exist
+    // The guard `comparisons.roiRelaxationApplied === true` should return false for undefined
+    const incumbent = {
+      configId: 'champion', score: 152.47,
+      metrics: { roiPct: 91.7, profitFactor: 3.56, maxDrawdownPct: 2.88, tradeCount: 261, winRatePct: 42.53, avgWin: 1.15, avgLoss: 0.24 },
+    };
+    const challenger = {
+      configId: 'challenger', score: 154.0,
+      metrics: { roiPct: 92.5, profitFactor: 3.58, maxDrawdownPct: 2.85, tradeCount: 265, winRatePct: 42.8, avgWin: 1.15, avgLoss: 0.24 },
+    };
+    const thresholds = {
+      minScoreDelta: 0.1, minRoiDeltaPct: 0, minProfitFactorDelta: -0.05,
+      maxDrawdownDeltaPct: 0.75, minTradeCount: 150, minTradeRatioVsIncumbent: 0.75,
+      significance: { minRelativeScoreDelta: 0, minTradeCount: 100 },
+    };
+    // Strict floor that the candidate can't pass (ROI +0.8 < +3)
+    const promotionPolicy = { minRoiDeltaPct: 3, minProfitFactorDelta: 0.1, minTradeCount: 60 };
+    const result = decideAutoresearchOutcome({ incumbent, challenger, thresholds, promotionPolicy });
+    // roiRelaxationApplied should be false (no relaxation needed — ROI improved)
+    // Floor should still apply and block
+    assert.equal(result.recommendation, 'hold');
+    assert.ok(result.failedGates?.includes('profitabilityFloor'));
+  });
+});

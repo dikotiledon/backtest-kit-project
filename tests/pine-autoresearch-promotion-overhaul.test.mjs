@@ -250,6 +250,65 @@ describe('Issue #4: track rotation off-by-one', () => {
   });
 });
 
+import { decideStagnationEscapePlan } from '../scripts/lib/pine-stagnation-escape.mjs';
+
+describe('Gate-stagnation escape path', () => {
+  it('activates widen-architecture at level 3+ with gateStagnation and generation healthy', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 3,
+      generatedLanesExhausted: false,
+      exploitExhausted: false,
+      zeroEmissionExhausted: false,
+      gateStagnation: true,
+    });
+    assert.equal(result.mode, 'widen-architecture');
+    assert.equal(result.reason, 'gate-stagnation');
+    assert.equal(result.allowArchitectureKeys, true);
+    assert.equal(result.multiKeyMutationCount, 3);
+    assert.equal(result.ladderScale, 2);
+  });
+
+  it('uses progressive-widen with higher mutation at level 5+ with gateStagnation', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 5,
+      generatedLanesExhausted: false,
+      exploitExhausted: false,
+      zeroEmissionExhausted: false,
+      gateStagnation: true,
+    });
+    assert.equal(result.mode, 'progressive-widen');
+    assert.equal(result.reason, 'gate-stagnation');
+    assert.equal(result.allowArchitectureKeys, true);
+    assert.equal(result.multiKeyMutationCount, 4);
+    assert.equal(result.ladderScale, 2.5);
+  });
+
+  it('remains not-eligible at level 2 with gateStagnation (too early)', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 2,
+      generatedLanesExhausted: false,
+      exploitExhausted: false,
+      zeroEmissionExhausted: false,
+      gateStagnation: true,
+    });
+    assert.equal(result.mode, 'none');
+    assert.equal(result.reason, 'not-eligible');
+  });
+
+  it('uses existing exhaustion path when generatedLanesExhausted even with gateStagnation', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 4,
+      generatedLanesExhausted: true,
+      exploitExhausted: false,
+      zeroEmissionExhausted: false,
+      gateStagnation: true,
+    });
+    // Should hit exploit-deepen (existing path), NOT gate-stagnation
+    assert.equal(result.mode, 'exploit-deepen');
+    assert.equal(result.reason, 'exploit-still-available');
+  });
+});
+
 describe('Issue #6: scoreImproved circular dependency', () => {
   const baseState = {
     activeTrackId: 'track-A',

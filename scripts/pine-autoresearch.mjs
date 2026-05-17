@@ -1398,11 +1398,18 @@ export function resolveScoutStagnationEscape({ schedulerState = {}, championStat
   const exploitExhausted = resolveSearchEfficiencyExploitExhausted(previousSearchEfficiency);
   const zeroEmissionExhausted = Number(previousSearchEfficiency?.emittedVariantCount) === 0
     && previousSearchEfficiency?.allCandidatesTabu === true;
+  // Gate-stagnation: variants are being generated but none pass promotion gates
+  const emittedVariants = Number(previousSearchEfficiency?.emittedVariantCount) || 0;
+  const noScoreImprovementStreak = Number(schedulerState?.noScoreImprovementStreak) || 0;
+  const gateStagnation = emittedVariants > 0
+    && !zeroEmissionExhausted
+    && noScoreImprovementStreak >= 3;
   return decideStagnationEscapePlan({
     stagnationLevel: schedulerState?.stagnationLevel ?? 0,
     generatedLanesExhausted,
     exploitExhausted,
     zeroEmissionExhausted,
+    gateStagnation,
   });
 }
 

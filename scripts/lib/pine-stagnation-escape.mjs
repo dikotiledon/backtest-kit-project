@@ -12,6 +12,7 @@ export function decideStagnationEscapePlan(input = {}) {
     generatedLanesExhausted = false,
     exploitExhausted = false,
     zeroEmissionExhausted = false,
+    gateStagnation = false,
   } = normalizeInput(input);
 
   const level = Number(stagnationLevel);
@@ -19,6 +20,7 @@ export function decideStagnationEscapePlan(input = {}) {
   const generatedExhausted = isTruthy(generatedLanesExhausted);
   const exploitDone = isTruthy(exploitExhausted);
   const zeroEmissionDone = isTruthy(zeroEmissionExhausted);
+  const gateStuck = isTruthy(gateStagnation);
 
   if (safeLevel < 2) return { mode: 'none', reason: 'not-eligible' };
 
@@ -26,6 +28,26 @@ export function decideStagnationEscapePlan(input = {}) {
     return {
       mode: 'progressive-widen',
       reason: 'zero-emission-exhausted',
+      allowArchitectureKeys: true,
+      multiKeyMutationCount: 3,
+      ladderScale: 2,
+    };
+  }
+
+  // Gate-stagnation escape — generating candidates but none pass promotion gates
+  if (!generatedExhausted && !zeroEmissionDone && gateStuck && safeLevel >= 3) {
+    if (safeLevel >= 5) {
+      return {
+        mode: 'progressive-widen',
+        reason: 'gate-stagnation',
+        allowArchitectureKeys: true,
+        multiKeyMutationCount: 4,
+        ladderScale: 2.5,
+      };
+    }
+    return {
+      mode: 'widen-architecture',
+      reason: 'gate-stagnation',
       allowArchitectureKeys: true,
       multiKeyMutationCount: 3,
       ladderScale: 2,

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useResults } from '../hooks/useResults.js';
+import { exportResultsCsv } from '../utils/exportCsv.js';
 import api from '../api.js';
 
 function formatDuration(ms) {
@@ -57,6 +58,13 @@ export default function ResultsTable() {
         <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-zinc-700 text-zinc-300">
           {results.length}
         </span>
+        <button
+          onClick={() => exportResultsCsv(results)}
+          disabled={results.length === 0}
+          className="px-2 py-1 text-xs font-medium text-gray-400 hover:text-white border border-gray-600 rounded transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          Export CSV
+        </button>
       </div>
 
       {/* Table */}

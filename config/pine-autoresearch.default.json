@@ -157,6 +157,51 @@
       "stopPolicy": {
         "maxNoChangeStreak": 5
       }
+    },
+    {
+      "trackId": "context-exit-shaping",
+      "name": "Context exit shaping (squeeze collapse + FFT)",
+      "sourceFamily": "context-exit-shaping",
+      "gridName": "phase3-core",
+      "variantMode": "grid",
+      "windowSet": "rotating",
+      "enabled": true,
+      "promotionPolicy": {
+        "requireCandidateChange": true
+      },
+      "stopPolicy": {
+        "maxNoChangeStreak": 5
+      }
+    },
+    {
+      "trackId": "fusion-tuning",
+      "name": "Fusion V2/V3 bonus/penalty",
+      "sourceFamily": "fusion",
+      "gridName": "phase3-core",
+      "variantMode": "grid",
+      "windowSet": "primary",
+      "enabled": true,
+      "promotionPolicy": {
+        "requireCandidateChange": true
+      },
+      "stopPolicy": {
+        "maxNoChangeStreak": 5
+      }
+    },
+    {
+      "trackId": "asymmetry-regime",
+      "name": "Asymmetry and regime filter",
+      "sourceFamily": "asymmetry",
+      "gridName": "phase3-core",
+      "variantMode": "grid",
+      "windowSet": "rotating",
+      "enabled": true,
+      "promotionPolicy": {
+        "requireCandidateChange": true
+      },
+      "stopPolicy": {
+        "maxNoChangeStreak": 3
+      }
     }
   ],
   "rotationPolicy": {
@@ -455,7 +500,9 @@
   ],
   "regimeExitResearch": {
     "enabled": true,
-    "offline": { "mode": "offline-strict" },
+    "offline": {
+      "mode": "offline-strict"
+    },
     "budget": {
       "exploitRatio": 0.25,
       "exitRegimeRatio": 0.35,

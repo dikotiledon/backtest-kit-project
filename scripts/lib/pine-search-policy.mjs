@@ -320,16 +320,24 @@ export function signalPatches(base, { temperature = 1 } = {}) {
 
 function legacyRiskPatches(base) {
   return [
-    { slAtrMult: Math.max(0.75, (base.slAtrMult ?? 1) - 0.25) },
+    { slAtrMult: Math.max(0.125, (base.slAtrMult ?? 1) - 0.25) },
     { slAtrMult: (base.slAtrMult ?? 1) + 0.25 },
-    { tpAtrMult: Math.max(1.5, (base.tpAtrMult ?? 2.5) - 0.5) },
+    { tpAtrMult: Math.max(1.0, (base.tpAtrMult ?? 2.5) - 0.5) },
     { tpAtrMult: (base.tpAtrMult ?? 2.5) + 0.5 },
-    { trailAtrMult: Math.max(0.75, (base.trailAtrMult ?? 1) - 0.25) },
+    { trailAtrMult: Math.max(0.25, (base.trailAtrMult ?? 1) - 0.25) },
     { trailAtrMult: (base.trailAtrMult ?? 1) + 0.25 },
     { trailActivateR: Math.max(0, (base.trailActivateR ?? 0.5) - 0.5) },
     { trailActivateR: (base.trailActivateR ?? 0.5) + 0.5 },
     { riskAtrLen: Math.max(7, (base.riskAtrLen ?? 14) - 7) },
     { riskAtrLen: (base.riskAtrLen ?? 14) + 7 },
+    // Wide exploration jumps (reach distant optima in single step)
+    { trailAtrMult: Math.max(0.25, (base.trailAtrMult ?? 1) + 1.0) },
+    { trailAtrMult: Math.max(0.25, (base.trailAtrMult ?? 1) + 2.0) },
+    { slAtrMult: (base.slAtrMult ?? 1) + 0.5 },
+    { tpAtrMult: Math.max(1.0, (base.tpAtrMult ?? 2.5) - 1.5) },
+    { tpAtrMult: Math.max(1.0, (base.tpAtrMult ?? 2.5) - 2.5) },
+    { trailActivateR: (base.trailActivateR ?? 0.5) + 1.0 },
+    { trailActivateR: (base.trailActivateR ?? 0.5) + 1.5 },
   ];
 }
 
@@ -341,18 +349,18 @@ export function riskPatches(base, { temperature = 1 } = {}) {
   const baseActivate = base.trailActivateR ?? 0.5;
   const baseAtrLen = base.riskAtrLen ?? 14;
   const stepScales = safeTemp >= 3 ? [0.5, 2, 3] : safeTemp >= 2 ? [0.5, 2] : [0.5];
-  const targetCount = safeTemp >= 3 ? 30 : safeTemp >= 2 ? 20 : 15;
+  const targetCount = safeTemp >= 3 ? 40 : safeTemp >= 2 ? 28 : 20;
   const patches = [...legacyRiskPatches(base)];
   for (const scale of stepScales) {
     patches.push(
       { slAtrMult: Math.max(0.125, Number((baseSl - 0.25 * scale).toFixed(3))) },
       { slAtrMult: Number((baseSl + 0.25 * scale).toFixed(3)) },
-      { tpAtrMult: Math.max(1.0, Number((baseTp - 0.5 * scale).toFixed(3))) },
+      { tpAtrMult: Math.max(1.0, Number((baseTp - 1.0 * scale).toFixed(3))) },
       { tpAtrMult: Number((baseTp + 0.5 * scale).toFixed(3)) },
-      { trailAtrMult: Math.max(0.25, Number((baseTrail - 0.25 * scale).toFixed(3))) },
-      { trailAtrMult: Number((baseTrail + 0.25 * scale).toFixed(3)) },
+      { trailAtrMult: Math.max(0.25, Number((baseTrail - 0.5 * scale).toFixed(3))) },
+      { trailAtrMult: Number((baseTrail + 0.5 * scale).toFixed(3)) },
       { trailActivateR: Math.max(0, Number((baseActivate - 0.25 * scale).toFixed(3))) },
-      { trailActivateR: Number((baseActivate + 0.5 * scale).toFixed(3)) },
+      { trailActivateR: Number((baseActivate + 0.75 * scale).toFixed(3)) },
       { riskAtrLen: Math.max(5, Math.round(baseAtrLen - 7 * scale)) },
       { riskAtrLen: Math.round(baseAtrLen + 7 * scale) },
     );

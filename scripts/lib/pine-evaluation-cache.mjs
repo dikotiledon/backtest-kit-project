@@ -7,12 +7,17 @@ export function buildEvaluationCacheKey({ runId, labId, variantKey, configFinger
   ]);
 }
 
-export function createEvaluationCache() {
+export function createEvaluationCache({ cacheVersion = 1 } = {}) {
   const entries = new Map();
 
   return {
     getOrCompute(key, compute) {
-      if (entries.has(key)) return entries.get(key);
+      if (entries.has(key)) {
+        const stored = entries.get(key);
+        if (stored._cacheVersion === cacheVersion) return stored.promise;
+        // Version mismatch — discard stale entry
+        entries.delete(key);
+      }
 
       const promise = Promise.resolve()
         .then(compute)
@@ -20,7 +25,7 @@ export function createEvaluationCache() {
           entries.delete(key);
           throw error;
         });
-      entries.set(key, promise);
+      entries.set(key, { promise, _cacheVersion: cacheVersion });
       return promise;
     },
     size() {

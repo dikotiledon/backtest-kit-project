@@ -104,3 +104,56 @@ export function scoreMetricsBreakdown(metrics, options = {}) {
 export function scoreMetrics(metrics, options = {}) {
   return scoreMetricsBreakdown(metrics, options).total;
 }
+
+export function calculateCompoundedMetrics(trades) {
+  if (!trades || trades.length === 0) {
+    return {
+      compoundedRoiPct: 0,
+      maxDrawdownPct: 0,
+      cagrPct: 0,
+      equityCurve: [],
+      tradeCount: 0,
+      finalEquity: 1,
+    };
+  }
+
+  let equity = 1.0;
+  let peak = 1.0;
+  let maxDrawdownFraction = 0;
+  const equityCurve = [1.0];
+
+  for (const trade of trades) {
+    const returnPct = Number.isFinite(trade?.returnPctExact) ? trade.returnPctExact
+      : (Number.isFinite(trade?.returnPct) ? trade.returnPct : 0);
+    const multiplier = 1 + (returnPct / 100);
+    equity *= Math.max(0, multiplier);
+    equityCurve.push(equity);
+
+    if (equity > peak) peak = equity;
+    const drawdownFraction = peak > 0 ? (peak - equity) / peak : 0;
+    if (drawdownFraction > maxDrawdownFraction) maxDrawdownFraction = drawdownFraction;
+  }
+
+  const compoundedRoiPct = (equity - 1) * 100;
+
+  // CAGR calculation if time data available
+  let cagrPct = 0;
+  const firstEntry = trades[0]?.entryTime;
+  const lastExit = trades[trades.length - 1]?.exitTime;
+  if (firstEntry && lastExit) {
+    const durationMs = Date.parse(lastExit) - Date.parse(firstEntry);
+    const years = durationMs / (365.25 * 24 * 60 * 60 * 1000);
+    if (years > 0 && equity > 0) {
+      cagrPct = (Math.pow(equity, 1 / years) - 1) * 100;
+    }
+  }
+
+  return {
+    compoundedRoiPct: Number(compoundedRoiPct.toFixed(4)),
+    maxDrawdownPct: Number((maxDrawdownFraction * 100).toFixed(4)),
+    cagrPct: Number.isFinite(cagrPct) ? Number(cagrPct.toFixed(4)) : 0,
+    equityCurve,
+    tradeCount: trades.length,
+    finalEquity: Number(equity.toFixed(6)),
+  };
+}

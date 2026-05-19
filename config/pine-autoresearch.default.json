@@ -512,27 +512,27 @@
     }
   ],
   "featureFlags": {
-    "USE_NEXT_BAR_OPEN_ENTRY": false,
-    "USE_COMPOUNDED_METRICS": false,
-    "USE_COST_MODEL": false,
-    "USE_STATISTICAL_SIGNIFICANCE": false,
-    "USE_WALK_FORWARD_GATE": false,
-    "USE_DATA_QUALITY_GATE": false,
-    "USE_UNIFIED_SCORING": false
+    "USE_NEXT_BAR_OPEN_ENTRY": true,
+    "USE_COMPOUNDED_METRICS": true,
+    "USE_COST_MODEL": true,
+    "USE_STATISTICAL_SIGNIFICANCE": true,
+    "USE_WALK_FORWARD_GATE": true,
+    "USE_DATA_QUALITY_GATE": true,
+    "USE_UNIFIED_SCORING": true
   },
   "costModel": {
-    "enabled": false,
+    "enabled": true,
     "commissionPct": 0.04,
     "slippagePct": 0.02,
     "spreadPct": 0.01,
     "slippageStopMultiplier": 2.5
   },
   "multipleTestingPolicy": {
-    "base": 1.0,
+    "base": 1,
     "step": 0.3
   },
   "walkForwardPolicy": {
-    "enabled": false,
+    "enabled": true,
     "folds": 5,
     "trainRatio": 0.7,
     "stepMode": "rolling",
@@ -565,5 +565,13 @@
       "minTradeCount": 60,
       "requireBlindHoldoutVerdict": true
     }
+  },
+  "cacheVersion": 2,
+  "significancePolicy": {
+    "mode": "statistical",
+    "minTradeCount": 30,
+    "bootstrapIterations": 2000,
+    "confidenceLevel": 0.95,
+    "alpha": 0.05
   }
 }

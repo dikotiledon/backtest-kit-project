@@ -59,12 +59,7 @@ test('computeCandidateUtility handles NaN/Infinity defensively with finite outpu
   });
 
   assert.equal(Number.isFinite(result.utility), true);
-  assert.equal(Number.isFinite(result.components.roiComponent), true);
-  assert.equal(Number.isFinite(result.components.expectancyComponent), true);
-  assert.equal(Number.isFinite(result.components.profitFactorComponent), true);
-  assert.equal(Number.isFinite(result.components.drawdownPenalty), true);
-  assert.equal(Number.isFinite(result.components.tradeCountComponent), true);
-  assert.equal(Number.isFinite(result.components.winRateDiagnostic), true);
+  assert.equal(Number.isFinite(result.components.baseScore), true);
 });
 
 test('negative tradeCount does not produce NaN utility', () => {
@@ -79,7 +74,6 @@ test('negative tradeCount does not produce NaN utility', () => {
 
   assert.equal(Number.isNaN(result.utility), false);
   assert.equal(Number.isFinite(result.utility), true);
-  assert.equal(result.components.tradeCountComponent, 0);
 });
 
 test('zero incumbent trade count uses defined trade ratio behavior', () => {
@@ -111,7 +105,83 @@ test('negative winRate/profitFactor are clamped safely', () => {
     winRatePct: -50,
   });
 
-  assert.equal(result.components.profitFactorComponent, 0);
-  assert.equal(result.components.winRateDiagnostic, 0);
+  // scoreMetrics handles clamping internally; just verify finite output
   assert.equal(Number.isFinite(result.utility), true);
+  assert.equal(Number.isFinite(result.components.baseScore), true);
+});
+
+// === Task 12+13 Tests ===
+
+import { describe, it } from 'node:test';
+
+describe('scoring unification (Task 12)', () => {
+  it('computeCandidateUtility uses scoreMetrics as base when no adjustments', () => {
+    const metrics = { roiPct: 30, winRatePct: 55, profitFactor: 1.8, maxDrawdownPct: 10, tradeCount: 150, expectancy: 0.3 };
+    const { utility, components } = computeCandidateUtility(metrics);
+    assert.ok(Number.isFinite(components.baseScore));
+    assert.equal(utility, components.baseScore); // no adjustments = utility equals base
+  });
+
+  it('adjustments modify utility relative to base', () => {
+    const metrics = { roiPct: 30, winRatePct: 55, profitFactor: 1.8, maxDrawdownPct: 10, tradeCount: 150, expectancy: 0.3 };
+    const { utility: base } = computeCandidateUtility(metrics);
+    const { utility: adjusted } = computeCandidateUtility(metrics, {
+      robustnessBonus: 5,
+      multipleTestingPenalty: 3,
+    });
+    assert.equal(adjusted, base + 5 - 3);
+  });
+
+  it('higher ROI candidate gets higher utility', () => {
+    const metricsA = { roiPct: 20, winRatePct: 55, profitFactor: 1.5, maxDrawdownPct: 10, tradeCount: 150 };
+    const metricsB = { roiPct: 40, winRatePct: 55, profitFactor: 1.5, maxDrawdownPct: 10, tradeCount: 150 };
+    const { utility: utilA } = computeCandidateUtility(metricsA);
+    const { utility: utilB } = computeCandidateUtility(metricsB);
+    assert.ok(utilB > utilA, `higher ROI should give higher utility: ${utilB} vs ${utilA}`);
+  });
+});
+
+describe('computeMultipleTestingPenalty v2 (Task 13)', () => {
+  it('penalty at 100 candidates with 5 families is meaningful', () => {
+    const penalty = computeMultipleTestingPenalty(
+      { attemptedCandidates: 100, mutationFamilyCount: 5, regimeSliceCount: 1, exitFamilyCount: 3 },
+      { base: 1.0, step: 0.3 },
+    );
+    // log2(100) = 6.64, familyBreadth = (5-1)+(1-1)+(3-1) = 6
+    // penalty = 1.0 + (6.64 + 6) * 0.3 = 4.79
+    assert.ok(penalty >= 4, `penalty ${penalty} should be >= 4`);
+    assert.ok(penalty <= 6, `penalty ${penalty} should be <= 6`);
+  });
+
+  it('penalty at 500 candidates with 8 families is substantial', () => {
+    const penalty = computeMultipleTestingPenalty(
+      { attemptedCandidates: 500, mutationFamilyCount: 8, regimeSliceCount: 3, exitFamilyCount: 5 },
+      { base: 1.0, step: 0.3 },
+    );
+    // log2(500) = 8.97, familyBreadth = (8-1)+(3-1)+(5-1) = 13
+    // penalty = 1.0 + (8.97 + 13) * 0.3 = 7.59
+    assert.ok(penalty >= 7, `penalty ${penalty} should be >= 7`);
+    assert.ok(penalty <= 9, `penalty ${penalty} should be <= 9`);
+  });
+
+  it('penalty at 1 candidate is minimal', () => {
+    const penalty = computeMultipleTestingPenalty(
+      { attemptedCandidates: 1, mutationFamilyCount: 1, regimeSliceCount: 1, exitFamilyCount: 1 },
+      { base: 1.0, step: 0.3 },
+    );
+    // log2(1) = 0, familyBreadth = 0
+    // penalty = 1.0
+    assert.ok(penalty >= 1);
+    assert.ok(penalty <= 1.5);
+  });
+
+  it('uses new defaults (base 1.0, step 0.3) when no policy provided', () => {
+    const penalty = computeMultipleTestingPenalty(
+      { attemptedCandidates: 100, mutationFamilyCount: 3, regimeSliceCount: 1, exitFamilyCount: 2 },
+    );
+    // With new defaults: base=1.0, step=0.3
+    // log2(100)=6.64, familyBreadth=(3-1)+(1-1)+(2-1)=3
+    // penalty = 1.0 + (6.64+3)*0.3 = 3.89
+    assert.ok(penalty >= 3, `penalty ${penalty} should be >= 3 with new defaults`);
+  });
 });

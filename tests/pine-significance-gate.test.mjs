@@ -164,3 +164,68 @@ test('decideSignificanceGate requires larger delta when challenger trade count d
     tradeRatio: 0.818,
   });
 });
+
+import { describe, it } from 'node:test';
+
+describe('decideSignificanceGate v2 - statistical mode', () => {
+  it('passes when trade returns are statistically different (seeded)', () => {
+    const incumbent = {
+      score: 50,
+      metrics: { tradeCount: 100 },
+      tradeReturns: Array.from({ length: 100 }, (_, i) => 0.1 + (i % 10) * 0.01),
+    };
+    const challenger = {
+      score: 55,
+      metrics: { tradeCount: 100 },
+      tradeReturns: Array.from({ length: 100 }, (_, i) => 0.5 + (i % 10) * 0.01),
+    };
+    const result = decideSignificanceGate({
+      incumbent, challenger,
+      policy: { mode: 'statistical', minTradeCount: 20, seed: 42 },
+    });
+    assert.equal(result.passed, true);
+    assert.equal(result.reason, 'statistically_significant');
+    assert.ok(result.statistical);
+    assert.ok(result.statistical.bootstrapCI);
+    assert.ok(result.statistical.permutation);
+  });
+
+  it('fails when trade returns are not statistically different (seeded)', () => {
+    const base = Array.from({ length: 80 }, (_, i) => 0.2 + (i % 40) * 0.01);
+    const incumbent = {
+      score: 50,
+      metrics: { tradeCount: 40 },
+      tradeReturns: base.filter((_, i) => i % 2 === 0),
+    };
+    const challenger = {
+      score: 51,
+      metrics: { tradeCount: 40 },
+      tradeReturns: base.filter((_, i) => i % 2 === 1),
+    };
+    const result = decideSignificanceGate({
+      incumbent, challenger,
+      policy: { mode: 'statistical', minTradeCount: 20, seed: 42 },
+    });
+    assert.equal(result.passed, false);
+  });
+
+  it('falls back to legacy mode when tradeReturns not provided', () => {
+    const incumbent = { score: 50, metrics: { tradeCount: 150 } };
+    const challenger = { score: 55, metrics: { tradeCount: 150 } };
+    const result = decideSignificanceGate({
+      incumbent, challenger,
+      policy: { mode: 'statistical', minTradeCount: 100, minRelativeScoreDelta: 0.02 },
+    });
+    assert.equal(result.passed, true);
+  });
+
+  it('legacy mode still works when mode not set', () => {
+    const incumbent = { score: 100, metrics: { tradeCount: 200 } };
+    const challenger = { score: 103, metrics: { tradeCount: 200 } };
+    const result = decideSignificanceGate({
+      incumbent, challenger,
+      policy: { minRelativeScoreDelta: 0.02, minTradeCount: 100 },
+    });
+    assert.equal(result.passed, true);
+  });
+});

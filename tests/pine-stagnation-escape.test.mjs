@@ -108,3 +108,80 @@ test('decideStagnationEscapePlan tolerates malformed inputs', () => {
     ladderScale: 2,
   });
 });
+
+// --- Quality-aware convergence tests ---
+import { describe, it } from 'node:test';
+
+describe('stagnation escape - quality-aware convergence', () => {
+  it('returns converged when at max level, all exhausted, and champion quality sufficient', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 6,
+      generatedLanesExhausted: true,
+      exploitExhausted: true,
+      zeroEmissionExhausted: true,
+      gateStagnation: true,
+      convergencePolicy: { enabled: true, maxStagnationLevel: 6 },
+      championQuality: { roiPct: 35, profitFactor: 1.8, maxDrawdownPct: 12, tradeCount: 200 },
+      qualityFloors: { minRoiPct: 15, minProfitFactor: 1.2, maxDrawdownPct: 25, minTradeCount: 50 },
+    });
+    assert.equal(result.mode, 'converged');
+    assert.equal(result.reason, 'convergence-accepted');
+    assert.equal(result.recommendation, 'stop-research');
+  });
+
+  it('does NOT converge when champion quality is below floors', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 6,
+      generatedLanesExhausted: true,
+      exploitExhausted: true,
+      zeroEmissionExhausted: true,
+      gateStagnation: true,
+      convergencePolicy: { enabled: true, maxStagnationLevel: 6 },
+      championQuality: { roiPct: 5, profitFactor: 0.9, maxDrawdownPct: 30, tradeCount: 200 },
+      qualityFloors: { minRoiPct: 15, minProfitFactor: 1.2, maxDrawdownPct: 25, minTradeCount: 50 },
+    });
+    assert.notEqual(result.mode, 'converged');
+    assert.ok(result.qualityGatesFailed);
+    assert.ok(result.qualityGatesFailed.includes('roiFloor'));
+    assert.ok(result.qualityGatesFailed.includes('profitFactorFloor'));
+  });
+
+  it('does not converge below max stagnation level', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 4,
+      generatedLanesExhausted: true,
+      exploitExhausted: true,
+      zeroEmissionExhausted: true,
+      convergencePolicy: { enabled: true, maxStagnationLevel: 6 },
+      championQuality: { roiPct: 35, profitFactor: 1.8, maxDrawdownPct: 12, tradeCount: 200 },
+      qualityFloors: { minRoiPct: 15, minProfitFactor: 1.2, maxDrawdownPct: 25, minTradeCount: 50 },
+    });
+    assert.notEqual(result.mode, 'converged');
+  });
+
+  it('does not converge when convergence policy disabled', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 6,
+      generatedLanesExhausted: true,
+      exploitExhausted: true,
+      zeroEmissionExhausted: true,
+      convergencePolicy: { enabled: false },
+      championQuality: { roiPct: 35, profitFactor: 1.8, maxDrawdownPct: 12, tradeCount: 200 },
+      qualityFloors: { minRoiPct: 15, minProfitFactor: 1.2, maxDrawdownPct: 25, minTradeCount: 50 },
+    });
+    assert.notEqual(result.mode, 'converged');
+  });
+
+  it('does not converge when trade count below floor', () => {
+    const result = decideStagnationEscapePlan({
+      stagnationLevel: 6,
+      generatedLanesExhausted: true,
+      exploitExhausted: true,
+      zeroEmissionExhausted: true,
+      convergencePolicy: { enabled: true, maxStagnationLevel: 6 },
+      championQuality: { roiPct: 35, profitFactor: 1.8, maxDrawdownPct: 12, tradeCount: 30 },
+      qualityFloors: { minRoiPct: 15, minProfitFactor: 1.2, maxDrawdownPct: 25, minTradeCount: 50 },
+    });
+    assert.notEqual(result.mode, 'converged');
+  });
+});

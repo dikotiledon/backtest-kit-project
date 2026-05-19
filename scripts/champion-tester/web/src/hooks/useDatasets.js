@@ -1,6 +1,15 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
 
+function normalizeDataset(d) {
+  return {
+    ...d,
+    id: `${d.exchange}:${d.symbol}:${d.timeframe}`,
+    candles: d.candleCount ?? d.candles ?? 0,
+    lastUpdated: d.updatedAt ?? d.lastUpdated ?? null,
+  };
+}
+
 export function useDatasets() {
   const [datasets, setDatasets] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -10,7 +19,7 @@ export function useDatasets() {
     setLoading(true);
     try {
       const data = await api.getDatasets();
-      setDatasets(data.datasets);
+      setDatasets(data.datasets.map(normalizeDataset));
       setError(null);
     } catch (err) {
       setError(err.message);

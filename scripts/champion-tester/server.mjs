@@ -9,9 +9,11 @@ import {
   validateSymbolInput, TIMEFRAME_MS,
 } from './lib/dataset-manager.mjs';
 import { listChampionSources, loadChampion } from './lib/champion-loader.mjs';
-import { runChampionTest, getRunStatus } from './lib/strategy-runner.mjs';
+import { runChampionTest, getRunStatus, loadPersistedState, loadLastResult, cancelRunningTest } from './lib/strategy-runner.mjs';
 import { runSweep, getSweepStatus, cancelSweep } from './lib/sweep-runner.mjs';
 import { ResultsStore } from './lib/results-store.mjs';
+import { normalizeResult } from './lib/metric-normalizer.mjs';
+import { registerTradingRoutes } from './lib/trading-routes.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -21,6 +23,26 @@ const RESULTS_DIR = path.resolve(__dirname, 'results');
 const store = new ResultsStore(RESULTS_DIR);
 const app = express();
 app.use(express.json());
+
+// ─── Structured Logger ──────────────────────────────────────────────────────
+
+function log(level, msg, meta = {}) {
+  const ts = new Date().toISOString();
+  const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(meta) : '';
+  console.log(`[${ts}] [${level}] ${msg}${metaStr}`);
+}
+
+// Request logging
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const ms = Date.now() - start;
+    if (req.path.startsWith('/api')) {
+      log('http', `${req.method} ${req.path} ${res.statusCode} ${ms}ms`);
+    }
+  });
+  next();
+});
 
 // ─── Startup Cleanup ────────────────────────────────────────────────────────
 
@@ -72,7 +94,9 @@ app.post('/api/datasets/fetch', async (req, res) => {
     }
 
     const limit = Math.min(Math.max(Number(initialLimit) || 10000, 100), 50000);
+    log('info', 'Dataset fetch started', { symbol, timeframe, limit });
     const result = await fetchOrUpdateDataset({ tvSymbol: symbol, timeframe, dataDir: DATA_DIR, initialLimit: limit });
+    log('info', 'Dataset fetch complete', { symbol, timeframe, fetched: result.fetched, isNew: result.isNew, total: result.dataset.candleCount });
 
     res.json({
       ok: true, isNew: result.isNew, fetched: result.fetched,
@@ -84,6 +108,7 @@ app.post('/api/datasets/fetch', async (req, res) => {
       updatedAt: result.dataset.updatedAt,
     });
   } catch (err) {
+    log('error', 'Dataset fetch failed', { error: err.message });
     res.status(500).json({ ok: false, error: err.message, code: 'EXCHANGE_ERROR' });
   }
 });
@@ -119,7 +144,7 @@ app.get('/api/champions/:matrixId', async (req, res) => {
   }
 });
 
-// ─── Test Runner API ────────────────────────────────────────────────────────
+// ─── Test Runner API (async: returns runId immediately, polls for result) ───
 
 app.post('/api/test/run', async (req, res) => {
   try {
@@ -142,17 +167,57 @@ app.post('/api/test/run', async (req, res) => {
       });
     }
 
-    broadcast('test:start', { symbol, timeframe });
-    const result = await runChampionTest({ matrixId, dataset, slice: slice || {} });
-    await store.save(result);
-    broadcast('test:complete', result);
-    res.json(result);
+    // Check if already running
+    const status = getRunStatus();
+    if (status.running) {
+      return res.status(409).json({
+        ok: false, error: 'A test is already running. Please wait.',
+        code: 'RUN_IN_PROGRESS', runId: status.runId,
+      });
+    }
+
+    // Start async — respond immediately with runId
+    log('info', 'Test started', { symbol, timeframe, matrixId, slice: slice || {} });
+    broadcast('test:start', { symbol, timeframe, matrixId });
+
+    // Fire and forget — result delivered via WebSocket
+    runChampionTest({ matrixId, dataset, slice: slice || {} })
+      .then(async (result) => {
+        const normalized = normalizeResult(result);
+        await store.save(normalized);
+        log('info', 'Test complete', {
+          runId: normalized.runId, ok: normalized.ok, score: normalized.score,
+          trades: normalized.trades?.length, durationMs: normalized.durationMs,
+        });
+        broadcast('test:complete', { result: normalized });
+      })
+      .catch((err) => {
+        log('error', 'Test failed', { error: err.message });
+        broadcast('test:error', { error: err.message || String(err) });
+      });
+
+    res.json({ ok: true, started: true, symbol, timeframe, matrixId });
   } catch (err) {
     if (err.code === 'RUN_IN_PROGRESS') {
       return res.status(409).json({ ok: false, error: err.message, code: err.code });
     }
     res.status(500).json({ ok: false, error: err.message, code: 'EXECUTION_ERROR' });
   }
+});
+
+app.get('/api/test/status', (req, res) => {
+  const status = getRunStatus();
+  res.json({ ok: true, ...status });
+});
+
+app.post('/api/test/cancel', (req, res) => {
+  const status = getRunStatus();
+  if (!status.running) {
+    return res.json({ ok: true, cancelled: false, reason: 'No test running' });
+  }
+  cancelRunningTest();
+  log('info', 'Test cancelled by user', { runId: status.runId });
+  res.json({ ok: true, cancelled: true, runId: status.runId });
 });
 
 // ─── Results API ────────────────────────────────────────────────────────────
@@ -209,21 +274,42 @@ app.post('/api/sweep/run', async (req, res) => {
       return { exchange: parsed.exchange, symbol: parsed.symbol, timeframe: d.timeframe };
     });
 
-    const onProgress = (progressData) => broadcast('sweep:progress', progressData);
-    const result = await runSweep({ matrixId, datasets: parsedDatasets, dataDir: DATA_DIR, onProgress });
-
-    // Save successful results to store
-    if (result.results) {
-      for (const r of result.results) {
-        if (r.ok) await store.save(r);
-      }
+    // Check if already running
+    const sweepStatus = getSweepStatus();
+    if (sweepStatus.running) {
+      return res.status(409).json({ ok: false, error: 'Sweep already in progress', code: 'SWEEP_IN_PROGRESS' });
+    }
+    const runStatus = getRunStatus();
+    if (runStatus.running) {
+      return res.status(409).json({ ok: false, error: 'A test is already running', code: 'RUN_IN_PROGRESS' });
     }
 
-    res.json({ ok: true, sweepId: result.sweepId, total: result.total, message: 'Sweep started' });
+    log('info', 'Sweep started', { matrixId, datasetCount: parsedDatasets.length });
+
+    // Fire async — respond immediately
+    const onProgress = (progressData) => broadcast('sweep:progress', progressData);
+    runSweep({ matrixId, datasets: parsedDatasets, dataDir: DATA_DIR, onProgress })
+      .then(async (result) => {
+        // Save successful results to store
+        if (result.results) {
+          for (const r of result.results) {
+            if (r.ok) await store.save(normalizeResult(r));
+          }
+        }
+        log('info', 'Sweep complete', { sweepId: result.sweepId, completed: result.completed, total: result.total });
+        broadcast('sweep:complete', result);
+      })
+      .catch((err) => {
+        log('error', 'Sweep failed', { error: err.message });
+        broadcast('sweep:error', { error: err.message });
+      });
+
+    res.json({ ok: true, started: true, datasetCount: parsedDatasets.length, matrixId });
   } catch (err) {
     if (err.code === 'SWEEP_IN_PROGRESS' || err.code === 'RUN_IN_PROGRESS') {
       return res.status(409).json({ ok: false, error: err.message, code: err.code });
     }
+    log('error', 'Sweep request failed', { error: err.message });
     res.status(500).json({ ok: false, error: err.message, code: 'EXECUTION_ERROR' });
   }
 });
@@ -238,16 +324,28 @@ app.post('/api/sweep/cancel', (req, res) => {
   res.json({ ok: true });
 });
 
-// ─── Static Serving (Production) ────────────────────────────────────────────
+// ─── Trading API ────────────────────────────────────────────────────────────
 
-if (process.env.NODE_ENV === 'production') {
-  const distDir = path.resolve(__dirname, 'dist');
+registerTradingRoutes(app, broadcast);
+
+// ─── Static Serving ────────────────────────────────────────────────────────
+
+// `npm start` runs this server directly and should serve the built web UI.
+// Dev mode still uses Vite on :5173, but serving dist here is harmless and
+// avoids a confusing `Cannot GET /` after `npm run build && npm start`.
+const distDir = path.resolve(__dirname, 'dist');
+try {
+  await fs.access(path.join(distDir, 'index.html'));
   app.use(express.static(distDir));
   app.get('*', (req, res) => {
     if (!req.path.startsWith('/api')) {
       res.sendFile(path.join(distDir, 'index.html'));
     }
   });
+} catch {
+  if (process.env.NODE_ENV === 'production') {
+    log('warn', 'Built web UI not found; run npm run build before npm start', { distDir });
+  }
 }
 
 // ─── Start ──────────────────────────────────────────────────────────────────
@@ -255,6 +353,19 @@ if (process.env.NODE_ENV === 'production') {
 const PORT = parseInt(process.env.CHAMPION_TESTER_PORT || '3847', 10);
 
 await startupCleanup();
+
+// Load persisted state from previous run (if server crashed mid-run)
+const persistedState = await loadPersistedState();
+if (persistedState.lastAborted) {
+  console.log(`[champion-tester] Previous run was aborted: ${persistedState.lastAborted.runId}`);
+}
+
+// Load last result so it's available immediately on /api/test/status
+const lastResult = await loadLastResult();
+if (lastResult) {
+  console.log(`[champion-tester] Loaded last result: runId=${lastResult.runId} ok=${lastResult.ok}`);
+}
+
 const server = app.listen(PORT, () => {
   console.log(`\n  ⚡ Champion Tester running at http://localhost:${PORT}`);
   console.log(`  📁 Data: ${DATA_DIR}`);
@@ -264,8 +375,16 @@ const server = app.listen(PORT, () => {
 // ─── WebSocket Server ─────────────────────────────────────────────────────────
 
 const wss = new WebSocketServer({ server, path: '/ws' });
-wss.on('connection', (ws) => {
-  ws.send(JSON.stringify({ type: 'connected', data: { service: 'champion-tester' } }));
+wss.on('connection', (ws, req) => {
+  log('info', 'WebSocket connected', { ip: req.socket.remoteAddress });
+  // Send current state on connect so page refresh recovers running status
+  const status = getRunStatus();
+  ws.send(JSON.stringify({
+    type: 'connected',
+    data: { service: 'champion-tester', runStatus: status },
+  }));
+  ws.on('close', () => log('info', 'WebSocket disconnected'));
+  ws.on('error', (err) => log('error', 'WebSocket error', { error: err.message }));
 });
 
 function broadcast(type, data) {
@@ -277,3 +396,13 @@ function broadcast(type, data) {
 
 export { broadcast };
 export default app;
+
+// ─── Global Error Handling ───────────────────────────────────────────────────
+
+process.on('uncaughtException', (err) => {
+  log('fatal', 'Uncaught exception', { error: err.message, stack: err.stack });
+});
+
+process.on('unhandledRejection', (reason) => {
+  log('fatal', 'Unhandled rejection', { error: String(reason) });
+});

@@ -32,6 +32,10 @@ export function useWebSocket() {
 
       ws.onopen = () => {
         setConnected(true);
+        // Emit synthetic 'connected' event so subscribers (e.g. TestRunner) can recover state
+        if (handlersRef.current.has('connected')) {
+          handlersRef.current.get('connected').forEach((handler) => handler({ type: 'connected', data: {} }));
+        }
       };
 
       ws.onclose = () => {

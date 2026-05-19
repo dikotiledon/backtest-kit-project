@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { api } from '../api.js';
+import { normalizeResultMetrics } from '../utils/metrics.js';
 
 export function useResults() {
   const [results, setResults] = useState([]);
@@ -10,8 +11,8 @@ export function useResults() {
     setLoading(true);
     try {
       const data = await api.getResults(params);
-      setResults(data.results);
-      setTotal(data.total);
+      setResults((data.results || []).map(normalizeResultMetrics));
+      setTotal(data.total || 0);
     } catch {} finally {
       setLoading(false);
     }

@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { runChampionTest, getRunStatus } from './strategy-runner.mjs';
+import { runChampionTest, getRunStatus, cancelRunningTest } from './strategy-runner.mjs';
 import { readDataset, datasetPath } from './dataset-manager.mjs';
 
 // Module-level state
@@ -7,12 +7,17 @@ let _sweepRunning = false;
 let _sweepId = null;
 let _sweepProgress = null;
 let _sweepCancelled = false;
+let _sweepLastResult = null;
 
 /**
  * Get current sweep status.
  */
 export function getSweepStatus() {
-  if (!_sweepRunning) return { running: false };
+  if (!_sweepRunning) {
+    return _sweepLastResult
+      ? { running: false, lastResult: _sweepLastResult }
+      : { running: false };
+  }
   return {
     running: true,
     sweepId: _sweepId,
@@ -26,6 +31,7 @@ export function getSweepStatus() {
  */
 export async function cancelSweep() {
   _sweepCancelled = true;
+  cancelRunningTest();
   return { ok: true };
 }
 
@@ -79,22 +85,24 @@ export async function runSweep({ matrixId, datasets, dataDir, onProgress, timeou
     // Build summary
     const totalTime = Date.now() - startedAt;
     const results = _sweepProgress.results;
-    const successfulResults = results.filter(r => r.ok !== false && r.netProfit != null);
+    // netProfit lives inside result.metrics, not at top level
+    const successfulResults = results.filter(r => r.ok !== false && r.metrics?.netProfit != null);
 
     let avgNetProfit = null;
     let bestSymbol = null;
     let worstSymbol = null;
 
     if (successfulResults.length > 0) {
-      const totalProfit = successfulResults.reduce((sum, r) => sum + r.netProfit, 0);
+      const totalProfit = successfulResults.reduce((sum, r) => sum + r.metrics.netProfit, 0);
       avgNetProfit = totalProfit / successfulResults.length;
 
-      const sorted = [...successfulResults].sort((a, b) => b.netProfit - a.netProfit);
-      bestSymbol = sorted[0]?.symbol ?? sorted[0]?.dataset?.symbol ?? null;
-      worstSymbol = sorted[sorted.length - 1]?.symbol ?? sorted[sorted.length - 1]?.dataset?.symbol ?? null;
+      const sorted = [...successfulResults].sort((a, b) => b.metrics.netProfit - a.metrics.netProfit);
+      bestSymbol = sorted[0]?.dataset?.symbol ?? null;
+      worstSymbol = sorted[sorted.length - 1]?.dataset?.symbol ?? null;
     }
 
-    return {
+    const finalResult = {
+      running: false,
       sweepId: _sweepId,
       totalTime,
       completed: _sweepProgress.completed,
@@ -105,6 +113,9 @@ export async function runSweep({ matrixId, datasets, dataDir, onProgress, timeou
       worstSymbol,
       results,
     };
+    _sweepLastResult = finalResult;
+    if (onProgress) onProgress(finalResult);
+    return finalResult;
   } finally {
     _sweepRunning = false;
     _sweepId = null;

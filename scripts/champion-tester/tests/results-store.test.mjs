@@ -46,14 +46,34 @@ describe('ResultsStore', () => {
       assert.ok(stat.isFile());
     });
 
-    it('file contains valid JSON matching input', async () => {
+    it('file contains valid JSON matching normalized input', async () => {
       const result = sampleResult();
       const { filePath } = await store.save(result);
 
       const raw = await fs.readFile(filePath, 'utf8');
       const parsed = JSON.parse(raw);
 
-      assert.deepEqual(parsed, result);
+      assert.equal(parsed.runId, result.runId);
+      assert.equal(parsed.metrics.netProfit, 150);
+      assert.equal(parsed.metrics.winRate, 65);
+      assert.equal(parsed.metrics.totalTrades, 20);
+      assert.equal(parsed.metrics.roi, 0);
+    });
+
+    it('normalizes analyzer metric aliases when saving', async () => {
+      const result = sampleResult({
+        metrics: { totalPnl: 123.456, roiPct: 4.321, winRatePct: 56.789, tradeCount: 12, maxDrawdownPct: 1.234, profitFactor: 2.345 },
+      });
+      await store.save(result);
+
+      const found = await store.get(result.runId);
+
+      assert.equal(found.metrics.netProfit, 123.46);
+      assert.equal(found.metrics.roi, 4.32);
+      assert.equal(found.metrics.winRate, 56.79);
+      assert.equal(found.metrics.totalTrades, 12);
+      assert.equal(found.metrics.maxDrawdown, 1.23);
+      assert.equal(found.metrics.profitFactor, 2.35);
     });
   });
 
@@ -131,7 +151,10 @@ describe('ResultsStore', () => {
 
       const found = await store.get('test-run-001');
 
-      assert.deepEqual(found, result);
+      assert.equal(found.runId, result.runId);
+      assert.equal(found.metrics.netProfit, result.metrics.netProfit);
+      assert.equal(found.metrics.winRate, result.metrics.winRate);
+      assert.equal(found.metrics.totalTrades, result.metrics.totalTrades);
     });
 
     it('returns null for unknown runId', async () => {

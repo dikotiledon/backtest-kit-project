@@ -5,7 +5,7 @@ import { getSweepStatus, cancelSweep } from '../lib/sweep-runner.mjs';
 describe('sweep-runner', () => {
   it('getSweepStatus returns idle when not running', () => {
     const status = getSweepStatus();
-    assert.deepStrictEqual(status, { running: false });
+    assert.equal(status.running, false);
   });
 
   it('cancelSweep returns ok', async () => {

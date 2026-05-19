@@ -1,5 +1,8 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { simulateTrades as newSimulateTrades } from './pine-simulator.mjs';
+import { buildCostModel } from './pine-cost-model.mjs';
+import { createFlagRegistry, getFlag } from './pine-feature-flags.mjs';
 
 export { analyzeJsonlFileStreaming } from './pine-streaming-metrics.mjs';
 
@@ -109,7 +112,7 @@ function buildTrade(position, exitRow, exitReason, exitPrice, exitIndex) {
   };
 }
 
-export function simulateTrades(rows, options = {}) {
+function legacySimulateTrades(rows, options = {}) {
   const normalized = normalizeRows(rows);
   const timeframeMinutes = options.timeframeMinutes || inferTimeframeMinutes(normalized);
   const trades = [];
@@ -200,6 +203,26 @@ export function simulateTrades(rows, options = {}) {
   }
 
   return trades;
+}
+
+export function simulateTrades(rows, options = {}) {
+  const flags = options.featureFlags
+    ? createFlagRegistry(options.featureFlags)
+    : null;
+
+  if (flags && getFlag(flags, 'USE_NEXT_BAR_OPEN_ENTRY')) {
+    const costModel = (getFlag(flags, 'USE_COST_MODEL') && options.costModel)
+      ? buildCostModel(options.costModel)
+      : null;
+    return newSimulateTrades(rows, {
+      entryMode: 'next-bar-open',
+      costModel,
+      timeframeMinutes: options.timeframeMinutes,
+    });
+  }
+
+  // Legacy path — existing behavior unchanged
+  return legacySimulateTrades(rows, options);
 }
 
 export function calculateMetrics(trades) {

@@ -1,3 +1,5 @@
+import { isStatisticallySignificant } from './pine-statistical-significance.mjs';
+
 const DEFAULT_MIN_RELATIVE_SCORE_DELTA = 0.02;
 const DEFAULT_MIN_TRADE_COUNT = 100;
 const SCORE_DENOMINATOR_FLOOR = 1e-6;
@@ -49,6 +51,35 @@ export function decideSignificanceGate(input = {}) {
   const normalizedInput = input != null && typeof input === 'object' && !Array.isArray(input) ? input : {};
   const { incumbent = {}, challenger = {}, policy = {} } = normalizedInput;
 
+  const mode = policy?.mode ?? 'legacy';
+
+  if (mode === 'statistical') {
+    const incumbentReturns = incumbent.tradeReturns;
+    const challengerReturns = challenger.tradeReturns;
+    const minTradeCount = policy.minTradeCount ?? 20;
+
+    if (Array.isArray(incumbentReturns) && Array.isArray(challengerReturns)
+        && incumbentReturns.length >= minTradeCount
+        && challengerReturns.length >= minTradeCount) {
+      const result = isStatisticallySignificant(incumbentReturns, challengerReturns, {
+        minSampleSize: minTradeCount,
+        iterations: policy.bootstrapIterations ?? 2000,
+        confidenceLevel: policy.confidenceLevel ?? 0.95,
+        alpha: policy.alpha ?? 0.05,
+        seed: policy.seed ?? Date.now(),
+      });
+
+      return {
+        passed: result.significant,
+        reason: result.significant ? 'statistically_significant' : 'not_statistically_significant',
+        relativeScoreDelta: null,
+        statistical: result,
+      };
+    }
+    // Fall through to legacy if tradeReturns not available
+  }
+
+  // --- existing legacy logic below (unchanged) ---
   const incumbentScore = scoreFromResult(incumbent);
   const challengerScore = scoreFromResult(challenger);
 

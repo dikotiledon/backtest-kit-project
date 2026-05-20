@@ -6,6 +6,20 @@ function isTruthy(value) {
   return value === true || value === 1 || value === '1' || value === 'true';
 }
 
+function checkQualityFloors(championQuality, qualityFloors) {
+  if (!championQuality || !qualityFloors) return { passed: true, failed: [] };
+  const failed = [];
+  const q = championQuality;
+  const f = qualityFloors;
+
+  if (Number.isFinite(f.minRoiPct) && (q.roiPct ?? 0) < f.minRoiPct) failed.push('roiFloor');
+  if (Number.isFinite(f.minProfitFactor) && (q.profitFactor ?? 0) < f.minProfitFactor) failed.push('profitFactorFloor');
+  if (Number.isFinite(f.maxDrawdownPct) && (q.maxDrawdownPct ?? 100) > f.maxDrawdownPct) failed.push('drawdownCeiling');
+  if (Number.isFinite(f.minTradeCount) && (q.tradeCount ?? 0) < f.minTradeCount) failed.push('tradeCountFloor');
+
+  return { passed: failed.length === 0, failed };
+}
+
 export function decideStagnationEscapePlan(input = {}) {
   const {
     stagnationLevel = 0,
@@ -13,6 +27,9 @@ export function decideStagnationEscapePlan(input = {}) {
     exploitExhausted = false,
     zeroEmissionExhausted = false,
     gateStagnation = false,
+    convergencePolicy = {},
+    championQuality = null,
+    qualityFloors = null,
   } = normalizeInput(input);
 
   const level = Number(stagnationLevel);
@@ -21,6 +38,31 @@ export function decideStagnationEscapePlan(input = {}) {
   const exploitDone = isTruthy(exploitExhausted);
   const zeroEmissionDone = isTruthy(zeroEmissionExhausted);
   const gateStuck = isTruthy(gateStagnation);
+
+  // Quality-aware convergence acceptance
+  const convergenceEnabled = convergencePolicy?.enabled === true;
+  const maxLevel = Number(convergencePolicy?.maxStagnationLevel ?? 6);
+  if (convergenceEnabled && safeLevel >= maxLevel && generatedExhausted && exploitDone) {
+    const qualityCheck = checkQualityFloors(championQuality, qualityFloors);
+    if (qualityCheck.passed) {
+      return {
+        mode: 'converged',
+        reason: 'convergence-accepted',
+        recommendation: 'stop-research',
+        allowArchitectureKeys: false,
+        multiKeyMutationCount: 0,
+        ladderScale: 0,
+      };
+    }
+    return {
+      mode: 'progressive-widen',
+      reason: 'convergence-blocked-by-quality',
+      qualityGatesFailed: qualityCheck.failed,
+      allowArchitectureKeys: true,
+      multiKeyMutationCount: 4,
+      ladderScale: 3,
+    };
+  }
 
   if (safeLevel < 2) return { mode: 'none', reason: 'not-eligible' };
 

@@ -1,3 +1,5 @@
+import { scoreMetrics } from './pine-metric-core.mjs';
+
 function number(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
@@ -5,32 +7,48 @@ function number(value, fallback = 0) {
 
 export function computeMultipleTestingPenalty(context = {}, policy = {}) {
   const attempted = Math.max(1, number(context.attemptedCandidates, 1));
-  const breadth =
-    Math.log2(attempted) +
+  const familyBreadth =
     Math.max(0, number(context.mutationFamilyCount, 0) - 1) +
     Math.max(0, number(context.regimeSliceCount, 0) - 1) +
     Math.max(0, number(context.exitFamilyCount, 0) - 1);
-  const base = Math.max(0, number(policy.base, 0.25));
-  const step = Math.max(0, number(policy.step, 0.05));
-  return Math.max(0, base + breadth * step);
+
+  const base = Math.max(0, number(policy.base, 1.0));
+  const step = Math.max(0, number(policy.step, 0.3));
+
+  const breadth = Math.log2(attempted) + familyBreadth;
+  return Math.max(0, Number((base + breadth * step).toFixed(4)));
 }
 
-export function computeCandidateUtility(metrics = {}, { multipleTestingPenalty = 0, complexityPenalty = 0, robustnessBonus = 0, targetRegimeImprovement = 0 } = {}) {
-  const roiPct = number(metrics.roiPct, 0);
-  const expectancy = number(metrics.expectancy, 0);
-  const profitFactor = Math.min(10, Math.max(0, number(metrics.profitFactor, 0)));
-  const maxDrawdownPct = Math.max(0, number(metrics.maxDrawdownPct, 0));
-  const tradeCount = Math.max(0, number(metrics.tradeCount, 0));
-  const winRatePct = Math.min(100, Math.max(0, number(metrics.winRatePct, 0)));
+export function computeCandidateUtility(metrics = {}, adjustments = {}) {
+  const {
+    multipleTestingPenalty = 0,
+    complexityPenalty = 0,
+    robustnessBonus = 0,
+    targetRegimeImprovement = 0,
+  } = adjustments;
 
-  const roiComponent = roiPct * 1.0;
-  const expectancyComponent = expectancy * 25;
-  const profitFactorComponent = profitFactor * 8;
-  const drawdownPenalty = maxDrawdownPct * 3;
-  const tradeCountComponent = Math.log10(Math.max(1, tradeCount)) * 5;
-  const winRateDiagnostic = winRatePct * 0.05;
-  const utility = roiComponent + expectancyComponent + profitFactorComponent - drawdownPenalty + tradeCountComponent + robustnessBonus + targetRegimeImprovement + winRateDiagnostic - complexityPenalty - multipleTestingPenalty;
-  return { utility, components: { roiComponent, expectancyComponent, profitFactorComponent, drawdownPenalty, tradeCountComponent, winRateDiagnostic, robustnessBonus, targetRegimeImprovement, complexityPenalty, multipleTestingPenalty } };
+  // Sanitize metrics before scoring to handle NaN/Infinity defensively
+  const sanitized = {
+    roiPct: number(metrics.roiPct, 0),
+    winRatePct: number(metrics.winRatePct, 0),
+    profitFactor: number(metrics.profitFactor, 0),
+    maxDrawdownPct: number(metrics.maxDrawdownPct, 0),
+    tradeCount: number(metrics.tradeCount, 0),
+  };
+
+  const baseScore = scoreMetrics(sanitized);
+  const utility = baseScore + robustnessBonus + targetRegimeImprovement - complexityPenalty - multipleTestingPenalty;
+
+  return {
+    utility,
+    components: {
+      baseScore,
+      robustnessBonus,
+      targetRegimeImprovement,
+      complexityPenalty,
+      multipleTestingPenalty,
+    },
+  };
 }
 
 export function evaluateObjectiveGates({ incumbent = {}, candidate = {}, policy = {} } = {}) {

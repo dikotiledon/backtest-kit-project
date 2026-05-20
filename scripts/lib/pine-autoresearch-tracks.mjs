@@ -596,18 +596,24 @@ export function nextTrackState({ state = defaultSchedulerState(), policy = {}, m
     ? previous.noNewCandidateStreak + 1
     : 0;
 
-  // Score-based stagnation: track cycles where no score improvement was found.
+  // Score-based stagnation: track cycles where no meaningful score improvement was found.
   // manifest.bestScoreDelta is the best challenger score minus champion score from the sweep.
-  // If it's <= 0 and we're not in a rotation, the search is functionally stuck.
+  // Increment streak when bestScoreDelta < minScoreDeltaForImprovement (default 0.25),
+  // which catches both steady-state AND cases where best candidate fails gates.
   const bestScoreDelta = typeof manifest.bestScoreDelta === 'number' && Number.isFinite(manifest.bestScoreDelta)
     ? manifest.bestScoreDelta
     : null;
-  // Only count score improvement as real progress if the candidate passed primary lab
-  // or actually promoted. A high-scoring candidate that fails primaryPromote is not progress.
-  const primaryLabPassed = manifest.primaryLabPassed === true;
-  const rawScoreImproved = bestScoreDelta !== null && bestScoreDelta > 0;
-  const scoreImproved = manifest.promotionEligible === true || rawScoreImproved;
-  const scoreStagnant = bestScoreDelta !== null && !scoreImproved && manifest.promotionEligible !== true;
+  const minScoreDeltaForImprovement = typeof policy.minScoreDeltaForImprovement === 'number'
+    && Number.isFinite(policy.minScoreDeltaForImprovement)
+    ? policy.minScoreDeltaForImprovement
+    : 0.25;
+  // Score improved only if delta exceeds threshold OR candidate actually promoted.
+  const scoreImproved = manifest.promotionEligible === true
+    || (bestScoreDelta !== null && bestScoreDelta >= minScoreDeltaForImprovement);
+  // Stagnant only when bestScoreDelta is explicitly known and below threshold.
+  // When bestScoreDelta is null (no candidate found), noNewCandidateStreak handles it.
+  // This prevents double-counting between noScoreImprovementStreak and noNewCandidateStreak.
+  const scoreStagnant = !scoreImproved && bestScoreDelta !== null;
   const noScoreImprovementStreak = rotationHappened || scoreImproved
     ? 0
     : scoreStagnant

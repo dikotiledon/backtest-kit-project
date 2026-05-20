@@ -1,4 +1,4 @@
-import test from 'node:test';
+import test, { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
 const loadPineOptimizer = () => import('../scripts/lib/pine-optimizer.mjs');
@@ -173,4 +173,44 @@ test('scoreMetricsBreakdown tradePenalty is smooth ramp, not cliff', async () =>
   assert.ok(justBelow.tradePenalty > -6); // should be -5
   assert.ok(halfWay.tradePenalty < justBelow.tradePenalty);
   assert.equal(atZero.tradePenalty, -50); // minTrades * 5
+});
+
+import { simulateTrades } from '../scripts/lib/pine-optimizer.mjs';
+
+describe('simulator feature flag integration', () => {
+  it('uses legacy simulateTrades when no featureFlags provided', () => {
+    const rows = [
+      { timestamp: '2026-01-01T00:00:00Z', Open: 100, High: 102, Low: 99, Close: 101, Signal: 1, StopLoss: 95, TakeProfit: 110 },
+      { timestamp: '2026-01-01T00:15:00Z', Open: 101.5, High: 105, Low: 100, Close: 104, Signal: -1 },
+    ];
+    const trades = simulateTrades(rows);
+    // Legacy behavior: entry at signal bar close (101)
+    assert.equal(trades[0].entryPrice, 101);
+  });
+
+  it('uses new simulator when USE_NEXT_BAR_OPEN_ENTRY is true', () => {
+    const rows = [
+      { timestamp: '2026-01-01T00:00:00Z', Open: 100, High: 102, Low: 99, Close: 101, Signal: 1, StopLoss: 95, TakeProfit: 110 },
+      { timestamp: '2026-01-01T00:15:00Z', Open: 101.5, High: 105, Low: 100, Close: 104, Signal: -1 },
+    ];
+    const trades = simulateTrades(rows, {
+      featureFlags: { USE_NEXT_BAR_OPEN_ENTRY: true },
+    });
+    // New behavior: entry at next bar open (101.5)
+    assert.equal(trades[0].entryPrice, 101.5);
+  });
+
+  it('applies cost model when USE_COST_MODEL is true', () => {
+    const rows = [
+      { timestamp: '2026-01-01T00:00:00Z', Open: 100, High: 102, Low: 99, Close: 101, Signal: 1, StopLoss: 90, TakeProfit: 115 },
+      { timestamp: '2026-01-01T00:15:00Z', Open: 101, High: 116, Low: 100, Close: 115, Signal: 0 },
+    ];
+    const trades = simulateTrades(rows, {
+      featureFlags: { USE_NEXT_BAR_OPEN_ENTRY: true, USE_COST_MODEL: true },
+      costModel: { commissionPct: 0.04, slippagePct: 0.02, spreadPct: 0.01 },
+    });
+    assert.ok(trades.length >= 1);
+    assert.ok(trades[0].costPct > 0);
+    assert.ok(trades[0].grossReturnPct > trades[0].returnPctExact);
+  });
 });

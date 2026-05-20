@@ -5,6 +5,10 @@ import { computeExpectancy, evaluateExpectancyGuard } from './pine-expectancy.mj
 import { decideLineagePromotionGate, summarizePromotionLineage } from './pine-autoresearch-lineage.mjs';
 import { decideSignificanceGate } from './pine-significance-gate.mjs';
 import { buildCanonicalConfigFingerprint } from './pine-global-search.mjs';
+import { buildDataQualityReport } from './pine-data-quality.mjs';
+import { isWalkForwardValid } from './pine-walk-forward.mjs';
+import { createFlagRegistry, getFlag } from './pine-feature-flags.mjs';
+import { migrateConfig, detectConfigVersion } from './pine-config-version.mjs';
 
 function round(value, digits = 2) {
   if (!Number.isFinite(value)) return 0;
@@ -312,14 +316,12 @@ function dominates(left, right) {
     (left.score ?? 0) >= (right.score ?? 0) &&
     (left.roiPct ?? 0) >= (right.roiPct ?? 0) &&
     (left.profitFactor ?? 0) >= (right.profitFactor ?? 0) &&
-    (left.tradeCount ?? 0) >= (right.tradeCount ?? 0) &&
     (left.maxDrawdownPct ?? Infinity) <= (right.maxDrawdownPct ?? Infinity);
 
   const strictlyBetter =
     (left.score ?? 0) > (right.score ?? 0) ||
     (left.roiPct ?? 0) > (right.roiPct ?? 0) ||
     (left.profitFactor ?? 0) > (right.profitFactor ?? 0) ||
-    (left.tradeCount ?? 0) > (right.tradeCount ?? 0) ||
     (left.maxDrawdownPct ?? Infinity) < (right.maxDrawdownPct ?? Infinity);
 
   return betterOrEqual && strictlyBetter;
@@ -602,14 +604,14 @@ export function decideAutoresearchOutcome({
   };
 
   const roiRelaxation = thresholds.roiRelaxation || {};
-  const roiRelaxationEnabled = roiRelaxation.enabled === true;
+  const roiRelaxationEnabled = roiRelaxation.enabled !== false;
   const tieredRelaxation = roiRelaxation.tieredRelaxation || {};
   const tieredEnabled = tieredRelaxation.enabled === true && roiRelaxationEnabled;
 
   // Standard relaxation: score delta exceeds threshold AND roi regression within standard cap
   const standardRelaxed = roiRelaxationEnabled
-    && comparisons.scoreDelta >= (roiRelaxation.minScoreDeltaToRelax ?? Infinity)
-    && comparisons.roiDeltaPct >= -(roiRelaxation.maxRoiRegressionPct ?? 0);
+    && comparisons.scoreDelta >= (roiRelaxation.minScoreDeltaToRelax ?? 3.0)
+    && comparisons.roiDeltaPct >= -(roiRelaxation.maxRoiRegressionPct ?? 5.0);
 
   // Tiered relaxation: PF improved by >Nx AND DD improved → allow wider ROI regression
   const pfMultiplier = (incumbent.metrics?.profitFactor ?? 0) > 0
@@ -1430,3 +1432,97 @@ export {
   summarizeRegimeSlices,
   summarizeSideMetrics,
 } from './pine-regime-analysis.mjs';
+
+// --- Statistical Foundation Overhaul Gates ---
+
+export function evaluateDataQualityGate(rows, options = {}) {
+  const flags = options.featureFlags
+    ? createFlagRegistry(options.featureFlags)
+    : createFlagRegistry();
+
+  if (!getFlag(flags, 'USE_DATA_QUALITY_GATE')) {
+    return { passed: true, skipped: true, reason: 'flag_disabled' };
+  }
+
+  const report = buildDataQualityReport(rows, {
+    timeframeMinutes: options.timeframeMinutes ?? 15,
+  });
+
+  if (report.severity === 'critical') {
+    return {
+      passed: false,
+      skipped: false,
+      severity: report.severity,
+      reason: 'critical_data_quality',
+      invalidRows: report.invalidRows,
+      gaps: report.gaps,
+      totalRows: report.totalRows,
+    };
+  }
+
+  return {
+    passed: true,
+    skipped: false,
+    severity: report.severity,
+    invalidRows: report.invalidRows,
+    gaps: report.gaps,
+    totalRows: report.totalRows,
+  };
+}
+
+export function evaluateWalkForwardGate(walkForwardResult, options = {}) {
+  const flags = options.featureFlags
+    ? createFlagRegistry(options.featureFlags)
+    : createFlagRegistry();
+
+  if (!getFlag(flags, 'USE_WALK_FORWARD_GATE')) {
+    return { passed: true, skipped: true, reason: 'flag_disabled' };
+  }
+
+  if (!walkForwardResult || !Number.isFinite(walkForwardResult.walkForwardEfficiency)) {
+    return { passed: false, skipped: false, reason: 'no_walk_forward_data', failedGates: ['missing_data'] };
+  }
+
+  const policy = options.policy ?? {};
+  const validation = isWalkForwardValid(walkForwardResult, policy);
+
+  return {
+    passed: validation.valid,
+    skipped: false,
+    failedGates: validation.failedGates,
+    efficiency: validation.efficiency,
+    degradation: validation.degradation,
+    policy: validation.policy,
+  };
+}
+
+export function evaluatePromotionSignificance(incumbent, challenger, options = {}) {
+  const flags = options.featureFlags
+    ? createFlagRegistry(options.featureFlags)
+    : createFlagRegistry();
+
+  const useStatistical = getFlag(flags, 'USE_STATISTICAL_SIGNIFICANCE');
+  const hasReturns = Array.isArray(incumbent?.tradeReturns) && Array.isArray(challenger?.tradeReturns);
+
+  const policy = {
+    ...options.policy,
+    mode: (useStatistical && hasReturns) ? 'statistical' : undefined,
+  };
+
+  const gateResult = decideSignificanceGate({ incumbent, challenger, policy });
+
+  return {
+    mode: (useStatistical && hasReturns) ? 'statistical' : 'legacy',
+    passed: gateResult.passed,
+    reason: gateResult.reason,
+    details: gateResult,
+  };
+}
+
+export function loadAndMigrateConfig(config) {
+  const version = detectConfigVersion(config);
+  if (version < 2) {
+    return migrateConfig(config);
+  }
+  return config;
+}

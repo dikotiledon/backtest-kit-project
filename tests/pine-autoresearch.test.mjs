@@ -645,7 +645,7 @@ test('evaluateMatrix short-circuits shadow labs when primary cannot promote', as
     },
     shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
     blindHoldoutLabs: [],
-    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true },
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 0, minShadowPassRatio: 0, requireCandidateChange: true, shadowOverride: { enabled: false } },
     expectancyPolicy: { enabled: false },
     regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
   }, 'run-primary-hold', champion, challenger, {
@@ -697,7 +697,7 @@ test('evaluateMatrix short-circuit marks shadow gates as not_evaluated', async (
     },
     shadowLabs: [{ labId: 'shadow-one' }, { labId: 'shadow-two' }],
     blindHoldoutLabs: [],
-    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 1, minShadowPassRatio: 0.5, requireCandidateChange: true },
+    matrixPolicy: { requirePrimaryPromote: true, minShadowPassCount: 1, minShadowPassRatio: 0.5, requireCandidateChange: true, shadowOverride: { enabled: false } },
     expectancyPolicy: { enabled: false },
     regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },
   }, 'run-honesty', champion, challenger, {
@@ -829,6 +829,7 @@ test('evaluateMatrix does not evaluate diagnostic shadows when option is disable
       minShadowPassRatio: 0,
       requireCandidateChange: true,
       diagnosticShadowEvaluation: false,
+      shadowOverride: { enabled: false },
     },
     expectancyPolicy: { enabled: false },
     regimeExitResearch: { resource: { maxConcurrentLabWorkers: 2 } },

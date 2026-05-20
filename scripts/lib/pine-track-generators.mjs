@@ -3,6 +3,10 @@ import { buildCanonicalConfigFingerprint, buildChampionConfigFingerprint } from 
 import { computeAnnealingState, normalizeTabuFingerprintSet } from './pine-search-policy.mjs';
 import { buildLanePatchFingerprint, LANE_PATCH_FINGERPRINT_VERSION } from './pine-lane-novelty.mjs';
 
+// Boolean filter keys that should never be toggled false→true
+// (champion disabled them for a reason; enabling produces zero trades)
+const DISABLED_FILTER_TOGGLE_KEYS = ['useRegimeFilter', 'useVolatilityFilter'];
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -362,27 +366,46 @@ function exitStatePatches(base) {
 }
 
 function asymmetryPatches(base) {
-  return [
+  const regimeEnabled = base.useRegimeFilter === true;
+  const patches = [];
+
+  if (regimeEnabled) {
+    // Only mutate regime threshold if the filter is already enabled
+    patches.push(
+      {
+        regimeThreshold: Math.min(numeric(base.regimeThreshold ?? -0.1) - 0.4, -0.5),
+        useAdxFilter: true,
+        adxThreshold: lowerBound((base.adxThreshold ?? 20) - 5, 1),
+      },
+      {
+        regimeThreshold: numeric(base.regimeThreshold ?? -0.1) + 0.4,
+        useAdxFilter: true,
+        adxThreshold: numeric(base.adxThreshold ?? 20) + 5,
+        minPredSum: lowerBound((base.minPredSum ?? 2) - 0.25, 0.5),
+      },
+    );
+  }
+
+  // These patches work regardless of regime filter state
+  patches.push(
     {
-      useRegimeFilter: true,
-      regimeThreshold: Math.min(numeric(base.regimeThreshold ?? -0.1) - 0.4, -0.5),
-      useAdxFilter: true,
-      adxThreshold: lowerBound((base.adxThreshold ?? 20) - 5, 1),
-    },
-    {
-      useRegimeFilter: true,
-      regimeThreshold: numeric(base.regimeThreshold ?? -0.1) + 0.4,
-      useAdxFilter: true,
-      adxThreshold: numeric(base.adxThreshold ?? 20) + 5,
-      minPredSum: lowerBound((base.minPredSum ?? 2) - 0.25, 0.5),
-    },
-    {
-      regimeThreshold: 0.5,
       useAdxFilter: true,
       adxThreshold: numeric(base.adxThreshold ?? 20) + 2,
       minBarsBetween: lowerBound((base.minBarsBetween ?? 2) + 1, 0),
     },
-  ];
+    {
+      useAdxFilter: true,
+      adxThreshold: lowerBound((base.adxThreshold ?? 20) - 2, 1),
+      minPredSum: numeric(base.minPredSum ?? 2) + 0.2,
+    },
+    {
+      adxThreshold: numeric(base.adxThreshold ?? 20) + 1,
+      minPredSum: lowerBound((base.minPredSum ?? 2) - 0.2, 0.5),
+      minBarsBetween: lowerBound((base.minBarsBetween ?? 2) - 1, 0),
+    },
+  );
+
+  return patches;
 }
 
 function incumbentLocalPatches(base) {
@@ -568,6 +591,12 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
     const patch = scalePatch(base, rawPatch, temperature);
     validateTrackPatch({ trackId, patch });
     const config = applyPatch(base, patch);
+    // Viability filter: never toggle a disabled boolean filter ON
+    // (toggling false→true predictably produces zero trades when champion disabled it)
+    const togglesDisabledFilter = DISABLED_FILTER_TOGGLE_KEYS.some(
+      (key) => base[key] === false && config[key] === true
+    );
+    if (togglesDisabledFilter) continue;
     // Gate-aware filter: skip variants that mechanically violate promotion gates
     if (gateAwareEnabled && baseSlAtrMult > 0) {
       const candidateSlAtrMult = Number(config.slAtrMult);
@@ -624,6 +653,12 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
         continue;
       }
       const config = applyPatch(base, patch);
+      // Viability filter: never toggle a disabled boolean filter ON
+      // (toggling false→true predictably produces zero trades when champion disabled it)
+      const togglesDisabledFilterFb = DISABLED_FILTER_TOGGLE_KEYS.some(
+        (key) => base[key] === false && config[key] === true
+      );
+      if (togglesDisabledFilterFb) continue;
       // Gate-aware filter: skip variants that mechanically violate promotion gates
       if (gateAwareEnabled && baseSlAtrMult > 0) {
         const candidateSlAtrMult = Number(config.slAtrMult);
@@ -671,6 +706,12 @@ export function buildTrackCandidateBatch({ track, incumbent, maxConfigs, history
       const patch = scalePatch(base, rawPatch, temperature);
       validateTrackPatch({ trackId: 'incumbent-local', patch });
       const config = applyPatch(base, patch);
+      // Viability filter: never toggle a disabled boolean filter ON
+      // (toggling false→true predictably produces zero trades when champion disabled it)
+      const togglesDisabledFilterInc = DISABLED_FILTER_TOGGLE_KEYS.some(
+        (key) => base[key] === false && config[key] === true
+      );
+      if (togglesDisabledFilterInc) continue;
       // Gate-aware filter: skip variants that mechanically violate promotion gates
       if (gateAwareEnabled && baseSlAtrMult > 0) {
         const candidateSlAtrMult = Number(config.slAtrMult);

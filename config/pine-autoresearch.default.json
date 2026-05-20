@@ -1,4 +1,5 @@
 {
+  "configVersion": 2,
   "matrixId": "pine-fusion-v4-core-15m-locked-window",
   "scriptPath": "../pine/test.pine",
   "grid": "phase3-core",
@@ -64,14 +65,14 @@
     "annealing": {
       "enabled": true,
       "baseTemperature": 0.4,
-      "growthFactor": 1.8,
-      "maxTemperature": 16
+      "growthFactor": 1.5,
+      "maxTemperature": 4
     },
     "tabuPolicy": {
-      "maxAgeCycles": 20,
-      "maxEntries": 40,
+      "maxAgeCycles": 30,
+      "maxEntries": 60,
       "maxSameCycleEntries": 24,
-      "dropOnChampionChange": true
+      "dropOnChampionChange": false
     }
   },
   "defaultProfile": "full",
@@ -228,6 +229,16 @@
       "deescalation": {
         "enabled": true,
         "consecutiveHealthyCycles": 2
+      },
+      "convergencePolicy": {
+        "enabled": true,
+        "maxStagnationLevel": 6
+      },
+      "qualityFloors": {
+        "minRoiPct": 15,
+        "minProfitFactor": 1.2,
+        "maxDrawdownPct": 25,
+        "minTradeCount": 50
       }
     }
   },
@@ -414,9 +425,11 @@
   },
   "autoPromotion": {
     "enabled": true,
-    "cooldownHours": 12,
-    "maxPromotionsPerDay": 2,
+    "cooldownHours": 48,
+    "maxPromotionsPerDay": 1,
     "requireMatrixPromotion": true,
+    "requireStatisticalSignificance": true,
+    "requireWalkForward": true,
     "lineagePolicy": {
       "enabled": true,
       "lookbackPromotions": 6,
@@ -473,10 +486,10 @@
       "when": "2025-11-30T23:45:00.000Z",
       "exchange": "default_exchange",
       "thresholds": {
-        "minScoreDelta": 0,
-        "minRoiDeltaPct": 5,
-        "minProfitFactorDelta": 0.1,
-        "maxDrawdownDeltaPct": 0.75,
+        "minScoreDelta": 1.0,
+        "minRoiDeltaPct": 0,
+        "minProfitFactorDelta": 0,
+        "maxDrawdownDeltaPct": 1.5,
         "minTradeCount": 60,
         "minTradeRatioVsIncumbent": 0.75
       }
@@ -489,15 +502,44 @@
       "when": "2025-11-30T23:45:00.000Z",
       "exchange": "default_exchange",
       "thresholds": {
-        "minScoreDelta": 0,
-        "minRoiDeltaPct": 5,
-        "minProfitFactorDelta": 0.1,
-        "maxDrawdownDeltaPct": 0.75,
+        "minScoreDelta": 1.0,
+        "minRoiDeltaPct": 0,
+        "minProfitFactorDelta": 0,
+        "maxDrawdownDeltaPct": 1.5,
         "minTradeCount": 60,
         "minTradeRatioVsIncumbent": 0.75
       }
     }
   ],
+  "featureFlags": {
+    "USE_NEXT_BAR_OPEN_ENTRY": true,
+    "USE_COMPOUNDED_METRICS": true,
+    "USE_COST_MODEL": true,
+    "USE_STATISTICAL_SIGNIFICANCE": true,
+    "USE_WALK_FORWARD_GATE": true,
+    "USE_DATA_QUALITY_GATE": true,
+    "USE_UNIFIED_SCORING": true
+  },
+  "costModel": {
+    "enabled": true,
+    "commissionPct": 0.04,
+    "slippagePct": 0.02,
+    "spreadPct": 0.01,
+    "slippageStopMultiplier": 2.5
+  },
+  "multipleTestingPolicy": {
+    "base": 1,
+    "step": 0.3
+  },
+  "walkForwardPolicy": {
+    "enabled": true,
+    "folds": 5,
+    "trainRatio": 0.7,
+    "stepMode": "rolling",
+    "minEfficiency": 0.5,
+    "maxDegradationPct": -50,
+    "regimeAware": true
+  },
   "regimeExitResearch": {
     "enabled": true,
     "offline": {
@@ -523,5 +565,13 @@
       "minTradeCount": 60,
       "requireBlindHoldoutVerdict": true
     }
+  },
+  "cacheVersion": 2,
+  "significancePolicy": {
+    "mode": "statistical",
+    "minTradeCount": 30,
+    "bootstrapIterations": 2000,
+    "confidenceLevel": 0.95,
+    "alpha": 0.05
   }
 }

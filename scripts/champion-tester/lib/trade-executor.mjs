@@ -1,6 +1,7 @@
 import { getConnector } from './binance-connector.mjs';
 import { getFuturesConnector } from './binance-futures-connector.mjs';
 import { loadConfig } from './binance-config.mjs';
+import { getSlippageEstimator } from './slippage-estimator.mjs';
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -239,6 +240,23 @@ class TradeExecutor extends EventEmitter {
         return { ok: false, error: `Unsupported order type: ${type}` };
       }
 
+      // Confirm fill for non-immediate orders
+      if (type === 'LIMIT' && mainOrder.status !== 'FILLED') {
+        const confirmation = await this.confirmOrderFill('spot', symbol, mainOrder.orderId, type);
+        if (confirmation.status === 'timeout' || confirmation.status === 'cancelled') {
+          const result = {
+            ok: false, error: `Order ${confirmation.status}`, market: 'spot',
+            signal, timestamp: Date.now(), confirmation,
+          };
+          this.emit('signal:timeout', result);
+          await this.logTrade(result);
+          return result;
+        }
+        if (confirmation.order) {
+          Object.assign(mainOrder, confirmation.order);
+        }
+      }
+
       // Track position
       const executedQty = parseFloat(mainOrder.executedQty || mainOrder.origQty);
       const avgPrice = this._calcAvgPrice(mainOrder);
@@ -286,6 +304,15 @@ class TradeExecutor extends EventEmitter {
         }
       }
 
+      // Record actual slippage for MARKET orders
+      if (type === 'MARKET') {
+        try {
+          getSlippageEstimator().recordActualSlippage(
+            symbol, 'spot', currentPrice, avgPrice, executedQty
+          );
+        } catch { /* slippage tracking is best-effort */ }
+      }
+
       const result = {
         ok: true, market: 'spot',
         order: mainOrder, stopLossOrder: slOrder, takeProfitOrder: tpOrder,
@@ -306,6 +333,333 @@ class TradeExecutor extends EventEmitter {
       await this.logTrade(result);
       return result;
     }
+  }
+
+  // ─── Signal Execution (Futures) ──────────────────────────────────
+
+  async _executeFuturesSignal(signal) {
+    const futuresConn = getFuturesConnector();
+    const market = signal.market; // 'usdm' or 'coinm'
+
+    if (!futuresConn.isInitialized(market)) {
+      return { ok: false, error: `Futures market '${market}' not initialized` };
+    }
+
+    const {
+      symbol, side, type = 'MARKET', reason = '',
+      positionSide, leverage, marginType,
+    } = signal;
+    let { quantity, price, stopLoss, takeProfit, callbackRate } = signal;
+
+    // Set leverage if requested
+    if (leverage) {
+      const maxLev = this.futuresRiskLimits?.maxLeverage || 125;
+      const targetLev = Math.min(parseInt(leverage, 10), maxLev);
+      try {
+        await futuresConn.setLeverage(market, symbol, targetLev);
+      } catch (err) {
+        this.emit('error', { type: 'setLeverage', error: err.message });
+      }
+    }
+
+    // Set margin type if requested
+    if (marginType) {
+      try {
+        await futuresConn.setMarginType(market, symbol, marginType);
+      } catch (err) {
+        this.emit('error', { type: 'setMarginType', error: err.message });
+      }
+    }
+
+    // Get mark price for risk calculation
+    let markPrice;
+    try {
+      const priceData = await futuresConn.getPrice(market, symbol);
+      markPrice = Array.isArray(priceData) ? priceData[0]?.price : priceData.price;
+    } catch {
+      markPrice = price || 0;
+    }
+
+    const effectiveLeverage = leverage || this.futuresConfig?.defaultLeverage || 10;
+    const notionalSize = (quantity || 0) * markPrice;
+
+    // Risk check
+    const violations = this.checkRiskLimits(market, symbol, side, notionalSize);
+    if (violations.length > 0) {
+      const result = {
+        ok: false, error: 'Risk limit violated', market,
+        violations, signal, timestamp: Date.now(),
+      };
+      this.emit('signal:rejected', result);
+      await this.logTrade(result);
+      return result;
+    }
+
+    // Adjust to exchange filters
+    const adjusted = futuresConn.adjustOrder(market, symbol, quantity, price);
+    quantity = adjusted.quantity;
+    if (price) price = adjusted.price;
+
+    try {
+      // Build order params
+      const orderParams = {
+        symbol, side, type,
+        quantity: String(quantity),
+      };
+
+      if (positionSide) orderParams.positionSide = positionSide;
+      if (type !== 'MARKET' && price) {
+        orderParams.price = String(price);
+        orderParams.timeInForce = 'GTC';
+      }
+      if (type === 'TRAILING_STOP_MARKET' && callbackRate) {
+        orderParams.callbackRate = String(callbackRate);
+        delete orderParams.price;
+      }
+      if (type === 'STOP_MARKET' || type === 'TAKE_PROFIT_MARKET') {
+        if (price) orderParams.stopPrice = String(price);
+        delete orderParams.price;
+      }
+
+      const mainOrder = await futuresConn.newOrder(market, orderParams);
+
+      // Confirm fill for non-immediate orders
+      if (type === 'LIMIT' && mainOrder.status !== 'FILLED') {
+        const confirmation = await this.confirmOrderFill(market, symbol, mainOrder.orderId, type);
+        if (confirmation.status === 'timeout' || confirmation.status === 'cancelled') {
+          const result = {
+            ok: false, error: `Order ${confirmation.status}`, market,
+            signal, timestamp: Date.now(), confirmation,
+          };
+          this.emit('signal:timeout', result);
+          await this.logTrade(result);
+          return result;
+        }
+        if (confirmation.order) {
+          Object.assign(mainOrder, confirmation.order);
+        }
+      }
+
+      // Track position
+      const executedQty = parseFloat(mainOrder.executedQty || mainOrder.origQty || quantity);
+      const avgPrice = parseFloat(mainOrder.avgPrice || mainOrder.price || markPrice);
+      const posSide = positionSide || (side === 'BUY' ? 'LONG' : 'SHORT');
+      const posKey = this._positionKey(market, symbol, posSide);
+
+      const isOpen = (side === 'BUY' && posSide !== 'SHORT') || (side === 'SELL' && posSide === 'SHORT');
+
+      if (isOpen) {
+        this.openPositions.set(posKey, {
+          market, symbol, side: posSide,
+          entryPrice: avgPrice, quantity: executedQty,
+          leverage: effectiveLeverage,
+          orderId: mainOrder.orderId, entryTime: Date.now(),
+          stopLoss, takeProfit,
+        });
+      } else {
+        // Closing a position
+        const pos = this.openPositions.get(posKey);
+        if (pos) {
+          const direction = pos.side === 'LONG' ? 1 : -1;
+          const pnl = direction * (avgPrice - pos.entryPrice) * executedQty;
+          this.dailyStats.pnl += pnl;
+          if (pnl < 0) {
+            this.dailyStats.losses++;
+            this.lastLossTime = Date.now();
+          }
+          this.openPositions.delete(posKey);
+        }
+      }
+
+      this.dailyStats.trades++;
+
+      // Place SL/TP orders if provided and opening
+      let slOrder = null;
+      let tpOrder = null;
+
+      if (isOpen && stopLoss) {
+        try {
+          const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+          slOrder = await futuresConn.stopMarket(market, symbol, slSide, executedQty, stopLoss, {
+            positionSide: positionSide, reduceOnly: !positionSide || positionSide === 'BOTH',
+          });
+        } catch (err) {
+          this.emit('error', { type: 'futuresStopLoss', error: err.message });
+        }
+      }
+
+      if (isOpen && takeProfit) {
+        try {
+          const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
+          tpOrder = await futuresConn.takeProfitMarket(market, symbol, tpSide, executedQty, takeProfit, {
+            positionSide: positionSide, reduceOnly: !positionSide || positionSide === 'BOTH',
+          });
+        } catch (err) {
+          this.emit('error', { type: 'futuresTakeProfit', error: err.message });
+        }
+      }
+
+      // Auto SL/TP from config if not explicitly provided
+      if (isOpen && !stopLoss && this.futuresRiskLimits?.enableAutoStopLoss) {
+        const slPct = this.futuresRiskLimits.defaultStopLossPct || 2;
+        const autoSL = side === 'BUY' ? avgPrice * (1 - slPct / 100) : avgPrice * (1 + slPct / 100);
+        try {
+          const slSide = side === 'BUY' ? 'SELL' : 'BUY';
+          slOrder = await futuresConn.stopMarket(market, symbol, slSide, executedQty, autoSL, {
+            positionSide: positionSide, reduceOnly: !positionSide || positionSide === 'BOTH',
+          });
+        } catch (err) {
+          this.emit('error', { type: 'futuresAutoStopLoss', error: err.message });
+        }
+      }
+
+      if (isOpen && !takeProfit && this.futuresRiskLimits?.enableAutoTakeProfit) {
+        const tpPct = this.futuresRiskLimits.defaultTakeProfitPct || 5;
+        const autoTP = side === 'BUY' ? avgPrice * (1 + tpPct / 100) : avgPrice * (1 - tpPct / 100);
+        try {
+          const tpSide = side === 'BUY' ? 'SELL' : 'BUY';
+          tpOrder = await futuresConn.takeProfitMarket(market, symbol, tpSide, executedQty, autoTP, {
+            positionSide: positionSide, reduceOnly: !positionSide || positionSide === 'BOTH',
+          });
+        } catch (err) {
+          this.emit('error', { type: 'futuresAutoTakeProfit', error: err.message });
+        }
+      }
+
+      // Record actual slippage for MARKET orders
+      if (type === 'MARKET') {
+        try {
+          getSlippageEstimator().recordActualSlippage(
+            symbol, market, markPrice, avgPrice, executedQty
+          );
+        } catch { /* slippage tracking is best-effort */ }
+      }
+
+      const result = {
+        ok: true, market,
+        order: mainOrder, stopLossOrder: slOrder, takeProfitOrder: tpOrder,
+        executedQty, avgPrice, leverage: effectiveLeverage,
+        signal, reason, timestamp: Date.now(),
+      };
+
+      this.emit('signal:executed', result);
+      await this.logTrade(result);
+      return result;
+
+    } catch (err) {
+      const result = {
+        ok: false, error: err.message, market,
+        signal, timestamp: Date.now(),
+        binanceError: err.rawData || null,
+      };
+      this.emit('signal:error', result);
+      await this.logTrade(result);
+      return result;
+    }
+  }
+
+  // ─── Order Fill Confirmation ─────────────────────────────────────
+
+  /**
+   * Confirm order fill status. For MARKET orders, verify immediate fill.
+   * For LIMIT orders, poll up to timeout then cancel if not filled.
+   * @param {string} market - 'spot' | 'usdm' | 'coinm'
+   * @param {string} symbol
+   * @param {string|number} orderId
+   * @param {string} orderType - 'MARKET' | 'LIMIT'
+   * @returns {object} { status, order, fills }
+   */
+  async confirmOrderFill(market, symbol, orderId, orderType = 'MARKET') {
+    const pollIntervalMs = 2000;
+    const timeoutMs = 30000;
+    const startTime = Date.now();
+
+    const queryOrder = async () => {
+      if (market === 'spot') {
+        const connector = getConnector();
+        return connector.getOrder(symbol, orderId);
+      } else {
+        const fc = getFuturesConnector();
+        return fc.getOrder(market, symbol, orderId);
+      }
+    };
+
+    const cancelOrder = async () => {
+      try {
+        if (market === 'spot') {
+          const connector = getConnector();
+          return connector.cancelOrder(symbol, orderId);
+        } else {
+          const fc = getFuturesConnector();
+          return fc.cancelOrder(market, symbol, orderId);
+        }
+      } catch (err) {
+        this.emit('error', { type: 'cancelFailed', symbol, orderId, error: err.message });
+        return null;
+      }
+    };
+
+    // MARKET orders: single check (usually fills immediately)
+    if (orderType === 'MARKET') {
+      try {
+        const order = await queryOrder();
+        const status = order.status || 'UNKNOWN';
+        if (status === 'FILLED') {
+          this.emit('order:filled', { market, symbol, orderId, order });
+          return { status: 'filled', order };
+        } else if (status === 'PARTIALLY_FILLED') {
+          this.emit('order:partial-fill', { market, symbol, orderId, order });
+          return { status: 'partial', order };
+        }
+        // If not filled immediately, fall through to polling
+      } catch (err) {
+        this.emit('error', { type: 'orderQuery', symbol, orderId, error: err.message });
+        return { status: 'unknown', error: err.message };
+      }
+    }
+
+    // LIMIT orders (or MARKET that didn't fill immediately): poll loop
+    while (Date.now() - startTime < timeoutMs) {
+      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+
+      try {
+        const order = await queryOrder();
+        const status = order.status || 'UNKNOWN';
+
+        if (status === 'FILLED') {
+          this.emit('order:filled', { market, symbol, orderId, order });
+          return { status: 'filled', order };
+        }
+
+        if (status === 'PARTIALLY_FILLED') {
+          this.emit('order:partial-fill', { market, symbol, orderId, order });
+          // Continue polling for full fill
+        }
+
+        if (status === 'CANCELED' || status === 'EXPIRED' || status === 'REJECTED') {
+          this.emit('order:cancelled', { market, symbol, orderId, order, reason: status });
+          return { status: 'cancelled', order, reason: status };
+        }
+      } catch (err) {
+        this.emit('error', { type: 'orderPoll', symbol, orderId, error: err.message });
+      }
+    }
+
+    // Timeout reached — cancel the order
+    this.emit('order:timeout', { market, symbol, orderId, elapsedMs: Date.now() - startTime });
+    const cancelResult = await cancelOrder();
+
+    // Check if it partially filled before cancel
+    try {
+      const finalOrder = await queryOrder();
+      const executedQty = parseFloat(finalOrder.executedQty || '0');
+      if (executedQty > 0) {
+        this.emit('order:partial-fill', { market, symbol, orderId, order: finalOrder, timedOut: true });
+        return { status: 'partial-timeout', order: finalOrder, cancelResult };
+      }
+    } catch {}
+
+    return { status: 'timeout', cancelResult };
   }
 
   // ─── Position Management ─────────────────────────────────────────

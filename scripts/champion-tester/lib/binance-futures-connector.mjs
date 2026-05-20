@@ -20,10 +20,12 @@ import { EventEmitter } from 'node:events';
 const ENDPOINTS = {
   usdm: {
     live: 'https://fapi.binance.com',
+    demo: 'https://demo-fapi.binance.com',
     testnet: 'https://testnet.binancefuture.com',
   },
   coinm: {
     live: 'https://dapi.binance.com',
+    demo: 'https://demo-dapi.binance.com',
     testnet: 'https://testnet.binancefuture.com',
   },
 };
@@ -76,7 +78,15 @@ export class BinanceFuturesConnector extends EventEmitter {
     }
 
     const endpoints = ENDPOINTS[market];
-    const baseURL = config.testnet ? endpoints.testnet : endpoints.live;
+    // Support three modes: live, demo, testnet
+    let baseURL;
+    if (config.mode === 'demo' || (config.testnet && !config.useOldTestnet)) {
+      baseURL = endpoints.demo;
+    } else if (config.testnet && config.useOldTestnet) {
+      baseURL = endpoints.testnet;
+    } else {
+      baseURL = endpoints.live;
+    }
 
     const client = new BinanceBaseClient({
       apiKey: config.apiKey,

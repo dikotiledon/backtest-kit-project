@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import crypto from 'node:crypto';
+import { validateConfig } from './config-schema.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CONFIG_DIR = path.resolve(__dirname, '..', 'config');
@@ -41,18 +42,26 @@ function decrypt(payload) {
 export async function loadConfig() {
   try {
     const raw = await fs.readFile(CONFIG_FILE, 'utf8');
-    const config = JSON.parse(raw);
-    return {
-      apiKey: config.apiKey ? decrypt(config.apiKey) : '',
-      apiSecret: config.apiSecret ? decrypt(config.apiSecret) : '',
-      testnet: config.testnet ?? true,
-      tradingEnabled: config.tradingEnabled ?? false,
-      riskLimits: config.riskLimits ?? getDefaultRiskLimits(),
+    const stored = JSON.parse(raw);
+    const config = {
+      apiKey: stored.apiKey ? decrypt(stored.apiKey) : '',
+      apiSecret: stored.apiSecret ? decrypt(stored.apiSecret) : '',
+      testnet: stored.testnet ?? true,
+      tradingEnabled: stored.tradingEnabled ?? false,
+      riskLimits: stored.riskLimits ?? getDefaultRiskLimits(),
       // Futures-specific settings
-      futures: config.futures ?? getDefaultFuturesConfig(),
-      createdAt: config.createdAt,
-      updatedAt: config.updatedAt,
+      futures: stored.futures ?? getDefaultFuturesConfig(),
+      createdAt: stored.createdAt,
+      updatedAt: stored.updatedAt,
     };
+
+    // Validate config shape and values
+    const validation = validateConfig(config);
+    if (!validation.valid) {
+      config._validationErrors = validation.errors;
+    }
+
+    return config;
   } catch (err) {
     if (err.code === 'ENOENT') return null;
     throw err;

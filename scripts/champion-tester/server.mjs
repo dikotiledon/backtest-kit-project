@@ -14,6 +14,19 @@ import { runSweep, getSweepStatus, cancelSweep } from './lib/sweep-runner.mjs';
 import { ResultsStore } from './lib/results-store.mjs';
 import { normalizeResult } from './lib/metric-normalizer.mjs';
 import { registerTradingRoutes } from './lib/trading-routes.mjs';
+import { registerMarketRoutes } from './lib/market-routes.mjs';
+import { registerBotRoutes } from './lib/bot-routes.mjs';
+import { getBotManager } from './lib/bot-manager.mjs';
+import { loadConfig } from './lib/binance-config.mjs';
+import { getConnector } from './lib/binance-connector.mjs';
+import { getFuturesConnector } from './lib/binance-futures-connector.mjs';
+import logger from './lib/logger.mjs';
+import { AppError } from './lib/errors.mjs';
+import { scheduleBackups } from './lib/db-backup.mjs';
+import { getAlerter } from './lib/alerter.mjs';
+import { getMarketDataService } from './lib/market-data-service.mjs';
+import { getTradeDB } from './lib/trade-db.mjs';
+import { getPositionReconciler } from './lib/position-reconciler.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = path.resolve(__dirname, '..', '..');
@@ -24,12 +37,14 @@ const store = new ResultsStore(RESULTS_DIR);
 const app = express();
 app.use(express.json());
 
-// ─── Structured Logger ──────────────────────────────────────────────────────
+// ─── Logger (delegates to lib/logger.mjs) ───────────────────────────────────
 
 function log(level, msg, meta = {}) {
-  const ts = new Date().toISOString();
-  const metaStr = Object.keys(meta).length ? ' ' + JSON.stringify(meta) : '';
-  console.log(`[${ts}] [${level}] ${msg}${metaStr}`);
+  if (logger[level]) {
+    logger[level](msg, meta);
+  } else {
+    logger.info(msg, meta);
+  }
 }
 
 // Request logging
@@ -54,7 +69,7 @@ async function startupCleanup() {
   for (const dir of dirs) {
     try { await fs.rm(dir, { recursive: true, force: true }); } catch {}
   }
-  console.log('[champion-tester] startup cleanup done');
+  console.log('[crypto-trader] startup cleanup done');
 }
 
 // ─── Health & Utility ───────────────────────────────────────────────────────
@@ -64,7 +79,7 @@ app.get('/api/health', async (req, res) => {
   const datasets = await listDatasets(DATA_DIR);
   const results = await store.list({ limit: 1 });
   res.json({
-    ok: true, service: 'champion-tester', version: '1.0.0',
+    ok: true, service: 'crypto-trader', version: '2.0.0',
     uptime: process.uptime(), runStatus: status,
     datasetCount: datasets.length, resultCount: results.total,
   });
@@ -327,6 +342,8 @@ app.post('/api/sweep/cancel', (req, res) => {
 // ─── Trading API ────────────────────────────────────────────────────────────
 
 registerTradingRoutes(app, broadcast);
+registerMarketRoutes(app);
+registerBotRoutes(app, broadcast);
 
 // ─── Static Serving ────────────────────────────────────────────────────────
 
@@ -350,26 +367,30 @@ try {
 
 // ─── Start ──────────────────────────────────────────────────────────────────
 
-const PORT = parseInt(process.env.CHAMPION_TESTER_PORT || '3847', 10);
+const PORT = parseInt(process.env.CRYPTO_TRADER_PORT || process.env.CHAMPION_TESTER_PORT || '3847', 10);
 
 await startupCleanup();
 
 // Load persisted state from previous run (if server crashed mid-run)
 const persistedState = await loadPersistedState();
 if (persistedState.lastAborted) {
-  console.log(`[champion-tester] Previous run was aborted: ${persistedState.lastAborted.runId}`);
+  console.log(`[crypto-trader] Previous run was aborted: ${persistedState.lastAborted.runId}`);
 }
 
 // Load last result so it's available immediately on /api/test/status
 const lastResult = await loadLastResult();
 if (lastResult) {
-  console.log(`[champion-tester] Loaded last result: runId=${lastResult.runId} ok=${lastResult.ok}`);
+  console.log(`[crypto-trader] Loaded last result: runId=${lastResult.runId} ok=${lastResult.ok}`);
 }
 
 const server = app.listen(PORT, () => {
-  console.log(`\n  ⚡ Champion Tester running at http://localhost:${PORT}`);
+  console.log(`\n  ⚡ Crypto Trader running at http://localhost:${PORT}`);
   console.log(`  📁 Data: ${DATA_DIR}`);
-  console.log(`  📁 Results: ${RESULTS_DIR}\n`);
+  console.log(`  📁 Results: ${RESULTS_DIR}`);
+  console.log(`  🤖 Bot Manager: ready\n`);
+
+  // Auto-connect to Binance if credentials exist
+  autoConnectBinance();
 });
 
 // ─── WebSocket Server ─────────────────────────────────────────────────────────
@@ -381,7 +402,7 @@ wss.on('connection', (ws, req) => {
   const status = getRunStatus();
   ws.send(JSON.stringify({
     type: 'connected',
-    data: { service: 'champion-tester', runStatus: status },
+    data: { service: 'crypto-trader', runStatus: status },
   }));
   ws.on('close', () => log('info', 'WebSocket disconnected'));
   ws.on('error', (err) => log('error', 'WebSocket error', { error: err.message }));
@@ -397,6 +418,82 @@ function broadcast(type, data) {
 export { broadcast };
 export default app;
 
+// ─── Bot Manager Initialization ─────────────────────────────────────────────
+
+try {
+  const botMgr = getBotManager();
+  const loadResult = botMgr.loadState();
+  if (loadResult.ok && loadResult.loaded > 0) {
+    console.log(`[crypto-trader] Loaded ${loadResult.loaded} bot(s) from database`);
+  }
+  // Log events → console + WS broadcast
+  botMgr.on('log', (d) => {
+    const prefix = d.level === 'error' ? '❌' : d.level === 'warn' ? '⚠️' : d.level === 'debug' ? '🔍' : '📡';
+    console.log(`[bot-engine] ${prefix} ${d.message}`);
+    broadcast('system:log', d);
+  });
+  botMgr.on('bot:signal', (d) => {
+    console.log(`[bot-engine] ⚡ SIGNAL: ${d.action} ${d.symbol} @ ${d.suggestedEntry || d.price || '?'} conf=${d.confidence || '?'}`);
+    broadcast('bot:signal', d);
+  });
+  botMgr.on('bot:signal:rejected', (d) => {
+    console.log(`[bot-engine] 🚫 REJECTED: ${d.symbol} — ${d.riskCheck?.violations?.join(', ') || 'risk check failed'}`);
+    broadcast('bot:signal:rejected', d);
+  });
+  botMgr.on('bot:error', (d) => {
+    console.log(`[bot-engine] ❌ ERROR: bot ${d.botId} — ${d.error}`);
+    broadcast('bot:error', d);
+  });
+  botMgr.on('bot:started', (d) => broadcast('bot:started', d));
+  botMgr.on('bot:stopped', (d) => broadcast('bot:stopped', d));
+  botMgr.on('bot:paused', (d) => broadcast('bot:paused', d));
+  botMgr.on('bot:autoPaused', (d) => {
+    console.log(`[bot-engine] ⏸️ AUTO-PAUSED: bot ${d.botId} — ${d.reason}`);
+    broadcast('bot:autoPaused', d);
+  });
+  botMgr.on('bot:paper-trade', (d) => {
+    console.log(`[bot-engine] 📝 PAPER: ${d.symbol} ${d.side} qty=${d.quantity?.toFixed?.(6) || d.quantity} @ ${d.avgPrice}`);
+    broadcast('bot:paper-trade', d);
+  });
+  botMgr.on('bots:unrealized-pnl', (d) => {
+    broadcast('bots:unrealized-pnl', d);
+  });
+  botMgr.on('manager:started', (d) => {
+    console.log(`[bot-engine] 🚀 Bot Manager STARTED: ${d.botsStarted} bots, testnet=${d.testnet}`);
+    broadcast('manager:started', d);
+  });
+  botMgr.on('manager:stopped', (d) => broadcast('manager:stopped', d));
+} catch (err) {
+  console.log(`[crypto-trader] Bot manager init: ${err.message}`);
+}
+
+// ─── Alerter Wiring ─────────────────────────────────────────────────────────
+
+try {
+  const alerter = getAlerter();
+  const botMgr = getBotManager();
+  botMgr.on('bot:signal', (d) => {
+    alerter.sendAlert('signal_executed', `${d.action} ${d.symbol} @ ${d.suggestedEntry || d.price || '?'}`, d);
+  });
+  botMgr.on('bot:signal:rejected', (d) => {
+    alerter.sendAlert('signal_rejected', `${d.symbol} — ${d.riskCheck?.violations?.join(', ') || 'risk check failed'}`, d);
+  });
+  botMgr.on('bot:error', (d) => {
+    alerter.sendAlert('bot_error', `bot ${d.botId} — ${d.error}`, d);
+  });
+} catch {}
+
+// ─── Express Error Middleware ─────────────────────────────────────────────────
+
+app.use((err, req, res, _next) => {
+  if (err instanceof AppError) {
+    logger.warn(`AppError: ${err.message}`, { code: err.code, statusCode: err.statusCode });
+    return res.status(err.statusCode).json(err.toJSON());
+  }
+  logger.error('Unhandled express error', { error: err.message, stack: err.stack });
+  res.status(500).json({ ok: false, error: 'Internal server error', code: 'INTERNAL_ERROR' });
+});
+
 // ─── Global Error Handling ───────────────────────────────────────────────────
 
 process.on('uncaughtException', (err) => {
@@ -406,3 +503,156 @@ process.on('uncaughtException', (err) => {
 process.on('unhandledRejection', (reason) => {
   log('fatal', 'Unhandled rejection', { error: String(reason) });
 });
+
+// ─── Scheduled Backups ───────────────────────────────────────────────────────
+
+const backupScheduler = scheduleBackups();
+
+// ─── Graceful Shutdown ──────────────────────────────────────────────────────
+
+let isShuttingDown = false;
+
+async function gracefulShutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  log('info', `Shutdown initiated (${signal})`, {});
+  const startTime = Date.now();
+
+  // 0. Stop backup scheduler
+  backupScheduler.stop();
+
+  // 1. Stop all bots
+  try {
+    const botMgr = getBotManager();
+    botMgr.stopAll();
+    log('info', 'All bots stopped');
+  } catch (err) {
+    log('error', 'Error stopping bots', { error: err.message });
+  }
+
+  // 2. Stop position reconciler
+  try {
+    const reconciler = getPositionReconciler();
+    reconciler.stop();
+    log('info', 'Position reconciler stopped');
+  } catch (err) {
+    log('error', 'Error stopping reconciler', { error: err.message });
+  }
+
+  // 3. Close all WebSocket streams (market data)
+  try {
+    const mds = getMarketDataService();
+    mds.stop();
+    log('info', 'Market data streams closed');
+  } catch (err) {
+    log('error', 'Error stopping market data', { error: err.message });
+  }
+
+  // 4. Close WebSocket server
+  try {
+    for (const client of wss.clients) {
+      client.close(1001, 'Server shutting down');
+    }
+    wss.close();
+    log('info', 'WebSocket server closed');
+  } catch (err) {
+    log('error', 'Error closing WebSocket server', { error: err.message });
+  }
+
+  // 5. Close SQLite DB
+  try {
+    const db = getTradeDB();
+    db.close();
+    log('info', 'Database closed');
+  } catch (err) {
+    log('error', 'Error closing database', { error: err.message });
+  }
+
+  // 6. Close HTTP server
+  try {
+    await new Promise((resolve, reject) => {
+      server.close((err) => {
+        if (err) reject(err);
+        else resolve();
+      });
+    });
+    log('info', 'HTTP server closed');
+  } catch (err) {
+    log('error', 'Error closing HTTP server', { error: err.message });
+  }
+
+  const elapsed = Date.now() - startTime;
+  log('info', `Shutdown complete in ${elapsed}ms. Goodbye.`);
+  process.exit(0);
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// ─── Auto-Connect Binance on Startup ───────────────────────────────────────────
+
+async function autoConnectBinance() {
+  try {
+    const cfg = await loadConfig();
+    if (!cfg?.apiKey) {
+      console.log('[crypto-trader] No API credentials configured. Skipping auto-connect.');
+      return;
+    }
+
+    const mode = cfg.testnet ? 'demo' : 'live';
+    console.log(`[crypto-trader] Auto-connecting to Binance (mode=${mode})...`);
+
+    // Connect Spot
+    try {
+      const c = getConnector();
+      await c.initialize();
+      await c.loadExchangeInfo();
+      console.log(`[crypto-trader] ✅ Spot connected (${mode})`);
+    } catch (err) {
+      console.log(`[crypto-trader] ⚠️ Spot connect failed: ${err.message}`);
+    }
+
+    // Connect Futures if enabled
+    if (cfg.futures?.enabled) {
+      const markets = cfg.futures.markets || ['usdm'];
+      try {
+        const fc = getFuturesConnector();
+        await fc.initialize({ apiKey: cfg.apiKey, apiSecret: cfg.apiSecret, testnet: cfg.testnet, mode: cfg.testnet ? 'demo' : 'live', markets });
+        for (const m of markets) {
+          try { await fc.loadExchangeInfo(m); } catch {}
+        }
+        console.log(`[crypto-trader] ✅ Futures connected: ${markets.join(', ')} (${cfg.testnet ? 'demo' : 'live'})`);
+      } catch (err) {
+        console.log(`[crypto-trader] ⚠️ Futures connect failed: ${err.message}`);
+      }
+    }
+
+    // Start position reconciler after connectors are ready
+    try {
+      const reconciler = getPositionReconciler();
+      reconciler.on('log', (d) => {
+        const prefix = d.level === 'warn' ? '⚠️' : d.level === 'error' ? '❌' : '🔄';
+        console.log(`[reconciler] ${prefix} ${d.message}`);
+        broadcast('system:log', { ...d, source: 'reconciler' });
+      });
+      reconciler.on('reconciled', (data) => {
+        const total = data.futures.matched + data.spot.matched;
+        const orphans = data.futures.orphans.length + data.spot.orphans.length;
+        if (total > 0 || orphans > 0) {
+          console.log(`[reconciler] 🔄 Reconciled: ${total} matched, ${orphans} orphans, ${data.futures.updated + data.spot.updated} updated`);
+        }
+        broadcast('reconciler:update', data);
+      });
+      reconciler.on('error', (d) => {
+        console.log(`[reconciler] ❌ ${d.message}`);
+      });
+      await reconciler.start();
+      console.log(`[crypto-trader] 🔄 Position reconciler started (interval: 60s)`);
+    } catch (err) {
+      console.log(`[crypto-trader] ⚠️ Position reconciler failed: ${err.message}`);
+    }
+  } catch (err) {
+    console.log(`[crypto-trader] Auto-connect error: ${err.message}`);
+  }
+}

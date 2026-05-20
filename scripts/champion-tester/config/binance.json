@@ -1,0 +1,23 @@
+{
+  "apiKey": "69b17f0d48fb07e245461f99425bab2e:4ac175a1abf0c8a7cb0c78564109a3a4:7b9d86844d5afb12f2145926b89ff56f4e8573c31633f6068ba070ebf069a44b52daa1ceb86d4ec550f9d93c75863ce038ff9e8958ac37be44a36da490f0d0d0",
+  "apiSecret": "8d60e4374cd31bfe5401033ff249330c:3eb1e58abfa02e7c862181a795a97805:acc3efaf95df240b948e7cbafe28dbc5dcfc530a6d1bd154175cf5229f2238453a1e125ce3e0ac97690231588b17beb69130abedccb37a92957cf14babdca355",
+  "testnet": true,
+  "tradingEnabled": true,
+  "riskLimits": {
+    "maxPositionSizeUSDT": 50,
+    "maxDailyLossUSDT": 10,
+    "maxDailyTrades": 20,
+    "maxOpenPositions": 3,
+    "maxSlippagePct": 0.5,
+    "cooldownAfterLossMs": 60000,
+    "requireConfirmation": true
+  },
+  "futures": {
+    "enabled": true,
+    "markets": [
+      "usdm"
+    ]
+  },
+  "createdAt": "2026-05-19T08:15:18.400Z",
+  "updatedAt": "2026-05-20T02:53:43.254Z"
+}

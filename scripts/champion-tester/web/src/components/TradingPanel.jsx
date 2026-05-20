@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTrading } from '../hooks/useTrading.js';
 import { useWebSocket } from '../hooks/useWebSocket.js';
 import api from '../api.js';
+import MarketBadge from './ui/MarketBadge.jsx';
 import {
   Wallet, Settings, Power, PowerOff, TrendingUp, TrendingDown,
   AlertCircle, CheckCircle2, Loader2, RefreshCw, Shield,
@@ -22,18 +23,7 @@ function Toast({ toast }) {
   );
 }
 
-function MarketBadge({ market }) {
-  const colors = {
-    spot: 'bg-blue-500/10 text-blue-400 border-blue-500/20',
-    usdm: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-    coinm: 'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  };
-  return (
-    <span className={`px-2 py-0.5 text-[10px] font-bold rounded border ${colors[market] || colors.spot}`}>
-      {market === 'usdm' ? 'USD-M' : market === 'coinm' ? 'COIN-M' : 'SPOT'}
-    </span>
-  );
-}
+
 
 function ConnectionPanel({ status, onConnect, onDisconnect, onFuturesConnect, onFuturesDisconnect, loading }) {
   const spotConnected = status?.spot?.connected;
@@ -121,8 +111,8 @@ function ConnectionPanel({ status, onConnect, onDisconnect, onFuturesConnect, on
 }
 
 function BalancePanel({ account, futuresAccount }) {
-  const spotBalances = account?.balances || [];
-  const futuresAssets = futuresAccount?.assets || [];
+  const spotBalances = (account?.balances || []).filter(b => parseFloat(b.free) > 0 || parseFloat(b.locked) > 0);
+  const futuresAssets = (futuresAccount?.assets || []).filter(a => parseFloat(a.walletBalance) > 0 || parseFloat(a.unrealizedProfit) !== 0);
 
   if (spotBalances.length === 0 && futuresAssets.length === 0) return null;
 
@@ -238,10 +228,8 @@ export default function TradingPanel() {
 
   const tabs = [
     { id: 'overview', label: 'Overview' },
-    { id: 'orders', label: 'Orders' },
-    { id: 'futures', label: 'Futures' },
-    { id: 'positions', label: 'Positions' },
-    { id: 'settings', label: 'Settings' },
+    { id: 'spot-order', label: 'Spot Order' },
+    { id: 'futures-order', label: 'Futures Order' },
   ];
 
   return (
@@ -272,10 +260,8 @@ export default function TradingPanel() {
           actionLoading={actionLoading} showToast={showToast} refresh={refresh}
         />
       )}
-      {tab === 'orders' && <OrdersTab status={status} openOrders={openOrders} showToast={showToast} refresh={refresh} />}
-      {tab === 'futures' && <FuturesTab status={status} futuresPositions={futuresPositions} futuresOrders={futuresOrders} showToast={showToast} refresh={refresh} />}
-      {tab === 'positions' && <PositionsTab positions={positions} futuresPositions={futuresPositions} status={status} showToast={showToast} refresh={refresh} />}
-      {tab === 'settings' && <SettingsTab status={status} showToast={showToast} refresh={refresh} />}
+      {tab === 'spot-order' && <OrdersTab status={status} openOrders={openOrders} showToast={showToast} refresh={refresh} />}
+      {tab === 'futures-order' && <FuturesTab status={status} futuresPositions={futuresPositions} futuresOrders={futuresOrders} showToast={showToast} refresh={refresh} />}
     </div>
   );
 }
@@ -768,13 +754,13 @@ function PositionsTab({ positions, futuresPositions, status, showToast, refresh 
             <div key={`fut-${pos.symbol}-${pos.positionSide}-${i}`} className="bg-surface-1 rounded-xl border border-border-subtle p-5">
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
-                  <MarketBadge market="usdm" />
+                  <MarketBadge market={pos.market || 'usdm'} />
                   <span className="font-mono font-bold text-gray-200">{pos.symbol}</span>
                   <span className={`px-1.5 py-0.5 text-[10px] font-medium rounded ${pos.positionAmt > 0 ? 'bg-success/10 text-success' : 'bg-error/10 text-error'}`}>
                     {pos.positionAmt > 0 ? 'LONG' : 'SHORT'}
                   </span>
                 </div>
-                <button onClick={() => handleCloseFutures('usdm', pos.symbol, pos.positionSide)}
+                <button onClick={() => handleCloseFutures(pos.market || 'usdm', pos.symbol, pos.positionSide)}
                   className="px-2.5 py-1 text-[10px] font-medium bg-error/10 hover:bg-error/20 text-error border border-error/20 rounded-md">Close</button>
               </div>
               <div className="grid grid-cols-3 gap-3 text-xs">

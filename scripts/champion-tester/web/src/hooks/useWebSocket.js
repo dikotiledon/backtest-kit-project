@@ -5,6 +5,7 @@ export function useWebSocket() {
   const [lastEvent, setLastEvent] = useState(null);
   const wsRef = useRef(null);
   const reconnectTimerRef = useRef(null);
+  const reconnectAttemptRef = useRef(0);
   const handlersRef = useRef(new Map());
 
   const subscribe = useCallback((type, handler) => {
@@ -32,6 +33,7 @@ export function useWebSocket() {
 
       ws.onopen = () => {
         setConnected(true);
+        reconnectAttemptRef.current = 0;
         // Emit synthetic 'connected' event so subscribers (e.g. TestRunner) can recover state
         if (handlersRef.current.has('connected')) {
           handlersRef.current.get('connected').forEach((handler) => handler({ type: 'connected', data: {} }));
@@ -41,7 +43,9 @@ export function useWebSocket() {
       ws.onclose = () => {
         setConnected(false);
         wsRef.current = null;
-        reconnectTimerRef.current = setTimeout(connect, 3000);
+        const delay = Math.min(1000 * Math.pow(2, reconnectAttemptRef.current), 30000);
+        reconnectAttemptRef.current++;
+        reconnectTimerRef.current = setTimeout(connect, delay);
       };
 
       ws.onerror = () => {
@@ -50,12 +54,13 @@ export function useWebSocket() {
 
       ws.onmessage = (event) => {
         try {
-          const data = JSON.parse(event.data);
-          setLastEvent(data);
+          const msg = JSON.parse(event.data);
+          setLastEvent(msg);
 
-          const type = data.type;
+          const type = msg.type;
           if (type && handlersRef.current.has(type)) {
-            handlersRef.current.get(type).forEach((handler) => handler(data));
+            // Pass only the data payload to handlers, not the full envelope
+            handlersRef.current.get(type).forEach((handler) => handler(msg.data || msg));
           }
         } catch {
           // ignore non-JSON messages

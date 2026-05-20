@@ -1,6 +1,7 @@
 {
-  "name": "champion-tester",
-  "version": "1.0.0",
+  "name": "crypto-trader",
+  "version": "2.0.0",
+  "description": "Production-grade multi-symbol automated crypto trading platform. Spot + USD-M + COIN-M Futures.",
   "private": true,
   "type": "module",
   "scripts": {
@@ -13,10 +14,15 @@
   },
   "dependencies": {
     "@binance/connector": "^3.6.1",
+    "@tanstack/react-query": "^5.62.0",
+    "@tanstack/react-router": "^1.92.0",
+    "better-sqlite3": "^11.10.0",
     "express": "^4.21.0",
     "lightweight-charts": "^5.2.0",
     "lucide-react": "^0.454.0",
-    "ws": "^8.20.1"
+    "recharts": "^3.8.1",
+    "ws": "^8.20.1",
+    "zustand": "^5.0.13"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

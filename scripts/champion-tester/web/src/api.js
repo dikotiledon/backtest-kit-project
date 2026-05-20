@@ -28,7 +28,6 @@ const api = {
     request('POST', '/datasets/fetch', { symbol, timeframe, initialLimit }),
   deleteDataset: (exchange, symbol, timeframe) =>
     request('DELETE', `/datasets/${exchange}/${symbol}/${timeframe}`),
-  getChampions: () => request('GET', '/champions'),
   getTestStatus: () => request('GET', '/test/status'),
   cancelTest: () => request('POST', '/test/cancel'),
   runTest: (matrixId, symbol, timeframe, slice) =>
@@ -123,6 +122,60 @@ const api = {
   getTradingPositions: (market) => request('GET', `/trading/executor/positions${market ? `?market=${market}` : ''}`),
   getDailyStats: () => request('GET', '/trading/executor/daily-stats'),
   getTradeHistory: (date, limit) => request('GET', `/trading/executor/history?${date ? `date=${date}` : `limit=${limit || 20}`}`),
+
+  // ─── Bot Manager ─────────────────────────────────────────────
+  getBots: (filter) => request('GET', `/bots?${new URLSearchParams(filter || {})}`),
+  getBotManagerStatus: () => request('GET', '/bots/status'),
+  getBotGlobalStats: () => request('GET', '/bots/stats/global'),
+  getBot: (id) => request('GET', `/bots/${id}`),
+  createBot: (config) => request('POST', '/bots', config),
+  updateBot: (id, patch) => request('PATCH', `/bots/${id}`, patch),
+  deleteBot: (id) => request('DELETE', `/bots/${id}`),
+  startBot: (id) => request('POST', `/bots/${id}/start`),
+  stopBot: (id) => request('POST', `/bots/${id}/stop`),
+  pauseBot: (id) => request('POST', `/bots/${id}/pause`),
+  resumeBot: (id) => request('POST', `/bots/${id}/resume`),
+  getBotStats: (id) => request('GET', `/bots/${id}/stats`),
+  getBotTrades: (id, limit) => request('GET', `/bots/${id}/trades?limit=${limit || 50}`),
+  startAllBots: () => request('POST', '/bots/start-all'),
+  stopAllBots: () => request('POST', '/bots/stop-all'),
+  pauseAllBots: () => request('POST', '/bots/pause-all'),
+  resumeAllBots: () => request('POST', '/bots/resume-all'),
+  getBotSettings: () => request('GET', '/bots/settings/global'),
+  updateBotSettings: (patch) => request('PATCH', '/bots/settings/global', patch),
+
+  // ─── Position Sizing ──────────────────────────────────────────
+  getPositionSizingConfig: () => request('GET', '/position-sizing/config'),
+  updatePositionSizingConfig: (config) => request('PUT', '/position-sizing/config', config),
+
+  // ─── Strategies ───────────────────────────────────────────────
+  getStrategies: () => request('GET', '/strategies'),
+  getStrategy: (id) => request('GET', `/strategies/${id}`),
+
+  // ─── Markets (Symbol Registry) ────────────────────────────────
+  searchSymbols: (q, market) => request('GET', `/markets/search?q=${encodeURIComponent(q)}${market ? `&market=${market}` : ''}`),
+  getMarketSymbols: (market, filter) => request('GET', `/markets/symbols/${market}?${new URLSearchParams(filter || {})}`),
+  getMarketStats: () => request('GET', '/markets/stats'),
+  refreshMarkets: (market) => request('POST', '/markets/refresh', { market }),
+  getMultiPrices: (symbols, market) => request('POST', '/markets/prices', { symbols, market }),
+
+  // ─── Risk Manager ─────────────────────────────────────────────
+  getRiskStatus: () => request('GET', '/risk/status'),
+  updateRiskLimits: (limits) => request('PATCH', '/risk/limits', limits),
+  setKillSwitch: (active, reason) => request('POST', '/risk/kill-switch', { active, reason }),
+  getRiskEvents: (limit) => request('GET', `/risk/events?limit=${limit || 50}`),
+
+  // ─── Analytics ────────────────────────────────────────────────
+  getAnalyticsSummary: (botId) => request('GET', `/analytics/summary${botId ? `?botId=${botId}` : ''}`),
+  getEquityCurve: (days) => request('GET', `/analytics/equity?days=${days || 30}`),
+  getDailyAnalytics: (opts) => request('GET', `/analytics/daily?${new URLSearchParams(opts || {})}`),
+  getAnalyticsTrades: (opts) => request('GET', `/analytics/trades?${new URLSearchParams(opts || {})}`),
+
+  // ─── Champions (Autoresearch) ───────────────────────────────────
+  getChampions: () => request('GET', '/champions'),
+  getChampion: (matrixId) => request('GET', `/champions/${matrixId}`),
+  createChampionBot: (matrixId, opts) => request('POST', `/champions/${matrixId}/create-bot`, opts),
+  createChampionBots: (matrixId, opts) => request('POST', `/champions/${matrixId}/create-bots`, opts),
 };
 
 export { api };

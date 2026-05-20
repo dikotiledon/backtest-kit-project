@@ -32,9 +32,15 @@ class BinanceConnector extends EventEmitter {
       throw new Error('Binance credentials not configured');
     }
 
-    const baseURL = this.config.testnet
-      ? 'https://testnet.binance.vision'
-      : 'https://api.binance.com';
+    // Support three modes: live, demo (testnet toggle), old testnet
+    let baseURL;
+    if (this.config.testnet && !this.config.useOldTestnet) {
+      baseURL = 'https://demo-api.binance.com'; // Demo mode
+    } else if (this.config.testnet && this.config.useOldTestnet) {
+      baseURL = 'https://testnet.binance.vision'; // Old testnet
+    } else {
+      baseURL = 'https://api.binance.com'; // Live
+    }
 
     this.client = new Spot(this.config.apiKey, this.config.apiSecret, {
       baseURL,
@@ -116,6 +122,21 @@ class BinanceConnector extends EventEmitter {
     } catch (err) {
       this._handleError('loadExchangeInfo', err);
     }
+  }
+
+  getExchangeInfo() {
+    // Return cached exchange info in a format compatible with SymbolRegistry
+    const symbols = [];
+    for (const [symbol, info] of this.filterManager.filters) {
+      symbols.push({
+        symbol,
+        status: info.status,
+        baseAsset: info.baseAsset,
+        quoteAsset: info.quoteAsset,
+        filters: info.filters,
+      });
+    }
+    return { symbols };
   }
 
   getSymbolInfo(symbol) {

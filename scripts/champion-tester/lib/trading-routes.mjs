@@ -1,6 +1,7 @@
 import { getConnector, resetConnector } from './binance-connector.mjs';
 import { getFuturesConnector, resetFuturesConnector } from './binance-futures-connector.mjs';
 import { getExecutor } from './trade-executor.mjs';
+import { getSymbolRegistry } from './symbol-registry.mjs';
 import {
   loadConfig, saveConfig, getConfigStatus,
   deleteConfig, getDefaultRiskLimits,
@@ -76,6 +77,8 @@ export function registerTradingRoutes(app, broadcast) {
     try {
       const c = getConnector();
       const r = await c.initialize(); await c.loadExchangeInfo();
+      // Auto-refresh symbol registry after connection
+      try { await getSymbolRegistry().refresh('spot'); } catch {}
       broadcast('trading:connected', { market: 'spot', testnet: c.config.testnet });
       res.json({ ok: true, market: 'spot', ...r });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }
@@ -96,8 +99,12 @@ export function registerTradingRoutes(app, broadcast) {
       const { market } = req.body;
       const markets = market ? [market] : (cfg.futures.markets || ['usdm']);
       const fc = getFuturesConnector();
-      const results = await fc.initialize({ apiKey: cfg.apiKey, apiSecret: cfg.apiSecret, testnet: cfg.testnet, markets });
+      const results = await fc.initialize({ apiKey: cfg.apiKey, apiSecret: cfg.apiSecret, testnet: cfg.testnet, mode: cfg.testnet ? 'demo' : 'live', markets });
       for (const m of markets) { if (results[m]?.ok) await fc.loadExchangeInfo(m); }
+      // Auto-refresh symbol registry for futures
+      for (const m of markets) {
+        try { await getSymbolRegistry().refresh(m); } catch {}
+      }
       broadcast('trading:futures:connected', { markets, results });
       res.json({ ok: true, markets, results });
     } catch (e) { res.status(500).json({ ok: false, error: e.message }); }

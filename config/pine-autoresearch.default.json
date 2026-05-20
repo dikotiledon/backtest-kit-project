@@ -486,10 +486,10 @@
       "when": "2025-11-30T23:45:00.000Z",
       "exchange": "default_exchange",
       "thresholds": {
-        "minScoreDelta": 0,
-        "minRoiDeltaPct": 5,
-        "minProfitFactorDelta": 0.1,
-        "maxDrawdownDeltaPct": 0.75,
+        "minScoreDelta": 1.0,
+        "minRoiDeltaPct": 0,
+        "minProfitFactorDelta": 0,
+        "maxDrawdownDeltaPct": 1.5,
         "minTradeCount": 60,
         "minTradeRatioVsIncumbent": 0.75
       }
@@ -502,10 +502,10 @@
       "when": "2025-11-30T23:45:00.000Z",
       "exchange": "default_exchange",
       "thresholds": {
-        "minScoreDelta": 0,
-        "minRoiDeltaPct": 5,
-        "minProfitFactorDelta": 0.1,
-        "maxDrawdownDeltaPct": 0.75,
+        "minScoreDelta": 1.0,
+        "minRoiDeltaPct": 0,
+        "minProfitFactorDelta": 0,
+        "maxDrawdownDeltaPct": 1.5,
         "minTradeCount": 60,
         "minTradeRatioVsIncumbent": 0.75
       }

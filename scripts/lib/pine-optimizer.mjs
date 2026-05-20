@@ -3,7 +3,7 @@ import path from 'node:path';
 import { simulateTrades as newSimulateTrades } from './pine-simulator.mjs';
 import { buildCostModel } from './pine-cost-model.mjs';
 import { createFlagRegistry, getFlag } from './pine-feature-flags.mjs';
-import { calculateMetrics, scoreMetrics, scoreMetricsBreakdown } from './pine-metric-core.mjs';
+import { calculateMetrics, calculateCompoundedMetrics, scoreMetrics, scoreMetricsBreakdown } from './pine-metric-core.mjs';
 
 export { analyzeJsonlFileStreaming } from './pine-streaming-metrics.mjs';
 
@@ -305,6 +305,19 @@ export async function analyzeJsonlFile(filePath, options = {}) {
   const rows = normalizeRows(parsedRows);
   const trades = simulateTrades(rows, options);
   const metrics = calculateMetrics(trades);
+
+  // Preserve arithmetic values before override
+  metrics.arithmeticRoiPct = metrics.roiPct;
+  metrics.arithmeticMaxDrawdownPct = metrics.maxDrawdownPct;
+
+  // Override arithmetic ROI and DD with compounded equity-curve values
+  const compounded = calculateCompoundedMetrics(trades);
+  metrics.roiPct = round(compounded.compoundedRoiPct, 2);
+  metrics.maxDrawdownPct = round(compounded.maxDrawdownPct, 2);
+  metrics.compoundedRoiPct = compounded.compoundedRoiPct;
+  metrics.equityCurveDD = compounded.maxDrawdownPct;
+  metrics.finalEquity = compounded.finalEquity;
+
   const score = scoreMetrics(metrics, options);
   const diagnostics = summarizeSignalDiagnostics(rows);
 

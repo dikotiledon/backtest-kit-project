@@ -78,26 +78,38 @@ export function calculateMetrics(trades) {
 export function scoreMetricsBreakdown(metrics, options = {}) {
   const minTrades = options.minTrades ?? 10;
   const weights = {
-    roi: options.roiWeight ?? 1.0,
-    winRate: options.winRateWeight ?? 0.8,
-    profitFactor: options.profitFactorWeight ?? 8,
-    drawdown: options.drawdownWeight ?? 0.6,
+    roi: options.roiWeight ?? 0.8,
+    winRate: options.winRateWeight ?? 0.3,
+    profitFactor: options.profitFactorWeight ?? 12,
+    drawdown: options.drawdownWeight ?? 3.0,
+    expectancy: options.expectancyWeight ?? 20,
   };
 
-  const profitFactor = Number.isFinite(metrics.profitFactor) ? metrics.profitFactor : 10;
-  const roi = round(metrics.roiPct * weights.roi);
-  const winRate = round(metrics.winRatePct * weights.winRate);
+  // Cap PF at 6 (not 10) to reduce perverse incentive for zero-loss strategies
+  const profitFactor = Math.min(Number.isFinite(metrics.profitFactor) ? metrics.profitFactor : 6, 6);
+
+  // Compute expectancy: (winRate * avgWin) - (lossRate * avgLoss)
+  const winRate = (metrics.winRatePct ?? 0) / 100;
+  const lossRate = 1 - winRate;
+  const avgWin = metrics.avgWin ?? 0;
+  const avgLoss = metrics.avgLoss ?? 0;
+  const expectancy = (winRate * avgWin) - (lossRate * avgLoss);
+
+  const roiContribution = round(metrics.roiPct * weights.roi);
+  const winRateContribution = round(metrics.winRatePct * weights.winRate);
   const profitFactorContribution = round(profitFactor * weights.profitFactor);
-  const drawdown = round(-metrics.maxDrawdownPct * weights.drawdown);
+  const drawdownContribution = round(-metrics.maxDrawdownPct * weights.drawdown);
+  const expectancyContribution = round(expectancy * weights.expectancy);
   const tradePenalty = metrics.tradeCount < minTrades ? round((metrics.tradeCount - minTrades) * 5) : 0;
 
   return {
-    roi,
-    winRate,
+    roi: roiContribution,
+    winRate: winRateContribution,
     profitFactor: profitFactorContribution,
-    drawdown,
+    drawdown: drawdownContribution,
+    expectancy: expectancyContribution,
     tradePenalty,
-    total: round(roi + winRate + profitFactorContribution + drawdown + tradePenalty),
+    total: round(roiContribution + winRateContribution + profitFactorContribution + drawdownContribution + expectancyContribution + tradePenalty),
   };
 }
 

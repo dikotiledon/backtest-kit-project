@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
 import { analyzeJsonlFile } from './lib/pine-optimizer.mjs';
@@ -2885,6 +2886,46 @@ async function evaluateConfigOnLab({ config, lab, runId, variantKey, candidate }
   };
 }
 
+function buildChampionCacheDir(config) {
+  if (!config?.researchRoot) return null;
+  return path.join(config.researchRoot, 'state', 'eval-cache');
+}
+
+function buildChampionCacheKey(championFingerprint, labId) {
+  const hash = createHash('sha256')
+    .update(`${championFingerprint}:${labId}`)
+    .digest('hex')
+    .slice(0, 16);
+  return `champion-${hash}.json`;
+}
+
+async function getCachedChampionEvaluation(config, championFingerprint, labId) {
+  const cacheDir = buildChampionCacheDir(config);
+  if (!cacheDir) return null;
+  const cachePath = path.join(cacheDir, buildChampionCacheKey(championFingerprint, labId));
+  try {
+    const raw = await fs.readFile(cachePath, 'utf8');
+    const cached = JSON.parse(raw);
+    if (cached.championFingerprint === championFingerprint && cached.labId === labId) {
+      return cached.result;
+    }
+  } catch { /* cache miss */ }
+  return null;
+}
+
+async function setCachedChampionEvaluation(config, championFingerprint, labId, result) {
+  const cacheDir = buildChampionCacheDir(config);
+  if (!cacheDir) return;
+  await fs.mkdir(cacheDir, { recursive: true });
+  const cachePath = path.join(cacheDir, buildChampionCacheKey(championFingerprint, labId));
+  await fs.writeFile(cachePath, JSON.stringify({
+    championFingerprint,
+    labId,
+    cachedAt: new Date().toISOString(),
+    result,
+  }), 'utf8');
+}
+
 export async function evaluateMatrix(config, runId, championState, challengerSummary, dependencies = {}) {
   const evaluateConfigOnLabFn = dependencies.evaluateConfigOnLab || evaluateConfigOnLab;
   const evaluationCache = dependencies.evaluationCache || createEvaluationCache();
@@ -2899,13 +2940,19 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
       variantKey: 'champion',
       configFingerprint: championConfigFingerprint,
     });
-    const incumbentResult = await evaluationCache.getOrCompute(incumbentCacheKey, () => evaluateConfigOnLabFn({
-      config,
-      lab,
-      runId,
-      variantKey: 'champion',
-      candidate: championState,
-    }));
+    // Try persistent file cache first (survives across runs)
+    let incumbentResult = await getCachedChampionEvaluation(config, championConfigFingerprint, lab.labId);
+    if (!incumbentResult) {
+      incumbentResult = await evaluationCache.getOrCompute(incumbentCacheKey, () => evaluateConfigOnLabFn({
+        config,
+        lab,
+        runId,
+        variantKey: 'champion',
+        candidate: championState,
+      }));
+      // Persist for future runs
+      await setCachedChampionEvaluation(config, championConfigFingerprint, lab.labId, incumbentResult);
+    }
 
     const challengerResult = sameCandidate
       ? {
@@ -2967,7 +3014,97 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
 
   const primaryResult = await evaluateLabPair(labs[0]);
   const requiresPrimaryPromote = config.matrixPolicy?.requirePrimaryPromote !== false;
-  if (requiresPrimaryPromote && primaryResult.decision.recommendation !== 'promote') {
+  const primaryFailed = primaryResult.decision.recommendation !== 'promote';
+  
+  // Shadow override policy: allow promotion despite primary failure if enough shadows pass
+  const shadowOverridePolicy = config.matrixPolicy?.shadowOverride || {};
+  const shadowOverrideEnabled = shadowOverridePolicy.enabled !== false;
+  const shadowOverrideMinPassRatio = Number(shadowOverridePolicy.minPassRatio) || 0.75;
+  const shadowOverrideMinPassCount = Number(shadowOverridePolicy.minPassCount) || 2;
+  const shadowOverrideMaxPrimaryScoreRegression = Number(shadowOverridePolicy.maxPrimaryScoreRegression) || 3.0;
+
+  if (requiresPrimaryPromote && primaryFailed) {
+    // Only evaluate shadows if shadow override is enabled (to check override conditions)
+    const shadowConcurrency = config.regimeExitResearch?.resource?.maxConcurrentLabWorkers ?? 3;
+    let shadowResults = [];
+    if (shadowOverrideEnabled && labs.length > 1) {
+      try {
+        shadowResults = await mapWithConcurrency(labs.slice(1), shadowConcurrency, evaluateLabPair);
+      } catch {
+        shadowResults = [];
+      }
+    }
+
+    // Check if shadow override conditions are met
+    const shadowPassCount = shadowResults.filter(r => r.decision?.recommendation === 'promote').length;
+    const shadowPassRatio = shadowResults.length > 0 ? shadowPassCount / shadowResults.length : 0;
+    const primaryScoreRegression = Math.abs(primaryResult.decision?.comparisons?.scoreDelta ?? 0);
+    
+    const shadowOverrideMet = shadowOverrideEnabled
+      && shadowResults.length > 0
+      && shadowPassCount >= shadowOverrideMinPassCount
+      && shadowPassRatio >= shadowOverrideMinPassRatio
+      && primaryScoreRegression <= shadowOverrideMaxPrimaryScoreRegression;
+
+    if (shadowOverrideMet) {
+      // Shadow override: treat as if primary passed, proceed with full matrix evaluation
+      const labResults = [primaryResult, ...shadowResults];
+      const matrixDecision = decideMatrixPromotion({
+        labResults,
+        shadowsEvaluated: true,
+        policy: {
+          ...config.matrixPolicy,
+          requirePrimaryPromote: false, // Override for this evaluation
+        },
+        champion: championState,
+        challenger: challengerSummary,
+      });
+
+      // Add shadow override metadata to the decision
+      matrixDecision.shadowOverride = {
+        applied: true,
+        shadowPassCount,
+        shadowPassRatio: Number(shadowPassRatio.toFixed(3)),
+        primaryScoreRegression: Number(primaryScoreRegression.toFixed(2)),
+        policy: {
+          minPassRatio: shadowOverrideMinPassRatio,
+          minPassCount: shadowOverrideMinPassCount,
+          maxPrimaryScoreRegression: shadowOverrideMaxPrimaryScoreRegression,
+        },
+      };
+
+      // Still run holdout if matrix would promote
+      let holdoutVerdict = null;
+      if (matrixDecision.recommendation === 'promote' && Array.isArray(config.blindHoldoutLabs) && config.blindHoldoutLabs.length > 0) {
+        const holdoutResults = await mapWithConcurrency(
+          config.blindHoldoutLabs,
+          shadowConcurrency,
+          evaluateLabPair,
+        );
+        const holdoutPassCount = holdoutResults.filter(r => r.decision?.recommendation === 'promote').length;
+        const holdoutPassRatio = holdoutResults.length > 0 ? holdoutPassCount / holdoutResults.length : 0;
+        holdoutVerdict = {
+          passed: holdoutPassCount === holdoutResults.length,
+          reason: holdoutPassCount === holdoutResults.length ? 'blind_holdout_passed' : 'blind_holdout_failed',
+          labResults: holdoutResults.map(r => ({
+            labId: r.lab?.labId,
+            recommendation: r.decision?.recommendation,
+            scoreDelta: r.decision?.comparisons?.scoreDelta,
+            roiDeltaPct: r.decision?.comparisons?.roiDeltaPct,
+          })),
+          counts: { total: holdoutResults.length, passed: holdoutPassCount, ratio: holdoutPassRatio },
+        };
+      }
+
+      return {
+        labResults,
+        holdoutVerdict,
+        matrixDecision,
+        diagnosticShadowResults: null,
+      };
+    }
+
+    // Shadow override NOT met — fall through to original behavior (block)
     const labResults = [primaryResult];
     const matrixDecision = decideMatrixPromotion({
       labResults,
@@ -2977,23 +3114,24 @@ export async function evaluateMatrix(config, runId, championState, challengerSum
       challenger: challengerSummary,
     });
 
-    // Diagnostic shadow evaluation: collect cross-asset data even on primary failure
-    let diagnosticShadowResults = null;
-    if (config.matrixPolicy?.diagnosticShadowEvaluation === true && labs.length > 1) {
-      const shadowConcurrency = config.regimeExitResearch?.resource?.maxConcurrentLabWorkers ?? 3;
-      try {
-        diagnosticShadowResults = await mapWithConcurrency(labs.slice(1), shadowConcurrency, evaluateLabPair);
-      } catch {
-        // Diagnostic evaluation is best-effort; do not fail the cycle
-        diagnosticShadowResults = null;
-      }
-    }
+    matrixDecision.shadowOverride = {
+      applied: false,
+      shadowPassCount,
+      shadowPassRatio: Number(shadowPassRatio.toFixed(3)),
+      primaryScoreRegression: Number(primaryScoreRegression.toFixed(2)),
+      reason: !shadowOverrideEnabled ? 'disabled'
+        : shadowResults.length === 0 ? 'no_shadow_labs'
+        : shadowPassCount < shadowOverrideMinPassCount ? 'insufficient_shadow_pass_count'
+        : shadowPassRatio < shadowOverrideMinPassRatio ? 'insufficient_shadow_pass_ratio'
+        : primaryScoreRegression > shadowOverrideMaxPrimaryScoreRegression ? 'primary_regression_too_large'
+        : 'unknown',
+    };
 
     return {
       labResults,
       holdoutVerdict: null,
       matrixDecision,
-      diagnosticShadowResults,
+      diagnosticShadowResults: shadowResults.length > 0 ? shadowResults : null,
     };
   }
 
@@ -3052,6 +3190,25 @@ export async function runScout(config, dependencies = {}) {
   const runPrimarySweepFn = dependencies.runPrimarySweep || runPrimarySweep;
   const buildIncumbentSearchBatchFn = dependencies.buildIncumbentSearchBatch || buildIncumbentSearchBatch;
   await ensureDirs(config);
+
+  // Clean up orphan .started.json files older than 24 hours
+  const runsDir = path.join(config.researchRoot, 'runs');
+  try {
+    const runFiles = await fs.readdir(runsDir);
+    const now = Date.now();
+    const MAX_RUN_AGE_MS = 24 * 3600000;
+    for (const file of runFiles) {
+      if (!file.endsWith('.started.json')) continue;
+      const filePath = path.join(runsDir, file);
+      try {
+        const stat = await fs.stat(filePath);
+        if (now - stat.mtimeMs > MAX_RUN_AGE_MS) {
+          await fs.unlink(filePath);
+        }
+      } catch { /* skip individual file errors */ }
+    }
+  } catch { /* runs dir may not exist yet */ }
+
   const queue = await readPromotionQueue(promotionQueueFilePath(config));
   const pendingPromotion = selectNextPendingPromotion(queue);
   const cycleStartAction = decideCycleStartAction({ pendingPromotion, forceCycle: config.forceCycle === true });
@@ -3657,7 +3814,14 @@ export async function runScout(config, dependencies = {}) {
       const blockedQueuePath = path.join(trackedConfig.researchRoot, 'state', 'blocked-challenger-queue.json');
       let existingQueue = [];
       try { existingQueue = JSON.parse(await fs.readFile(blockedQueuePath, 'utf8')); } catch { /* no queue yet */ }
-      const deduped = [blockedEntry, ...existingQueue.filter(e => e.configFingerprint !== blockedEntry.configFingerprint)].slice(0, 5);
+      const MAX_BLOCKED_QUEUE = 30;
+      const BLOCKED_TTL_MS = 72 * 3600000; // 72 hours
+      const now = Date.now();
+      const fresh = existingQueue.filter(e => {
+        if (!e.blockedAt) return true;
+        return (now - Date.parse(e.blockedAt)) < BLOCKED_TTL_MS;
+      });
+      const deduped = [blockedEntry, ...fresh.filter(e => e.configFingerprint !== blockedEntry.configFingerprint)].slice(0, MAX_BLOCKED_QUEUE);
       await fs.mkdir(path.dirname(blockedQueuePath), { recursive: true });
       await fs.writeFile(blockedQueuePath, JSON.stringify(deduped, null, 2), 'utf8');
     }

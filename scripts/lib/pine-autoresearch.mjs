@@ -316,14 +316,12 @@ function dominates(left, right) {
     (left.score ?? 0) >= (right.score ?? 0) &&
     (left.roiPct ?? 0) >= (right.roiPct ?? 0) &&
     (left.profitFactor ?? 0) >= (right.profitFactor ?? 0) &&
-    (left.tradeCount ?? 0) >= (right.tradeCount ?? 0) &&
     (left.maxDrawdownPct ?? Infinity) <= (right.maxDrawdownPct ?? Infinity);
 
   const strictlyBetter =
     (left.score ?? 0) > (right.score ?? 0) ||
     (left.roiPct ?? 0) > (right.roiPct ?? 0) ||
     (left.profitFactor ?? 0) > (right.profitFactor ?? 0) ||
-    (left.tradeCount ?? 0) > (right.tradeCount ?? 0) ||
     (left.maxDrawdownPct ?? Infinity) < (right.maxDrawdownPct ?? Infinity);
 
   return betterOrEqual && strictlyBetter;
@@ -606,14 +604,14 @@ export function decideAutoresearchOutcome({
   };
 
   const roiRelaxation = thresholds.roiRelaxation || {};
-  const roiRelaxationEnabled = roiRelaxation.enabled === true;
+  const roiRelaxationEnabled = roiRelaxation.enabled !== false;
   const tieredRelaxation = roiRelaxation.tieredRelaxation || {};
   const tieredEnabled = tieredRelaxation.enabled === true && roiRelaxationEnabled;
 
   // Standard relaxation: score delta exceeds threshold AND roi regression within standard cap
   const standardRelaxed = roiRelaxationEnabled
-    && comparisons.scoreDelta >= (roiRelaxation.minScoreDeltaToRelax ?? Infinity)
-    && comparisons.roiDeltaPct >= -(roiRelaxation.maxRoiRegressionPct ?? 0);
+    && comparisons.scoreDelta >= (roiRelaxation.minScoreDeltaToRelax ?? 3.0)
+    && comparisons.roiDeltaPct >= -(roiRelaxation.maxRoiRegressionPct ?? 5.0);
 
   // Tiered relaxation: PF improved by >Nx AND DD improved → allow wider ROI regression
   const pfMultiplier = (incumbent.metrics?.profitFactor ?? 0) > 0

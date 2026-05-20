@@ -1,5 +1,10 @@
 import { buildCanonicalConfigFingerprint } from './pine-global-search.mjs';
 
+function roundParam(value, precision = 6) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return value;
+  return Number(value.toFixed(precision));
+}
+
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
 }
@@ -66,16 +71,21 @@ function countCycles(historyEvents = []) {
 
 function withPatch(base, patch, meta) {
   const touchedKeys = Object.keys(patch || {});
+  const roundedPatch = Object.fromEntries(
+    Object.entries(patch || {}).map(([key, value]) => [key, roundParam(value)])
+  );
   return {
     variantId: `${meta.lane}-${meta.family}-${meta.index}`,
     lane: meta.lane,
     family: meta.family,
-    patch: clone(patch || {}),
+    patch: clone(roundedPatch),
     touchedKeys,
     temperature: meta.temperature ?? 1,
     tabuSkipped: meta.tabuSkipped ?? 0,
     metadata: meta.metadata,
-    config: { ...clone(base), ...patch },
+    config: Object.fromEntries(
+      Object.entries({ ...clone(base), ...roundedPatch }).map(([k, v]) => [k, roundParam(v)])
+    ),
   };
 }
 
@@ -112,7 +122,7 @@ function scalePatch(base, patch, temperature, patchBounds = {}, diversityScale =
       patchBounds,
     );
     const integerLike = Number.isInteger(baseValue) && Number.isInteger(value);
-    return [key, integerLike ? Math.round(scaled) : Number(scaled.toFixed(4))];
+    return [key, integerLike ? Math.round(scaled) : roundParam(scaled, 4)];
   }));
 }
 
@@ -276,13 +286,13 @@ function legacySignalPatches(base) {
     { neighborsCount: (base.neighborsCount ?? 32) + 8 },
     { adxThreshold: Math.max(10, (base.adxThreshold ?? 20) - 5) },
     { adxThreshold: (base.adxThreshold ?? 20) + 5 },
-    { minPredSum: Math.max(1, (base.minPredSum ?? 2) - 0.5) },
-    { minPredSum: (base.minPredSum ?? 2) + 0.5 },
+    { minPredSum: Math.max(1, roundParam((base.minPredSum ?? 2) - 0.5)) },
+    { minPredSum: roundParam((base.minPredSum ?? 2) + 0.5) },
     { minBarsBetween: Math.max(0, (base.minBarsBetween ?? 2) - 1) },
     { minBarsBetween: (base.minBarsBetween ?? 2) + 2 },
     { h: Math.max(4, (base.h ?? 8) - 2) },
     { h: (base.h ?? 8) + 2 },
-    { r: Math.max(2, (base.r ?? 8) / 2) },
+    { r: Math.max(2, roundParam((base.r ?? 8) / 2)) },
     { x: Math.max(15, (base.x ?? 25) - 5) },
   ];
 }
@@ -320,24 +330,24 @@ export function signalPatches(base, { temperature = 1 } = {}) {
 
 function legacyRiskPatches(base) {
   return [
-    { slAtrMult: Math.max(0.125, (base.slAtrMult ?? 1) - 0.25) },
-    { slAtrMult: (base.slAtrMult ?? 1) + 0.25 },
-    { tpAtrMult: Math.max(1.0, (base.tpAtrMult ?? 2.5) - 0.5) },
-    { tpAtrMult: (base.tpAtrMult ?? 2.5) + 0.5 },
-    { trailAtrMult: Math.max(0.25, (base.trailAtrMult ?? 1) - 0.25) },
-    { trailAtrMult: (base.trailAtrMult ?? 1) + 0.25 },
-    { trailActivateR: Math.max(0, (base.trailActivateR ?? 0.5) - 0.5) },
-    { trailActivateR: (base.trailActivateR ?? 0.5) + 0.5 },
+    { slAtrMult: Math.max(0.125, roundParam((base.slAtrMult ?? 1) - 0.25)) },
+    { slAtrMult: roundParam((base.slAtrMult ?? 1) + 0.25) },
+    { tpAtrMult: Math.max(1.0, roundParam((base.tpAtrMult ?? 2.5) - 0.5)) },
+    { tpAtrMult: roundParam((base.tpAtrMult ?? 2.5) + 0.5) },
+    { trailAtrMult: Math.max(0.25, roundParam((base.trailAtrMult ?? 1) - 0.25)) },
+    { trailAtrMult: roundParam((base.trailAtrMult ?? 1) + 0.25) },
+    { trailActivateR: Math.max(0, roundParam((base.trailActivateR ?? 0.5) - 0.5)) },
+    { trailActivateR: roundParam((base.trailActivateR ?? 0.5) + 0.5) },
     { riskAtrLen: Math.max(7, (base.riskAtrLen ?? 14) - 7) },
     { riskAtrLen: (base.riskAtrLen ?? 14) + 7 },
     // Wide exploration jumps (reach distant optima in single step)
-    { trailAtrMult: Math.max(0.25, (base.trailAtrMult ?? 1) + 1.0) },
-    { trailAtrMult: Math.max(0.25, (base.trailAtrMult ?? 1) + 2.0) },
-    { slAtrMult: (base.slAtrMult ?? 1) + 0.5 },
-    { tpAtrMult: Math.max(1.0, (base.tpAtrMult ?? 2.5) - 1.5) },
-    { tpAtrMult: Math.max(1.0, (base.tpAtrMult ?? 2.5) - 2.5) },
-    { trailActivateR: (base.trailActivateR ?? 0.5) + 1.0 },
-    { trailActivateR: (base.trailActivateR ?? 0.5) + 1.5 },
+    { trailAtrMult: Math.max(0.25, roundParam((base.trailAtrMult ?? 1) + 1.0)) },
+    { trailAtrMult: Math.max(0.25, roundParam((base.trailAtrMult ?? 1) + 2.0)) },
+    { slAtrMult: roundParam((base.slAtrMult ?? 1) + 0.5) },
+    { tpAtrMult: Math.max(1.0, roundParam((base.tpAtrMult ?? 2.5) - 1.5)) },
+    { tpAtrMult: Math.max(1.0, roundParam((base.tpAtrMult ?? 2.5) - 2.5)) },
+    { trailActivateR: roundParam((base.trailActivateR ?? 0.5) + 1.0) },
+    { trailActivateR: roundParam((base.trailActivateR ?? 0.5) + 1.5) },
   ];
 }
 
@@ -365,6 +375,70 @@ export function riskPatches(base, { temperature = 1 } = {}) {
       { riskAtrLen: Math.round(baseAtrLen + 7 * scale) },
     );
   }
+  return deduplicatePatches(patches, base, targetCount);
+}
+
+export function jointPatches(base, { temperature = 1 } = {}) {
+  const safeTemp = Math.max(1, Number(temperature) || 1);
+  const baseSl = base.slAtrMult ?? 1;
+  const baseTp = base.tpAtrMult ?? 2.5;
+  const baseTrail = base.trailAtrMult ?? 1;
+  const baseActivate = base.trailActivateR ?? 0.5;
+  const baseAdx = base.adxThreshold ?? 20;
+  const baseMinPred = base.minPredSum ?? 2;
+  const baseBars = base.minBarsBetween ?? 2;
+  const baseLongAtr = base.fusionV4LongAtrWeight ?? -0.25;
+  const baseShortAtr = base.fusionV4ShortAtrWeight ?? -0.5;
+  const baseLongEngulf = base.fusionV4LongEngulfWeight ?? -0.25;
+  const baseShortEngulf = base.fusionV4ShortEngulfWeight ?? -0.1;
+
+  const patches = [
+    // Risk:Reward pairs (SL + TP move together)
+    { slAtrMult: roundParam(baseSl * 0.8), tpAtrMult: roundParam(baseTp * 1.2) },
+    { slAtrMult: roundParam(baseSl * 1.2), tpAtrMult: roundParam(baseTp * 0.85) },
+    { slAtrMult: roundParam(baseSl * 0.6), tpAtrMult: roundParam(baseTp * 1.4) },
+
+    // Trail + TP (exit management as a unit)
+    { trailAtrMult: roundParam(baseTrail * 0.75), tpAtrMult: roundParam(baseTp * 1.15) },
+    { trailAtrMult: roundParam(baseTrail * 1.3), tpAtrMult: roundParam(baseTp * 0.9) },
+    { trailActivateR: roundParam(baseActivate * 0.6), trailAtrMult: roundParam(baseTrail * 0.8) },
+    { trailActivateR: roundParam(baseActivate * 1.5), trailAtrMult: roundParam(baseTrail * 1.2) },
+
+    // Signal sensitivity pairs (ADX + minPredSum)
+    { adxThreshold: Math.max(10, baseAdx - 2), minPredSum: roundParam(baseMinPred + 0.2) },
+    { adxThreshold: Math.min(30, baseAdx + 2), minPredSum: roundParam(Math.max(1, baseMinPred - 0.2)) },
+    { adxThreshold: Math.max(10, baseAdx - 3), minPredSum: roundParam(baseMinPred + 0.3) },
+    { adxThreshold: Math.min(30, baseAdx + 3), minPredSum: roundParam(Math.max(1, baseMinPred - 0.3)) },
+
+    // Signal + cooldown (entry selectivity)
+    { minPredSum: roundParam(baseMinPred + 0.3), minBarsBetween: Math.max(0, baseBars + 1) },
+    { minPredSum: roundParam(Math.max(1, baseMinPred - 0.3)), minBarsBetween: Math.max(0, baseBars - 1) },
+
+    // Fusion weight asymmetry (long/short rebalancing)
+    { fusionV4LongAtrWeight: roundParam(baseLongAtr - 0.1), fusionV4ShortAtrWeight: roundParam(baseShortAtr + 0.1) },
+    { fusionV4LongAtrWeight: roundParam(baseLongAtr + 0.1), fusionV4ShortAtrWeight: roundParam(baseShortAtr - 0.1) },
+    { fusionV4LongEngulfWeight: roundParam(baseLongEngulf - 0.1), fusionV4ShortEngulfWeight: roundParam(baseShortEngulf + 0.05) },
+    { fusionV4LongEngulfWeight: roundParam(baseLongEngulf + 0.1), fusionV4ShortEngulfWeight: roundParam(baseShortEngulf - 0.05) },
+  ];
+
+  // Temperature-scaled wider exploration
+  if (safeTemp >= 2) {
+    patches.push(
+      { slAtrMult: roundParam(baseSl * 0.5), tpAtrMult: roundParam(baseTp * 1.8), trailAtrMult: roundParam(baseTrail * 0.7) },
+      { adxThreshold: Math.max(10, baseAdx - 5), minPredSum: roundParam(baseMinPred + 0.5), minBarsBetween: Math.max(0, baseBars + 2) },
+      { trailActivateR: roundParam(baseActivate * 2.0), trailAtrMult: roundParam(baseTrail * 0.6), tpAtrMult: roundParam(baseTp * 1.3) },
+    );
+  }
+
+  if (safeTemp >= 3) {
+    patches.push(
+      { slAtrMult: roundParam(baseSl * 0.4), tpAtrMult: roundParam(baseTp * 2.0), trailAtrMult: roundParam(baseTrail * 0.5) },
+      { adxThreshold: Math.max(10, baseAdx - 7), minPredSum: roundParam(baseMinPred + 0.8), minBarsBetween: Math.max(0, baseBars + 3) },
+      { fusionV4LongAtrWeight: roundParam(baseLongAtr - 0.2), fusionV4ShortAtrWeight: roundParam(baseShortAtr + 0.2), fusionV4LongEngulfWeight: roundParam(baseLongEngulf - 0.15) },
+    );
+  }
+
+  const targetCount = safeTemp >= 3 ? 24 : safeTemp >= 2 ? 20 : 17;
   return deduplicatePatches(patches, base, targetCount);
 }
 
@@ -406,7 +480,9 @@ function enforceRequiredTouchedKeys({ base, variant, requiredTouchedKeys = [], b
       forcedEntryMutation: true,
       requiredTouchedKeys: required,
     },
-    config: { ...clone(base), ...mergedPatch },
+    config: Object.fromEntries(
+      Object.entries({ ...clone(base), ...mergedPatch }).map(([k, v]) => [k, roundParam(v)])
+    ),
   };
 }
 
@@ -431,7 +507,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
     : incumbent;
   const base = policy.freezeArchitecture === false ? clone(normalizedIncumbent) : freezeArchitecture(normalizedIncumbent, policy);
   const { exploit, explore } = allocateLaneBudget(maxConfigs, policy.exploitRatio ?? 0.8);
-  const exploitFamilies = policy.exploitFamilies?.length ? policy.exploitFamilies : ['signal', 'risk'];
+  const exploitFamilies = policy.exploitFamilies?.length ? policy.exploitFamilies : ['signal', 'risk', 'joint'];
   const exploreFamilies = policy.exploreFamilies?.length ? policy.exploreFamilies : ['signal'];
   const cycleCount = countCycles(historyEvents);
   const annealingState = computeAnnealingState({ schedulerState, policy });
@@ -445,14 +521,17 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
   const familyPatchMap = {
     signal: signalPatches(base, { temperature }),
     risk: riskPatches(base, { temperature }),
+    joint: jointPatches(base, { temperature }),
   };
   const poolSizes = {
     signal: familyPatchMap.signal.length,
     risk: familyPatchMap.risk.length,
+    joint: familyPatchMap.joint.length,
   };
   const familyTabuRejects = {
     signal: 0,
     risk: 0,
+    joint: 0,
   };
 
   const orderedExploitFamilies = exploitFamilies.map((_, index) => exploitFamilies[(cycleCount + index) % exploitFamilies.length]);
@@ -514,7 +593,7 @@ export function buildIncumbentSearchBatch({ incumbent, maxConfigs, historyEvents
   const poolExhaustionRatio = Number.isFinite(rawPoolExhaustionRatio) && rawPoolExhaustionRatio > 0 && rawPoolExhaustionRatio <= 1
     ? rawPoolExhaustionRatio
     : 0.75;
-  const exhaustedFamilies = ['signal', 'risk'].filter((family) => {
+  const exhaustedFamilies = ['signal', 'risk', 'joint'].filter((family) => {
     const size = poolSizes[family];
     if (!size) return false;
     const rejects = familyTabuRejects[family];
